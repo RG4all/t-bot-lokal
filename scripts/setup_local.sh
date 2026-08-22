@@ -15,10 +15,13 @@
 #      `docker compose up --build -d`.
 #
 # Nutzung:
-#   scripts/setup_local.sh                    # Setup + Start
-#   scripts/setup_local.sh --install-deps     # vorher auch Systempakete/ Docker
-#   scripts/setup_local.sh --no-up           # nur .env.local erzeugen, nicht starten
+#   scripts/setup_local.sh                       # Setup + Start
+#   scripts/setup_local.sh --install-deps        # vorher auch Systempakete/Docker
+#   scripts/setup_local.sh --no-up               # nur .env.local erzeugen, nicht starten
 #   scripts/setup_local.sh --render-free-simulation
+#   scripts/setup_local.sh --reset-db            # bestehendes Postgres-Volume
+#                                                # zuruecksetzen (Password-Mismatch)
+#   scripts/setup_local.sh --reset-db --yes      # ohne interaktive Nachfrage
 # ============================================================================
 
 set -euo pipefail
@@ -32,6 +35,8 @@ TUNING_ENV="${TUNING_ENV:-config/hardware.env}"
 INSTALL_DEPS=0
 DO_UP=1
 RENDER_FREE=0
+RESET_DB=0
+FORCE_RESET_DB=0
 
 # ANSI-Farben
 if [[ -t 1 ]]; then
@@ -57,6 +62,8 @@ parse_args() {
       --install-deps) INSTALL_DEPS=1 ;;
       --no-up)        DO_UP=0 ;;
       --render-free-simulation|--render-simulation) RENDER_FREE=1 ;;
+      --reset-db)     RESET_DB=1 ;;
+      --yes|-y)       FORCE_RESET_DB=1 ;;
       -h|--help)      usage ;;
       *) die "Unbekannte Option: ${arg}" ;;
     esac
@@ -125,7 +132,11 @@ write_env_local() {
 
   [[ -z "${secret_key}" ]]  && secret_key="$(random_secret)"
   [[ -z "${passphrase}" ]]   && passphrase="local-t-bot"
-  [[ -z "${pg_password}" ]]  && pg_password="$(random_secret)"
+  # Ein festes, nur-lokal Default-Passwort verhindert Password-Mismatches
+  # gegenueber frueheren Compose-Laeufen mit demselben Default. Wer ein
+  # individuelles Passwort moechte, kann es vor dem ersten Lauf in .env.local
+  # setzen oder dieses Skript mit --reset-db neu initialisieren.
+  [[ -z "${pg_password}" ]]  && pg_password="tbot-local-password"
   [[ -z "${web_port}" ]]     && web_port="8000"
 
   info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."
@@ -167,7 +178,39 @@ write_env_local() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Stack starten
+# 4. Ggf. altes Postgres-Volume zuruecksetzen
+# ---------------------------------------------------------------------------
+# Wenn ein frueherer Lauf bereits das Postgres-Volume initialisiert hat
+# (z.B. mit dem Default-Passwort aus .env.docker.example oder mit einem
+# aelteren, anderen POSTGRES_PASSWORD), akzeptiert der Server das neue
+# Passwort aus .env.local nicht (Postgres liest POSTGRES_PASSWORD nur beim
+# ersten Initialisieren eines leeren Datenverzeichnisses). Dann schlagen
+# wait_for_database/Migrationen fehl und Web/Worker crashen in einer
+# Restart-Schleife ("health: starting"). Diese Funktion erkennt die
+# Situation und setzt das Volume nach expliziter Bestaetigung zurueck.
+reset_db_if_needed() {
+  [[ "${RESET_DB}" -eq 1 ]] || return 0
+
+  if [[ "${FORCE_RESET_DB}" -ne 1 ]] && [[ -t 0 ]]; then
+    warn "Das wird das lokale Postgres-Volume (t-bot-local_postgres_data)"
+    warn "und ALLE lokalen Datenbankinhalte unwiderruflich loeschen."
+    printf '%s[setup]%s Wirklich fortfahren? [j/N] ' "${C_YELLOW}" "${C_RESET}" >&2
+    read -r answer
+    case "${answer}" in
+      j|J|y|Y|yes|YES) ;;
+      *) die "Abgebrochen." ;;
+    esac
+  fi
+
+  info "Stoppe Stack und entferne Postgres-Volume..."
+  docker compose --env-file "${ENV_LOCAL}" rm -sf postgres 2>/dev/null || true
+  docker volume rm -f t-bot-local_postgres_data 2>/dev/null || \
+    docker volume rm -f tbotlocal_postgres_data 2>/dev/null || true
+  info "Postgres-Volume zurueckgesetzt."
+}
+
+# ---------------------------------------------------------------------------
+# 5. Stack starten und auf Web-Health warten
 # ---------------------------------------------------------------------------
 start_stack() {
   [[ "${DO_UP}" -eq 1 ]] || { info "--no-up gesetzt - Stack wird nicht gestartet."; return 0; }
@@ -179,16 +222,53 @@ start_stack() {
   . "./${ENV_LOCAL}"
   set +a
   docker compose --env-file "${ENV_LOCAL}" up --build -d
-  info "Stack gestartet. Health:"
+
+  info "Warte bis zu 90 Sekunden auf Web-Health..."
+  local healthy=0
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+    if docker inspect --format '{{.State.Health.Status}}' t-bot-local-web-1 2>/dev/null | grep -q '^healthy$'; then
+      healthy=1; break
+    fi
+    sleep 5
+  done
+  # attempt nur fuer die Schleife benoetigt; Shellcheck-Zufriedenheit:
+  : "${attempt:-1}"
+
   docker compose ps || true
-  info "App: http://localhost:${web_port:-8000}/"
+
+  if [[ "${healthy}" -eq 1 ]]; then
+    info "Web ist healthy. App: http://localhost:${WEB_PORT:-8000}/"
+    return 0
+  fi
+
+  error "Web-Container wurde nicht healthy. Haeufigste Ursache: POSTGRES_PASSWORD"
+  error "passt nicht zum bereits initialisierten Volume (stale postgres_data)."
+  error ""
+  error "Diagnose-Output:"
+  docker logs --tail 80 t-bot-local-web-1 2>&1 | sed 's/^/  | /' >&2 || true
+  echo "" >&2
+  docker logs --tail 30 t-bot-local-backtest-worker-1 2>&1 | sed 's/^/  | /' >&2 || true
+  echo "" >&2
+  error "Abhilfe (setzt die lokale Datenbank zurueck):"
+  error "  scripts/setup_local.sh --reset-db --yes"
+  error "oder manuell:"
+  error "  docker compose down -v"
+  error "  docker compose --env-file ${ENV_LOCAL} up --build -d"
+  exit 1
 }
 
 main() {
   parse_args "$@"
-  check_docker
+  # --no-up erzeugt nur .env.local und benoetigt kein laufendes Docker.
+  if [[ "${DO_UP}" -eq 1 ]]; then
+    check_docker
+  else
+    info "Docker-Check uebersprungen (--no-up)."
+  fi
   run_hardware_test
   write_env_local
+  reset_db_if_needed
   start_stack
 }
 

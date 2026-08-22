@@ -162,7 +162,76 @@ docker compose exec postgres psql -U tbot -d tbot -c \
 
 Der authentifizierte Endpoint `/api/backtesting/status/` liefert Worker-/Redis-Modus sowie Web-Peak-RSS, Threadzahl, Heartbeat-Alter und maximalen Scheduler-Lag.
 
-## 9. Beenden und Zurücksetzen
+## 9. Troubleshooting
+
+### Web/Worker bleibt `health: starting` oder ist nicht erreichbar
+
+Wenn `docker compose up` erfolgreich laeuft, aber `http://localhost:8000/`
+nicht antwortet und der Web-Container immer wieder neu startet, ist fast
+immer das **Postgres-Passwort nicht konsistent** mit dem bereits
+initialisierten Volume.
+
+Ursache: Das offizielle Postgres-Image liest `POSTGRES_PASSWORD` nur beim
+**ersten** Initialisieren eines leeren Datenverzeichnisses. Ein frueherer
+Lauf mit `.env` (Default-Passwort `tbot-local-password`), mit `scripts/setup_local.sh`
+(frueher zufaellig generiertes Passwort) oder mit einer aelteren Version
+hat das Volume `postgres_data` bereits mit einem anderen Passwort
+angelegt. Neue Werte in `.env`/`.env.local` aendern das Passwort im
+bestehenden Volume **nicht**. Migrationen und `wait_for_database`
+schlagen dann fehl; Web/Worker crashen in einer Restart-Schleife.
+
+Diagnose:
+
+```bash
+docker compose logs --tail 80 web
+# Suche nach:
+#   password authentication failed for user "tbot"
+#   FATAL: password authentication failed
+```
+
+Abhilfe (lokale Datenbank zuruecksetzen):
+
+```bash
+# Ueber das Setup-Skript (bestaetigt oder mit --yes):
+scripts/setup_local.sh --reset-db --yes
+
+# Oder manuell:
+docker compose down -v
+docker compose up --build -d
+```
+
+Das `-v` loescht das benannte Volume `t-bot-local_postgres_data`; beim
+naechsten Start initialisiert Postgres mit dem aktuellen Passwort.
+
+### Web-Healthcheck startet neu durch
+
+Der Healthcheck trifft `/health/`. Wenn Daphne nach Migrationen 30-60
+Sekunden braucht, bleibt der Status zunaechst `health: starting`. Das ist
+normal; `start_period` ist auf 30 s (Web) bzw. 45 s (Worker) eingestellt.
+Nach Ablauf sollte der Status zu `healthy` wechseln. Wenn nicht:
+
+```bash
+docker compose logs -f web
+curl -i http://localhost:8000/health/
+```
+
+### Worker-Healthcheck schlaegt fehl
+
+Der Worker-Healthcheck nutzt `celery -A trading_bot_project inspect ping`.
+Voraussetzung ist, dass der Broker (Redis) erreichbar ist und der Worker
+innerhalb von `start_period` (45 s) hochgefahren ist. Wenn der Worker
+nicht startet, weil die DB nicht erreichbar ist, zuerst das Web-Problem
+oben loesen.
+
+### Ports bereits belegt
+
+Wenn Port 8000 bereits belegt ist, mit `WEB_PORT=8001` in `.env` starten:
+
+```bash
+WEB_PORT=8001 docker compose up -d
+```
+
+## 10. Beenden und Zurücksetzen
 
 ```bash
 docker compose down                 # Datenbank-Volume behalten

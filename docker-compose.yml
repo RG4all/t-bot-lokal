@@ -110,8 +110,10 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/', timeout=2)"]
       interval: 5s
-      timeout: 3s
-      retries: 20
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+      start_interval: 2s
     mem_limit: 512m
     cpus: "${WEB_CPUS:-0.50}"
     restart: unless-stopped
@@ -137,11 +139,13 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A trading_bot_project inspect ping -d celery@$$HOSTNAME --timeout 3 | grep -q pong",
+          "celery -A trading_bot_project inspect ping -d celery@$$(hostname) --timeout 5 | grep -q pong",
         ]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 12
+      start_period: 45s
+      start_interval: 5s
     mem_limit: 512m
     cpus: "${WORKER_CPUS:-0.50}"
     pids_limit: 64

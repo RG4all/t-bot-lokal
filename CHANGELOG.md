@@ -4,6 +4,41 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [2.3.0] – 2026-08-22
 
+### Hotfix: Web/Worker-Start-Loop (stale Postgres-Volume)
+
+- **Root Cause:** Das offizielle Postgres-Image liest `POSTGRES_PASSWORD`
+  nur beim ersten Initialisieren eines leeren Datenverzeichnisses. Wurde
+  das Volume `postgres_data` bereits in einem frueheren Lauf mit einem
+  anderen Passwort initialisiert (z.B. ueber `.env` mit
+  `tbot-local-password`, fruehere Versionen von `setup_local.sh` mit
+  Zufallspasswort oder eine andere Compose-Konfiguration), schlug
+  `wait_for_database`/`migrate` mit
+  `password authentication failed for user "tbot"` fehl. Web/Worker
+  starteten neu und blieben ewig in `health: starting`; der Port 8000
+  war nicht erreichbar.
+- `scripts/setup_local.sh`:
+  - `--reset-db` (mit interaktiver Bestaetigung oder `--yes`) setzt das
+    benannte Volume `t-bot-local_postgres_data` vor dem Start zurueck.
+  - Default-Postgres-Passwort ist jetzt ein fester lokaler Wert
+    (`tbot-local-password`), kompatibel zu `.env.docker.example`; ein
+    individuelles Passwort kann weiterhin vor dem ersten Lauf in
+    `.env.local` gesetzt werden.
+  - Nach `up` wartet das Skript bis zu 90 s auf Web-Health und gibt bei
+    Fehlschlag die letzten 80 Zeilen `docker logs web` sowie die
+    konkrete Abhilfe (`scripts/setup_local.sh --reset-db --yes` bzw.
+    `docker compose down -v`) aus.
+- `docker-entrypoint.sh` und `docker/worker-entrypoint.sh`: fangen
+  `wait_for_database`-Fehler ab und geben eine verstaendliche
+    Diagnosemeldung zum Postgres-Password-Mismatch aus, statt still zu
+    sterben.
+- `docker-compose.yml`: Healthchecks mit `start_period` (30 s Web, 45 s
+    Worker) und `start_interval`, damit `health: starting` nicht
+    fruehzeitig zu Restarts fuehrt. Worker-Ping nutzt jetzt
+    `$$(hostname)` statt `$$HOSTNAME`, das nicht in allen Images
+    gesetzt ist. Timeouts leicht hochgesetzt.
+- `LOCAL_DEVELOPMENT.md`: Neuer Abschnitt "Troubleshooting" mit
+    Diagnose und Abhilfe fuer Web/Worker-Start-Loops.
+
 ### Hotfix: Redis-Alpine-Entrypoint (POSIX-sh)
 
 - `docker/redis-entrypoint.sh` wurde von Bash-auf POSIX-sh-Syntax umgestellt. Das `redis:7.4-alpine`-Image bringt kein `bash` und kein `set -o pipefail` mit; der bisherige Entrypoint nutzte Arrays (`args=(...)`), `[[ ... ]]`, `(( ... ))` und den `=~`-RegEx-Operator und scheiterte still an `/bin/sh` (BusyBox ash), sodass der Redis-Healthcheck fehlschlug und `docker compose up` mit „dependency failed to start: container t-bot-local-redis-1 is unhealthy“ abbrach.
