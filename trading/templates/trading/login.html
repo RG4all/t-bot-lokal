@@ -12,7 +12,12 @@
                     <tbody>
                         {% for field in form %}
                         <tr>
-                            <th class="text-right">{{ field.label_tag }}</th>
+                            <th class="text-right">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span>{{ field.label }}</span>
+                                    {% if field.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>{% endif %}
+                                </div>
+                            </th>
                             <td>
                                 {{ field }}
                                 {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}

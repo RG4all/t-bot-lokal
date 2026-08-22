@@ -21,7 +21,7 @@ th { background: #e8eef5; }
 <tr><th>Erstellt</th><td>{{ task.created_at }}</td></tr>
 <tr><th>Abgeschlossen</th><td>{{ task.completed_at }}</td></tr>
 <tr><th>Dauer</th><td>{{ task.result.duration|default:"–" }}</td></tr>
-<tr><th>Kombinationen</th><td>Acceleration {{ task.parameters.acc_from }}–{{ task.parameters.acc_to }} / {{ task.parameters.acc_steps }}; NDA {{ task.parameters.nda_from }}–{{ task.parameters.nda_to }} / {{ task.parameters.nda_steps }}; DeltaDelta {{ task.parameters.deltadelta_from }}–{{ task.parameters.deltadelta_to }} / {{ task.parameters.deltadelta_steps }}</td></tr>
+<tr><th>Kombinationen</th><td>Beschleunigung (DVA/prev NDA) {{ task.parameters.acc_from }}–{{ task.parameters.acc_to }} (Schritt {{ task.parameters.acc_steps }}); NDA {{ task.parameters.nda_from }}–{{ task.parameters.nda_to }} (Schritt {{ task.parameters.nda_steps }}); DeltaDelta {{ task.parameters.deltadelta_from }}–{{ task.parameters.deltadelta_to }} (Schritt {{ task.parameters.deltadelta_steps }})</td></tr>
 </table>
 
 {% for symbol, result in task.result.symbol_results.items %}

@@ -13,21 +13,30 @@
 <form method="get" class="card card-body mb-3">
   <div class="row g-2 align-items-end">
     <div class="col-md-3">
-      <label class="form-label" for="config_id">Konfiguration</label>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label mb-0" for="config_id">Konfiguration</label>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Fehler nach bestimmter Konfiguration filtern.">ⓘ</span>
+      </div>
       <select class="form-select" id="config_id" name="config_id">
         <option value="">Alle</option>
         {% for config in configs %}<option value="{{ config.id }}" {% if filters.config_id == config.id|stringformat:'s' %}selected{% endif %}>{{ config.name }} (#{{ config.id }})</option>{% endfor %}
       </select>
     </div>
     <div class="col-md-2">
-      <label class="form-label" for="severity">Schweregrad</label>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label mb-0" for="severity">Schweregrad</label>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Filterung nach Kritikalität: Info, Warnung, Fehler, Kritisch.">ⓘ</span>
+      </div>
       <select class="form-select" id="severity" name="severity">
         <option value="">Alle</option>
         {% for value, label in severity_choices %}<option value="{{ value }}" {% if filters.severity == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </div>
     <div class="col-md-2">
-      <label class="form-label" for="state">Status</label>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label mb-0" for="state">Status</label>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Offene oder bereits erledigte Fehlermeldungen anzeigen.">ⓘ</span>
+      </div>
       <select class="form-select" id="state" name="state">
         <option value="open" {% if filters.state == 'open' %}selected{% endif %}>Offen</option>
         <option value="resolved" {% if filters.state == 'resolved' %}selected{% endif %}>Erledigt</option>
@@ -35,7 +44,10 @@
       </select>
     </div>
     <div class="col-md-3">
-      <label class="form-label" for="source">Quelle enthält</label>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label mb-0" for="source">Quelle enthält</label>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Volltextsuche in der Quellangabe (z. B. fetch_tickers oder db_safe).">ⓘ</span>
+      </div>
       <input class="form-control" id="source" name="source" value="{{ filters.source }}" placeholder="z. B. fetch_tickers">
     </div>
     <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">Filtern</button></div>

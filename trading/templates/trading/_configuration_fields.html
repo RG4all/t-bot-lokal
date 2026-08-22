@@ -5,9 +5,20 @@
 {% for field in form %}
   <div class="col-md-6 {% if field.name == 'symbols' %}position-relative{% endif %} {% if field.errors %}field-error{% endif %}">
     {% if field.field.widget.input_type == 'checkbox' %}
-    <div class="form-check mt-4">{{ field }} <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
+    <div class="form-check mt-4">
+      {{ field }}
+      <label class="form-check-label d-inline-flex align-items-center gap-1" for="{{ field.id_for_label }}">
+        <span>{{ field.label }}</span>
+        {% if field.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>{% endif %}
+      </label>
+    </div>
     {% else %}
-    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+    <div class="d-flex justify-content-between align-items-center mb-1">
+      <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {% if field.help_text %}
+      <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>
+      {% endif %}
+    </div>
     {{ field }}
     {% endif %}
     {% if field.name == 'symbols' %}

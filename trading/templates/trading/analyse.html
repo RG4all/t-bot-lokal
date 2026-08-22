@@ -17,7 +17,10 @@
       </div>
     </div>
     <div class="col-md-4">
-      <label class="form-label fw-semibold" for="timeframe">Kerzen-Zeitrahmen</label>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label fw-semibold mb-0" for="timeframe">Kerzen-Zeitrahmen</label>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Intervall für die SMA-Berechnung (1m bis 1d). Benötigt mindestens 16 abgeschlossene lokale Daten-Buckets.">ⓘ</span>
+      </div>
       <select class="form-select" id="timeframe" name="timeframe">
         <option value="1m" {% if selected_timeframe == '1m' %}selected{% endif %}>1 Minute</option>
         <option value="5m" {% if selected_timeframe == '5m' %}selected{% endif %}>5 Minuten</option>

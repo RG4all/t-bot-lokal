@@ -45,6 +45,22 @@
     {% block content %}{% endblock %}
 </main>
 <footer class="py-3 bg-light border-top mt-5"><div class="container text-center text-muted">&copy; {% now "Y" %} t-bot · Version {{ app_version }}</div></footer>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    function initTooltips() {
+        if (window.bootstrap && bootstrap.Tooltip) {
+            document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+                if (!bootstrap.Tooltip.getInstance(el)) {
+                    new bootstrap.Tooltip(el, { trigger: 'hover focus' });
+                }
+            });
+        } else {
+            setTimeout(initTooltips, 100);
+        }
+    }
+    initTooltips();
+});
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>

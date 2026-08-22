@@ -120,6 +120,31 @@ class FormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("acc_steps", form.errors)
 
+    def test_configuration_and_backtest_indicator_labels_are_aligned(self):
+        config_form = ConfigurationForm()
+        backtest_form = BacktestForm()
+
+        # Prüfe, dass die Beschleunigung in beiden Formularen konsistent benannt ist
+        self.assertIn("Beschleunigung", config_form.fields["div_DVA_prev_NDA_threshold_buy"].label)
+        self.assertIn("DVA", config_form.fields["div_DVA_prev_NDA_threshold_buy"].label)
+        self.assertIn("Beschleunigung", backtest_form.fields["acc_from"].label)
+
+        # Prüfe DeltaDelta
+        self.assertIn("DeltaDelta", config_form.fields["deltadelta_threshold_buy"].label)
+        self.assertIn("DeltaDelta", backtest_form.fields["deltadelta_from"].label)
+
+        # Prüfe NDA
+        self.assertIn("NDA", config_form.fields["nda_threshold_buy"].label)
+        self.assertIn("NDA", backtest_form.fields["nda_from"].label)
+
+        # Prüfe Tooltip / Help_Text
+        self.assertTrue(bool(config_form.fields["div_DVA_prev_NDA_threshold_buy"].help_text))
+        self.assertTrue(bool(backtest_form.fields["acc_from"].help_text))
+        self.assertEqual(
+            config_form.fields["div_DVA_prev_NDA_threshold_buy"].widget.attrs.get("title"),
+            config_form.fields["div_DVA_prev_NDA_threshold_buy"].help_text,
+        )
+
 
 class MarketDataAdapterTests(TestCase):
     def test_binance_uses_one_websocket_for_all_symbols(self):
@@ -281,6 +306,26 @@ class ViewSecurityTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Benutzer- und Indikatorhandbuch")
         self.assertContains(response, "Verbindungsmodell ab Version 2.0.4")
+        self.assertContains(response, "Beschleunigung (Acceleration)")
+        self.assertContains(response, "div_DVA_prev_NDA_threshold_buy")
+
+    def test_dashboard_displays_aligned_indicator_fields_and_tooltips(self):
+        response = self.client.get(reverse("dashboard"), {"config_id": self.config.id})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Beschleunigung")
+        self.assertContains(response, "DeltaDelta")
+        self.assertContains(response, "NDA")
+        self.assertContains(response, "field-info-icon")
+        self.assertContains(response, 'data-bs-toggle="tooltip"')
+
+    def test_backtesting_form_displays_tooltips_and_aligned_labels(self):
+        response = self.client.get(reverse("backtesting_form", args=[self.config.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Beschleunigung")
+        self.assertContains(response, "DeltaDelta")
+        self.assertContains(response, "NDA")
+        self.assertContains(response, "field-info-icon")
+        self.assertContains(response, 'data-bs-toggle="tooltip"')
 
     def test_inactive_configuration_is_visible_on_dashboard(self):
         response = self.client.get(reverse("dashboard"), {"config_id": self.config.id})

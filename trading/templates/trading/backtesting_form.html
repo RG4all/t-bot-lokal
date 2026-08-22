@@ -12,8 +12,22 @@
 </div>
 
 <div class="accordion mb-4" id="backtestHelp"><div class="accordion-item"><h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#backtestHelpBody">Wie funktioniert dieses Backtesting?</button></h2><div id="backtestHelpBody" class="accordion-collapse collapse" data-bs-parent="#backtestHelp"><div class="accordion-body">
-<p>Für jede Kombination aus <strong>Beschleunigung</strong>, <strong>NDA</strong> und <strong>DeltaDelta</strong> simuliert t-bot Käufe und Verkäufe auf den lokal gesammelten Preisen aller Symbole dieser Konfiguration.</p>
-<ul><li><strong>Von/Bis/Schritt:</strong> definiert das Suchraster je Indikator. Die Gesamtzahl ist das Produkt aller drei Rastergrößen × Symbolanzahl.</li><li><strong>Beschleunigung:</strong> DVA geteilt durch vorherige NDA; reagiert stark bei kleinem vorherigem Momentum.</li><li><strong>NDA:</strong> normalisierte prozentuale Preisänderung.</li><li><strong>DeltaDelta:</strong> Mittelwert aus aktueller und vorheriger NDA.</li><li><strong>Trade/Risiko:</strong> überschreibt für diesen Test Trade-Betrag, Take Profit, Stop Loss und Gebühr.</li><li><strong>Preispunkte:</strong> weniger Daten sparen CPU/RAM; mehr Daten erhöhen Aussagekraft und Laufzeit.</li></ul>
+<p>Für jede Kombination aus <strong>Beschleunigung (DVA / prev NDA)</strong>, <strong>NDA (normalisierte Preisänderung)</strong> und <strong>DeltaDelta (geglättetes Momentum)</strong> simuliert t-bot Käufe und Verkäufe auf den lokal gesammelten Preisen aller Symbole dieser Konfiguration.</p>
+<ul>
+  <li><strong>1:1 Zuordnung zur Live-Konfiguration:</strong>
+    <ul>
+      <li><code>acc_from / acc_to / acc_steps</code> testet die Kaufschwelle <strong>Beschleunigung (DVA / prev NDA)</strong> (im Code: <code>div_DVA_prev_NDA_threshold_buy</code>).</li>
+      <li><code>nda_from / nda_to / nda_steps</code> testet die Kaufschwelle <strong>NDA (normalisierte Preisänderung)</strong> (im Code: <code>nda_threshold_buy</code>).</li>
+      <li><code>deltadelta_from / deltadelta_to / deltadelta_steps</code> testet die Kaufschwelle <strong>DeltaDelta (geglättetes Momentum)</strong> (im Code: <code>deltadelta_threshold_buy</code>).</li>
+    </ul>
+  </li>
+  <li><strong>Von / Bis / Schrittweite:</strong> definiert das Suchraster je Indikator. Die Gesamtzahl der Simulationen ist das Produkt aller drei Rastergrößen &times; Symbolanzahl.</li>
+  <li><strong>Beschleunigung (DVA / prev NDA):</strong> <code>DVA / vorherige NDA</code> mit <code>DVA = NDA - vorherige NDA</code>. Misst die relative Änderungsrate des Momentums.</li>
+  <li><strong>NDA (normalisierte Preisänderung):</strong> <code>((P0 - P1) / P1) * 100</code>. Prozentuale Kursänderung zum Vorpreis.</li>
+  <li><strong>DeltaDelta (geglättetes Momentum):</strong> <code>(NDA + vorherige NDA) / 2</code>. Geglätteter 2-Punkt-Mittelwert.</li>
+  <li><strong>Trading- & Risikoparameter:</strong> überschreibt für diesen Testlauf Trade-Betrag, Take Profit, Stop Loss und Gebühr.</li>
+  <li><strong>Preispunkte:</strong> weniger Datenpunkte sparen CPU/RAM; mehr Preispunkte erhöhen die statistische Tiefe.</li>
+</ul>
 <p class="mb-0">Backtests sind keine Prognose. Bereiche zuerst grob und anschließend um das beste Ergebnis feiner testen. <a href="{% url 'help' %}#11-backtesting">Vollständige Dokumentation</a>.</p>
 </div></div></div></div>
 
@@ -25,16 +39,58 @@
       <h3 class="h5">Indikator-Suchräume</h3>
       <div class="row g-3 mb-4">
       {% for field in form %}{% if field.name == 'acc_from' or field.name == 'acc_to' or field.name == 'acc_steps' or field.name == 'nda_from' or field.name == 'nda_to' or field.name == 'nda_steps' or field.name == 'deltadelta_from' or field.name == 'deltadelta_to' or field.name == 'deltadelta_steps' %}
-        <div class="col-md-4"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}{% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+        <div class="col-md-4">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% if field.help_text %}
+            <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>
+            {% endif %}
+          </div>
+          {{ field }}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+          {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+        </div>
       {% endif %}{% endfor %}
       </div>
       <h3 class="h5">Trading-, Risiko- und Ressourcenparameter</h3>
       <div class="row g-3 mb-3">
       {% for field in form %}{% if field.name == 'trade_amount' or field.name == 'take_profit' or field.name == 'stop_loss' or field.name == 'fee' or field.name == 'max_price_points' %}
-        <div class="col-md-4"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}{% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+        <div class="col-md-4">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% if field.help_text %}
+            <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>
+            {% endif %}
+          </div>
+          {{ field }}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+          {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+        </div>
       {% endif %}{% endfor %}
       </div>
-      <div class="border rounded p-3 mb-3"><div class="row g-3 align-items-end"><div class="col-md-4"><div class="form-check">{{ form.schedule_backtest }}<label class="form-check-label" for="{{ form.schedule_backtest.id_for_label }}">{{ form.schedule_backtest.label }}</label></div></div><div class="col-md-5"><label class="form-label" for="{{ form.scheduled_start_time.id_for_label }}">{{ form.scheduled_start_time.label }}</label>{{ form.scheduled_start_time }}{% for error in form.scheduled_start_time.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div></div></div>
+      <div class="border rounded p-3 mb-3">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-5">
+            <div class="form-check">
+              {{ form.schedule_backtest }}
+              <label class="form-check-label d-inline-flex align-items-center gap-1" for="{{ form.schedule_backtest.id_for_label }}">
+                <span>{{ form.schedule_backtest.label }}</span>
+                {% if form.schedule_backtest.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ form.schedule_backtest.help_text }}" aria-label="Hilfe">ⓘ</span>{% endif %}
+              </label>
+            </div>
+            {% if form.schedule_backtest.help_text %}<div class="form-text">{{ form.schedule_backtest.help_text }}</div>{% endif %}
+          </div>
+          <div class="col-md-7">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label class="form-label mb-0" for="{{ form.scheduled_start_time.id_for_label }}">{{ form.scheduled_start_time.label }}</label>
+              {% if form.scheduled_start_time.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ form.scheduled_start_time.help_text }}" aria-label="Hilfe">ⓘ</span>{% endif %}
+            </div>
+            {{ form.scheduled_start_time }}
+            {% if form.scheduled_start_time.help_text %}<div class="form-text">{{ form.scheduled_start_time.help_text }}</div>{% endif %}
+            {% for error in form.scheduled_start_time.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+      </div>
       <p id="combination-estimate" class="alert alert-secondary py-2">Kombinationen werden aus den Bereichen berechnet.</p>
       <button class="btn btn-primary" type="submit" {% if not execution_available %}disabled{% endif %}>Backtest anlegen</button>
     </form>

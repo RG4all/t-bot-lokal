@@ -13,6 +13,9 @@ body { background-color:#f5f7fb; font-family:"Segoe UI",Roboto,Helvetica,Arial,s
 .user-pill { display:inline-flex; align-items:center; gap:.35rem; color:white; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); border-radius:2rem; padding:.4rem .75rem; margin:.25rem .35rem; white-space:nowrap; }
 .user-pill::first-letter { color:var(--accent); }
 .field-error input,.field-error select,.field-error textarea { border-color:#dc3545!important; box-shadow:0 0 0 .2rem rgba(220,53,69,.15); }
+.field-info-icon { display:inline-flex; align-items:center; justify-content:center; width:1.25rem; height:1.25rem; border-radius:50%; background:#e8f0fe; color:#0d6efd; font-size:.78rem; font-weight:700; cursor:help; user-select:none; line-height:1; transition:background .15s,color .15s,transform .15s; }
+.field-info-icon:hover, .field-info-icon:focus { background:#0d6efd; color:#ffffff; transform:scale(1.15); outline:none; }
+.tooltip { font-size:.85rem; }
 .container { margin:20px auto; max-width:1200px; padding:15px; }
 .card { background:white; border-radius:10px; box-shadow:0 2px 9px rgba(15,38,68,.09); padding:20px; margin-bottom:15px; }
 .footer { text-align:center; color:#6c757d; margin:40px 0 10px; font-size:.9rem; }

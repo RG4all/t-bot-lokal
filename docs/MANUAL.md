@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.3.0 · Stand 21. August 2026**
+**Version 2.3.1 · Stand 22. August 2026**
 
 [TOC]
 
@@ -10,14 +10,15 @@
 
 t-bot kombiniert:
 
-- geschützten Mehrbenutzerzugriff,
+- geschützten Mehrbenutzerzugriff mit Passphrase-Gate,
 - Konfigurationen pro Exchange und Marktart,
 - Live-Marktdaten für mehrere Symbole,
-- regelbasiertes Paper Trading,
-- Dashboard, Charts, Kennzahlen und Trading-Log,
+- regelbasiertes Paper Trading mit einstellbaren Indikatorschwellen,
+- Dashboard, interaktive Multi-Y-Achsen-Charts, Kennzahlen und Trading-Log,
 - PDF-, HTML- und CSV-Reports,
-- Parameter-Backtests,
-- persistentes Fehler- und Diagnose-Log.
+- speichereffizientes Parameter-Backtesting mit Raster-Optimierung,
+- persistentes Fehler- und Diagnose-Log mit Filterung,
+- interaktive Hover-/Info-Elemente (ⓘ) für alle bearbeitbaren Eingabefelder.
 
 Jeder Benutzer sieht ausschließlich seine eigenen Konfigurationen, Logs, Backtests und Reports.
 
@@ -27,45 +28,51 @@ Jeder Benutzer sieht ausschließlich seine eigenen Konfigurationen, Logs, Backte
 2. Registrieren oder anmelden.
 3. **Konfigurationen → Neue Konfiguration** öffnen.
 4. Exchange, Markt, Symbole, Kapital und Strategieparameter eingeben.
-5. Speichern. t-bot prüft die Felder und validiert die Symbole live gegen die Börse.
+5. Speichern. t-bot prüft alle Felder und validiert die Symbole live gegen die Börse.
 6. Konfiguration aktivieren und das Dashboard öffnen.
 
-Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelisteten Symbolen oder nicht erreichbarer Exchange nicht stillschweigend akzeptiert.
+Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelisteten Symbolen oder nicht erreichbarer Exchange nicht stillschweigend akzeptiert. Jedes bearbeitbare Eingabefeld verfügt über ein interaktives Info-Symbol (ⓘ) mit Tooltip-Hilfe.
 
-## 3. Konfigurationsfelder
+## 3. Konfigurationsfelder und Indikatoren-Mapping
 
-### Basis
+### 3.1 Basis- und Kontofelder
 
-| Feld | Bedeutung |
-|---|---|
-| Name | Frei wählbare Bezeichnung, mindestens drei Zeichen. |
-| Exchange | Binance, BingX, Bybit, BitMart oder Bitunix. |
-| Markt | `Spot` oder `Futures`. Nicht jede Exchange unterstützt in t-bot beide Varianten. |
-| Symbole | Kommagetrennte CCXT-Schreibweise, z. B. `BTC/USDT, ETH/USDT`. |
+| Feld im Formular | Interner Name / Model | Bedeutung & Standardwert | Hover / Tooltip |
+|---|---|---|---|
+| **Name der Konfiguration** | `name` | Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. `Binance Spot Top 5`. | Eindeutiger Name zur Unterscheidung im Dashboard. |
+| **Börse (Exchange)** | `exchange` | Binance, BingX, Bybit, BitMart oder Bitunix. | Bestimmt den Marktdaten-Provider und das Verbindungsmodell. |
+| **Marktart** | `market` | `Spot` (Kassamarkt) oder `Futures` (Derivate/Swaps). | Unterscheidet Handelsinstrumente und Ticker-Endpunkte. |
+| **Handelspaare (Symbole)** | `symbols` | Kommagetrennte CCXT-Notation, z. B. `BTC/USDT, ETH/USDT`. | Autovervollständigung bietet passende Symbole; Live-Prüfung bei Save. |
+| **Startkapital (USDT)** | `start_capital` | Virtuelles Anfangskapital (z. B. `100`). | Basis für Cash, Gesamt-Equity und Verlustgrenzen. |
+| **Trade-Betrag pro Position (USDT)** | `trade_amount` | Virtueller Nominalbetrag je Kauforder (z. B. `10`). | Muss inkl. Kaufgebühr durch Startkapital gedeckt sein. |
+| **Take Profit (%)** | `take_profit` | Prozentualer Kursgewinn ab Einstiegskurs zum automatischen Verkauf (z. B. `0.5 %`). | Löst Gewinnmitnahme bei Erreichen aus. |
+| **Stop Loss (%)** | `stop_loss` | Prozentualer Kursverlust ab Einstiegskurs zur Verlustbegrenzung (z. B. `0.5 %`). | Löst Notverkauf bei Kursrückgang aus. |
+| **Gesamtverlustgrenze / Sales Stop (%)** | `sales_stop_threshold` | Maximal zulässiger Gesamtverlust in % des Startkapitals; `0` = deaktiviert. | Globaler Schutz: stoppt neue Trades und schließt Positionen. |
+| **Handelsgebühr je Order (%)** | `fee` | Simulierte Börsengebühr in Prozent (z. B. `0.1 %`), fällt bei Kauf und Verkauf an. | Wird realistisch vom Trade-P/L abgezogen. |
+| **Start-Countdown (Minuten)** | `countdown` | Wartezeit nach Botstart in Minuten, bevor Käufe erlaubt sind. | Sammelt vorab Kursdaten zur Indikatorstabilisierung. |
+| **Indikatoren nach Verkauf zurücksetzen** | `countdown_reset_indicators` | Leert den 10-Punkte-Preisbuffer nach einem Verkauf. | Verhindert Sofort-Wiedereinstiege auf altem Momentum. |
+| **Auswertungsintervall (Sekunden)** | `time_interval` | Pause zwischen zwei Preisabfragen/Prüfzyklen (1 bis 300 s). | BitMart/Bitunix Spot min. 5 s für API-Schonung. |
+| **API-Key (optional)** | `api_key` | Öffentlicher Börsen-API-Schlüssel. | Für öffentliches Paper-Trading leer lassen. |
+| **Secret-Key (optional)** | `secret_key` | Geheimer Börsen-API-Schlüssel. | Nur zusammen mit API-Key; für Paper-Trading leer lassen. |
 
-### Kapital und Risiko
+---
 
-| Feld | Bedeutung |
-|---|---|
-| Startkapital | Virtuelles Anfangskapital. |
-| Trade Amount | Virtueller Nominalbetrag je Position. Kaufgebühr muss zusätzlich gedeckt sein. |
-| Take Profit | Prozentuale positive Kursänderung, bei der geschlossen wird. |
-| Stop Loss | Prozentuale negative Kursänderung, bei der geschlossen wird. |
-| Sales Stop Threshold | Maximaler realisierter Gesamtverlust relativ zum Startkapital; `0` deaktiviert die Grenze. |
-| Fee | Simulierte Gebühr je Order. Kauf- und Verkaufsgebühr werden berücksichtigt. |
+### 3.2 Indikatoren-Zuordnungsmatrix (Live-Konfiguration vs. Backtesting)
 
-### Ausführung und Strategie
+Die folgende Tabelle zeigt die exakte 1:1-Entsprechung zwischen den Feldern der **Live-Konfiguration / Dashboard-Schnellbearbeitung** und dem **Backtesting-Modul**:
 
-| Feld | Bedeutung |
-|---|---|
-| Countdown | Wartezeit nach Botstart in Minuten, bevor Käufe erlaubt sind. Preise werden bereits gesammelt. |
-| Time Interval | Auswertungsabstand in Sekunden, 1 bis 300. Binance empfängt dazwischen weiter WebSocket-Daten. |
-| Indikatoren zurücksetzen | Leert den 10-Punkte-Preisbuffer nach einem Verkauf. |
-| Acceleration-Schwelle | Mindestwert von `DVA / vorherige NDA` für einen Kauf. |
-| DeltaDelta-Schwelle | Mindestwert des geglätteten NDA-Momentums. |
-| NDA-Schwelle | Mindestwert der aktuellen normalisierten Preisänderung. |
+| Indikator / Signal | Internes Model-Feld (DB) | Live-Konfiguration & Dashboard | Backtesting-Modul (Suchraum) | Mathematische Formel | Was bedeutet das? / Wofür steht das? |
+|---|---|---|---|---|---|
+| **Beschleunigung (Acceleration)** | `div_DVA_prev_NDA_threshold_buy` | **Beschleunigung (DVA / prev NDA) – Kaufschwelle** | `acc_from`, `acc_to`, `acc_steps` (**Beschleunigung – von / bis / Schritt**) | `DVA / vorherige_NDA`<br>mit `DVA = NDA - vorherige_NDA` | **Relative Momentum-Beschleunigung:** Misst die relative Änderungsrate des Momentums (Rate of Change der Kursänderungsrate). Ein Wert `> 0` signalisiert, dass der Kursanstieg an Dynamik gewinnt. |
+| **DeltaDelta (geglättetes Momentum)** | `deltadelta_threshold_buy` | **DeltaDelta (geglättetes Momentum) – Kaufschwelle** | `deltadelta_from`, `deltadelta_to`, `deltadelta_steps` (**DeltaDelta – von / bis / Schritt**) | `(NDA + vorherige_NDA) / 2` | **Geglättetes 2-Punkt-Momentum:** Bildet den arithmetischen Mittelwert der aktuellen und vorangegangenen Preisänderung. Filtert kurzfristige Ausreißer und misst die mittlere kurzfristige Trendrichtung. |
+| **NDA (normalisierte Preisänderung)** | `nda_threshold_buy` | **NDA (normalisierte Preisänderung) – Kaufschwelle** | `nda_from`, `nda_to`, `nda_steps` (**NDA – von / bis / Schritt**) | `((P0 - P1) / P1) * 100` | **Prozentuale Preisänderung:** Normalisierte Delta-Änderung vom aktuellen Preis `P0` zum Vorpreis `P1` in Prozent. Zeigt die unmittelbare prozentuale Kursbewegung an. |
 
-API-Key und Secret-Key müssen gemeinsam oder gar nicht angegeben werden. Die aktuelle Anwendung handelt ausschließlich auf Papier; öffentliche Marktdaten benötigen keine privaten Schlüssel.
+> **Zusammenfassung:**
+> - Was im Code `div_DVA_prev_NDA_threshold_buy` heißt, ist die Kaufschwelle für die **Beschleunigung** (`DVA / vorherige NDA`).
+> - Im Backtesting-Modul wird genau dieser Wert über `Beschleunigung – von / bis / Schrittweite` (`acc_from`, `acc_to`, `acc_steps`) variiert und optimiert!
+> - Im Dashboard und in der Konfiguration ist das Feld als **Beschleunigung (DVA / prev NDA) – Kaufschwelle** klar und eindeutig beschriftet.
+
+---
 
 ## 4. Symbol-Autovervollständigung
 
@@ -83,7 +90,7 @@ Beispiel: `BT` kann im Spot-Modus `BTC/USDT` vorschlagen; Futures kann zusätzli
 
 ### Binance
 
-Ein persistenter kombinierter `miniTicker`-WebSocket liefert alle konfigurierten Symbole. Das vermeidet REST-Polling und Request-Weight-Bans. Verbindungen werden mit Backoff, mehreren Endpunkten und einem proaktiven Reconnect vor der Binance-24-Stunden-Grenze erneuert.
+Ein persistenter kombinierter `miniTicker`-WebSocket liefert alle konfigurierten Symbole über eine einzige TCP-Verbindung. Das vermeidet REST-Polling und Request-Weight-Bans. Verbindungen werden mit Backoff, mehreren Endpunkten und einem proaktiven Reconnect vor der Binance-24-Stunden-Grenze erneuert.
 
 ### BingX und Bybit
 
@@ -104,13 +111,13 @@ Spot-Marktdaten laufen über die aktuelle öffentliche BitMart-V3-API. Symbole w
 
 Die Seite **Analyse** verwendet ausschließlich die bereits vom Bot gestreamten und in `DataLog` gespeicherten Preise. Sie erzeugt daraus Zeit-Buckets (1m bis 1d) und berechnet SMA 5/15. Dadurch entstehen exakt null externe Analyse-Requests, kein Binance-Request-Weight und kein 418-IP-Ban. Analyse und laufender Binance-WebSocket des Bots sind technisch getrennt. Mindestens 16 lokale Intervalle werden benötigt; bei zu wenig Historie zeigt die Seite eine konkrete Sammelzeit-Meldung.
 
-## 6. Indikatoren – exakte Berechnung
+## 6. Indikatoren – exakte Berechnung und Formeln
 
-Der Live-Bot hält je Symbol die letzten zehn Preise. Für die Berechnung werden die jüngsten drei Preise verwendet:
+Der Live-Bot hält je Symbol die letzten zehn Preise im RAM-Buffer. Für die Berechnung der Strategieindikatoren werden die jüngsten drei Preise verwendet:
 
-- `P0`: aktueller Preis
-- `P1`: vorheriger Preis
-- `P2`: Preis davor
+- `P0`: aktueller Preis (jüngster Kurs)
+- `P1`: vorheriger Preis (1 Zyklus davor)
+- `P2`: Preis davor (2 Zyklen davor)
 
 ### 6.1 DA – absolute Delta-Änderung
 
@@ -119,7 +126,7 @@ DA = P0 - P1
 vorherige_DA = P1 - P2
 ```
 
-DA zeigt die absolute Kursbewegung. Bei unterschiedlich teuren Assets ist sie allein schlecht vergleichbar.
+DA zeigt die absolute Preisdifferenz in Kurseinheiten (z. B. USDT).
 
 ### 6.2 NDA – normalisierte Delta-Änderung
 
@@ -128,28 +135,26 @@ NDA = (P0 - P1) / P1 × 100
 vorherige_NDA = (P1 - P2) / P1 × 100
 ```
 
-NDA drückt die Bewegung prozentual aus. Beispiel: von 100 auf 101 ergibt ungefähr `+1 %`.
+NDA drückt die Kursänderung prozentual bezogen auf den Basispreis aus. Beispiel: Ein Anstieg von 100 auf 101 ergibt exakt `+1.0 %`.
 
-### 6.3 DVA und Beschleunigung
+### 6.3 DVA und Beschleunigung (`div_DVA_prev_NDA`)
 
 ```text
 DVA = NDA - vorherige_NDA
 Beschleunigung = DVA / vorherige_NDA
 ```
 
-DVA misst, wie stark sich das normalisierte Momentum verändert. Die Division verstärkt Änderungen relativ zum vorherigen Momentum. Ist die vorherige NDA null, setzt t-bot die Beschleunigung defensiv auf null, um eine Division durch null zu verhindern.
-
-**Hinweis für Fortgeschrittene:** Bei sehr kleinen vorherigen NDA-Werten kann der Quotient stark ausschlagen. Schwellen sollten deshalb per Backtest und nicht isoliert gewählt werden.
+- **DVA (Delta Value Acceleration):** Differenz zwischen aktuellem und vorigem prozentualen Momentum.
+- **Beschleunigung (`div_DVA_prev_NDA`):** Setzt die Momentum-Veränderung ins Verhältnis zum Ausgangsmomentum.
+- **Nullstellenabsicherung:** Ist `vorherige_NDA == 0`, setzt t-bot die Beschleunigung defensiv auf `0.0`, um eine Division durch Null sicher zu verhindern.
 
 ### 6.4 DeltaDelta
-
-Die aktuelle Implementierung verwendet eine Glättung der aktuellen und vorherigen NDA:
 
 ```text
 DeltaDelta = (NDA + vorherige_NDA) / 2
 ```
 
-Der Name ist historisch; mathematisch handelt es sich hier um einen Zwei-Punkt-Mittelwert und nicht um eine reine zweite Ableitung. Ein positiver Wert zeigt überwiegend positives kurzfristiges Momentum.
+Mittelwert aus aktuellem und vorigem normalisiertem Momentum zur Rauschreduktion.
 
 ### 6.5 MVD – Verhältnis Minimum zu Maximum
 
@@ -157,47 +162,41 @@ Der Name ist historisch; mathematisch handelt es sich hier um einen Zwei-Punkt-M
 MVD = Minimum(Preisbuffer) / Maximum(Preisbuffer)
 ```
 
-MVD liegt bei positiven Preisen zwischen 0 und 1. Werte nahe 1 bedeuten eine enge Handelsspanne; kleinere Werte eine größere Spanne. MVD wird protokolliert, ist aktuell aber kein direktes Kaufkriterium.
+MVD liegt bei positiven Preisen zwischen 0 und 1. Werte nahe 1 bedeuten eine enge Handelsspanne; kleinere Werte eine größere Spanne. MVD wird in `DataLog` protokolliert.
 
 ## 7. Kauf- und Verkaufslogik
 
-Ein Kauf wird nur simuliert, wenn:
+Ein Kauf wird nur simuliert, wenn **alle** folgenden Bedingungen gleichzeitig erfüllt sind:
 
-1. der Start-Countdown abgelaufen ist,
-2. noch keine Position für das Symbol offen ist,
-3. genügend freies virtuelles Kapital vorhanden ist,
-4. die globale Verlustgrenze nicht erreicht ist,
-5. NDA, DeltaDelta und Beschleunigung jeweils über ihrer Kaufschwelle liegen.
+1. Der Start-Countdown ist abgelaufen (`start_countdown_over == True`).
+2. Für dieses Symbol ist aktuell keine Position offen.
+3. Genügend freies virtuelles Kapital für den Trade-Betrag plus Kaufgebühr ist verfügbar.
+4. Die globale Verlustgrenze (`sales_stop_threshold`) ist nicht erreicht.
+5. Alle drei Indikatorschwellen werden gleichzeitig überschritten:
+   - `NDA > nda_threshold_buy`
+   - `DeltaDelta > deltadelta_threshold_buy`
+   - `Beschleunigung > div_DVA_prev_NDA_threshold_buy`
 
-Eine Position wird geschlossen, wenn Take Profit oder Stop Loss erreicht ist oder die globale Verlustgrenze greift.
-
-### Beispiel
-
-- Startkapital: 1.000 USDT
-- Trade Amount: 100 USDT
-- Fee: 0,1 % je Seite
-- Einstieg: 100 USDT, Menge etwa 1
-- Ausstieg: 102 USDT
-
-Bruttobewegung: 2 USDT. Davon werden Kauf- und Verkaufsgebühr abgezogen. Der im Sell-Log ausgewiesene P/L ist deshalb kleiner als 2 USDT.
+Eine offene Position wird automatisch geschlossen (Verkauf), wenn:
+- Der Kursanstieg den **Take Profit (%)** erreicht oder überschreitet,
+- Der Kursrückgang den **Stop Loss (%)** erreicht oder überschreitet, oder
+- Die globale Gesamtverlustgrenze greift.
 
 ## 8. Kill-Switch
 
-Der rote Button **„Alle Positionen schließen“**:
+Der Button **„⚠ Alle Positionen schließen“**:
 
-1. verlangt zwei unabhängige Bestätigungen,
-2. ruft für alle offenen Positionen frische Marktpreise ab,
-3. blockiert währenddessen neue Käufe,
-4. erstellt für jede erfolgreiche Liquidation einen Sell-Log,
-5. meldet Teilerfolge und Fehler symbolgenau.
-
-Der Bot muss laufen, damit ein aktueller Preis sicher beschafft werden kann. Ein Fehler bei einem Symbol verhindert nicht die Liquidation der übrigen Symbole.
+1. Verlangt zwei unabhängige Bestätigungsdialoge im Browser.
+2. Ruft für alle offenen Positionen frische Marktpreise ab.
+3. Blockiert währenddessen neue Käufe.
+4. Erstellt für jede erfolgreiche Liquidation einen `sell`-TradingLog.
+5. Meldet Teilerfolge und eventuelle Einzelfehler symbolgenau.
 
 ## 9. Dashboard, Kontostand und Trading-Log
 
 ### Kontostandslogik
 
-Die Oberfläche trennt jetzt Begriffe, die zuvor fälschlich als ein einzelner „aktueller Kontostand“ behandelt wurden:
+Die Oberfläche trennt exakt:
 
 ```text
 Verfügbarer Cash = Startkapital + realisierter P/L
@@ -210,58 +209,39 @@ Gesamtequity = verfügbarer Cash + Netto-Marktwert offen
 Unrealisierter P/L = Netto-Marktwert offen - gebundenes Kapital
 ```
 
-Direkt nach einem Kauf sinkt deshalb der **verfügbare Kontostand** um Positionswert plus Kaufgebühr. Die Gesamtequity bleibt – abgesehen von Gebühren und Kursbewegung – in ähnlicher Höhe. Nach dem Verkauf fließt der Nettoerlös zurück in den Cash-Bestand; der vollständige Trade-P/L wird realisiert.
-
-Beispiel: Start 1.000, Kauf 100, Kaufgebühr 0,10. Unmittelbar danach sind ungefähr 899,90 Cash verfügbar und 100,10 gebunden. Bei einem aktuellen Netto-Marktwert von 101 liegt die Equity bei ungefähr 1.000,90.
+Direkt nach einem Kauf sinkt der **verfügbare Kontostand** um den gebundenen Positionswert plus Kaufgebühr. Die Gesamtequity bleibt dabei erhalten. Nach dem Verkauf fließt der Nettoerlös zurück in den Cash-Bestand; der vollständige Trade-P/L wird realisiert.
 
 ### Trading-Log
 
-Das Trading-Log zeigt 100 Einträge pro Seite, neueste zuerst. **Neuere** und **Ältere** navigieren serverseitig durch die Historie. Dadurch bleibt die Seite auch bei großen Datenmengen schnell.
-
-Farben:
-
-- Grün: Buy
-- Rot: Sell
-- Gelber „Verkaufen“-Button: aktuell offene Position
-
-Portfolio- und Performancefelder werden regelmäßig aktualisiert. Die Equity-Kurve zeigt realisiertes Kapital.
+- 100 Einträge pro Seite mit Server-Paginierung.
+- Grün: Buy-Orders.
+- Rot: Sell-Orders.
+- Gelber „Verkaufen“-Button für jede aktuell noch offene Position zum manuellen Schließen.
 
 ## 10. Reports
 
 Im Dashboard stehen drei Exportformate bereit:
 
-- **PDF**: druckbarer Gesamtbericht mit Konfiguration, Cash, Equity, offenen Positionen, Kennzahlen, Trading-Log und eingebetteten Diagrammen.
-- **HTML**: eigenständige Reportdatei mit denselben Informationen für Browser und Archiv.
-- **CSV**: maschinenlesbarer vollständiger Trading-Export mit Zeit, Symbol, Aktion, Preisen, Menge, Gebühren, Order-ID, P/L, Cash-Snapshot und Tank; UTF-8 mit BOM.
+- **PDF**: Druckbarer Gesamtbericht mit Konfiguration, Cash, Equity, offenen Positionen, Kennzahlen, Trading-Log und eingebetteten Diagrammen.
+- **HTML**: Eigenständige Reportdatei für Offline-Betrachtung im Browser.
+- **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation.
 
-Die Exportbuttons und wichtigen Kontofelder besitzen Hover-Hinweise (`title`), die Zweck und Dateninhalt erklären.
-
-Dateinamenschema:
-
-```text
-username_exchange_config-id_YYYYMMDD_HHMMSS.ext
-```
-
-Beispiel: `anna_binance_5_20260820_184501.pdf`.
+Dateinamenschema: `username_exchange_config-id_YYYYMMDD_HHMMSS.ext` (z. B. `anna_binance_5_20260820_184501.pdf`).
 
 ## 11. Backtesting
 
-Backtests variieren die drei Kaufschwellen über Von/Bis/Schrittweite. t-bot begrenzt Kombinationen und historische Punkte, um Speicher- und CPU-Überlastung zu vermeiden. Für jedes Symbol wird nur der beste Kandidat dauerhaft gespeichert.
+Das Backtesting-Modul optimiert die drei Kaufschwellen über konfigurierbare Suchraster:
 
-Empfohlener Ablauf:
+- **Beschleunigung – von / bis / Schrittweite** (`acc_from`, `acc_to`, `acc_steps`)
+- **NDA – von / bis / Schrittweite** (`nda_from`, `nda_to`, `nda_steps`)
+- **DeltaDelta – von / bis / Schrittweite** (`deltadelta_from`, `deltadelta_to`, `deltadelta_steps`)
+- **Trading-Parameter:** Trade-Betrag, Take Profit, Stop Loss, Gebühr und maximale historische Preispunkte.
 
-1. Mit groben Schritten einen kleinen Bereich testen.
-2. Den besten Bereich mit kleineren Schritten verfeinern.
-3. Gebühren, Take Profit und Stop Loss realistisch setzen.
-4. Ergebnisse auf einem anderen Zeitraum gegenprüfen.
+Für jedes Symbol wird das threshold-Set ermittelt, welches das höchste Endkapital erzielt, und im Report übersichtlich dargestellt.
 
-Backtests sind keine Prognose. Overfitting entsteht, wenn Parameter zu eng an eine einzige Historie angepasst werden.
+### Isolation und Ressourcenschonung
 
-### Produktionsbetrieb und Isolation
-
-Auf Render Free ist die Backtest-Ausführung absichtlich deaktiviert: 0,1 CPU und 512 MB werden vom Web-/Bot-Prozess benötigt, und Free unterstützt keinen isolierten Background Worker. Ein lokaler Thread könnte die absolute Bot-Priorität nicht garantieren. Lokal kann der serielle Entwicklungsfallback aktiviert werden.
-
-Produktiv benötigt Backtesting `REDIS_URL` und einen separaten Celery-Worker auf Queue `backtest` mit Concurrency 1, Prefetch 1, maximal einem Task pro Child und 384-MB-Child-Limit. Lokal startet `scripts/setup_local.sh` Web/Bot, Worker, Redis und PostgreSQL in getrennten Containern. Der Installer erkennt Debian/Ubuntu, Arch, Fedora/RHEL, openSUSE und Alpine sowie die CPU-Architektur. Ein Hardwaretest dimensioniert CPU, RAM, Redis und PostgreSQL automatisch; die Render-Free-Simulation bleibt ohne expliziten Schalter aus. Fällt Redis vollständig aus, ist der serielle lokale Fallback explizit erlaubt. Details zum Setup stehen in `LOCAL_DEVELOPMENT.md`; Architekturdiagramm und Messergebnisse in `BACKTESTING_STUDY.md`; `render.worker.example.yaml` ist die absichtlich nicht automatisch aktivierte Produktionsvorlage.
+Auf Render Free ist die Backtest-Ausführung zum Schutz des Trading-Bots deaktiviert. Produktiv wird `REDIS_URL` mit einem separaten Celery-Worker genutzt. Lokal kann der serielle Fallback verwendet werden. Preispunkte und Rastergrößen werden überwacht (maximal 20.000 Kombinationen), um Überlastung zu verhindern.
 
 ## 12. Fehler-Log und Betrieb
 
@@ -301,21 +281,24 @@ Das RAM-Journal überlebt keinen kompletten Container-Neustart. Für garantierte
 
 Für Bot-Threads greift zusätzlich ein globaler Circuit-Breaker: Nach fünf koordinierten Fehlversuchen werden weitere DB-Operationen fünf Minuten lang sofort verworfen. Danach führt genau ein Thread einen Recovery-Versuch aus. Konfigurationen werden höchstens alle 30 Sekunden neu geladen und DataLogs standardmäßig nur alle 10 Sekunden je Symbol geschrieben.
 
-## 13. Integrierte Hilfe-Seite
+## 13. Integrierte Hilfe-Seite und Performance
 
-Unter **Hilfe** beziehungsweise `/help/` wird diese Datei direkt innerhalb der Anwendung gerendert. Die Seite enthält ein Inhaltsverzeichnis, formatierte Tabellen und Codebeispiele sowie eine Druckansicht. Dadurch bleibt die Dokumentation mit dem Repository identisch und muss nicht doppelt gepflegt werden.
+Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, formatierten Tabellen, Code-Highlighting und Druckansicht.
+
+**Minimaler Ressourcenverbrauch:**
+- Das gerenderte HTML wird mittels `@lru_cache(maxsize=1)` im Arbeitsspeicher gehalten.
+- Die Markdown-Kompilierung erfolgt exakt **einmal** beim ersten Aufruf und erzeugt bei nachfolgenden Anfragen **nahezu 0 % CPU- und I/O-Last**.
+- Die Pfadsuche prüft automatisch `docs/MANUAL.md` sowie `MANUAL.md` im Projektstamm.
 
 ## 14. Render-Hinweise
 
-- Free-Web-Services schlafen bei Inaktivität ein; ein In-Process-Bot ist dort nicht garantiert 24/7 aktiv.
-- Free-Postgres läuft nach 30 Tagen ab.
-- Für produktiven Dauerbetrieb: bezahlter Web-Service, dauerhaftes PostgreSQL, Redis, separater Worker und Scheduler.
-- `/health/` bleibt absichtlich leichtgewichtig und öffentlich für Render.
+- Free-Web-Services schlafen bei Inaktivität ein; für 24/7-Betrieb empfiehlt sich ein bezahlter Service oder ein lokaler Container.
+- `/health/` liefert leichtgewichtig `{"status": "ok", "version": "..."}` für Health-Checks.
 
 ## 15. Sicherheits- und Risikocheckliste
 
 - Passphrase und Django `SECRET_KEY` niemals veröffentlichen.
-- Keine echten Exchange-Schlüssel verwenden, solange Feldverschlüsselung und ein echtes Order-Risikomodell nicht eingerichtet sind.
-- Kill-Switch-Ergebnis und Fehler-Log nach jeder Notfallaktion prüfen.
-- Parameter zuerst backtesten und mit kleinen virtuellen Beträgen beobachten.
-- Datenbank sichern, bevor eine kostenlose Instanz abläuft.
+- Paper Trading simuliert Ausführungen – keine Garantie für reale Marktausführungen.
+- Alle bearbeitbaren Felder vor dem Bot-Start per Info-Hover (ⓘ) und Backtest prüfen.
+- Regelmäßige Backups der Datenbank durchführen.
+

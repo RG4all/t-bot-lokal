@@ -23,80 +23,132 @@ class Configuration(models.Model):
 
     is_running = models.BooleanField(
         default=False,
+        verbose_name="Bot läuft",
         help_text="Gibt an, ob der Bot aktuell laufen soll.",
     )
-    name = models.CharField(max_length=100)
-    market = models.CharField(max_length=20, choices=MARKET_CHOICES, default="spot")
+    name = models.CharField(
+        max_length=100,
+        verbose_name="Name der Konfiguration",
+        help_text="Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. „Binance Spot Top 5“.",
+    )
+    market = models.CharField(
+        max_length=20,
+        choices=MARKET_CHOICES,
+        default="spot",
+        verbose_name="Marktart",
+        help_text="Handelsmarkt: Spot (Kassamarkt) oder Futures (Derivate/Swaps).",
+    )
     sales_stop_threshold = models.FloatField(
         default=0.0,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
+        verbose_name="Gesamtverlustgrenze / Sales Stop (%)",
         help_text="Maximaler Verlust des Gesamtkapitals in Prozent (0 = deaktiviert).",
     )
     countdown_reset_indicators = models.BooleanField(
         default=False,
-        help_text="Indikatoren nach einem Verkauf zurücksetzen.",
+        verbose_name="Indikatoren nach Verkauf zurücksetzen",
+        help_text="Indikatoren und 10-Punkte-Preisbuffer nach einem Verkauf zurücksetzen.",
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     exchange = models.CharField(
         max_length=20,
         choices=EXCHANGE_CHOICES,
         default="binance",
+        verbose_name="Börse (Exchange)",
+        help_text="Kryptobörse für Marktdaten und Paper-Trading: Binance, BingX, Bybit, BitMart oder Bitunix.",
     )
     symbols = models.CharField(
         max_length=200,
         default="BTC/USDT,ETH/USDT,SOL/USDT,LTC/USDT,XRP/USDT",
+        verbose_name="Handelspaare (Symbole)",
+        help_text="Kommagetrennte CCXT-Symbole (z. B. BTC/USDT, ETH/USDT).",
     )
     start_capital = models.DecimalField(
         max_digits=20,
         decimal_places=8,
         default=Decimal(100),
         validators=[MinValueValidator(Decimal("0.00000001"))],
+        verbose_name="Startkapital (USDT)",
+        help_text="Virtuelles Anfangskapital für die Paper-Trading-Simulation.",
     )
     trade_amount = models.DecimalField(
         max_digits=20,
         decimal_places=8,
         default=Decimal(10),
         validators=[MinValueValidator(Decimal("0.00000001"))],
+        verbose_name="Trade-Betrag pro Position (USDT)",
+        help_text="Virtueller Nominalbetrag je Position. Kaufgebühr muss zusätzlich gedeckt sein.",
     )
     take_profit = models.DecimalField(
         max_digits=6,
         decimal_places=3,
         default=Decimal("0.5"),
         validators=[MinValueValidator(Decimal("0.001")), MaxValueValidator(Decimal(100))],
+        verbose_name="Take Profit (%)",
+        help_text="Prozentualer Kursgewinn ab Einstieg zum automatischen Verkauf.",
     )
     stop_loss = models.DecimalField(
         max_digits=6,
         decimal_places=3,
         default=Decimal("0.5"),
         validators=[MinValueValidator(Decimal("0.001")), MaxValueValidator(Decimal(100))],
+        verbose_name="Stop Loss (%)",
+        help_text="Prozentualer Kursverlust ab Einstieg zum automatischen Verkauf.",
     )
     fee = models.DecimalField(
         max_digits=6,
         decimal_places=3,
         default=Decimal("0.1"),
         validators=[MinValueValidator(Decimal(0)), MaxValueValidator(Decimal(100))],
+        verbose_name="Handelsgebühr je Order (%)",
+        help_text="Simulierte Handelsgebühr je Kauf und Verkauf in Prozent.",
     )
-    api_key = models.CharField(max_length=120, blank=True, null=True)
-    secret_key = models.CharField(max_length=120, blank=True, null=True)
-    countdown = models.IntegerField(default=1, validators=[MinValueValidator(0)])
+    api_key = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        verbose_name="API-Key (optional)",
+        help_text="Öffentlicher Börsenschlüssel. Für Paper-Trading nicht erforderlich.",
+    )
+    secret_key = models.CharField(
+        max_length=120,
+        blank=True,
+        null=True,
+        verbose_name="Secret-Key (optional)",
+        help_text="Geheimer Börsenschlüssel. Für Paper-Trading nicht erforderlich.",
+    )
+    countdown = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(0)],
+        verbose_name="Start-Countdown (Minuten)",
+        help_text="Wartezeit nach Bot-Start in Minuten, in der Kurse gesammelt aber noch keine Käufe ausgeführt werden.",
+    )
     time_interval = models.IntegerField(
         default=2,
         validators=[MinValueValidator(1), MaxValueValidator(300)],
+        verbose_name="Auswertungsintervall (Sekunden)",
+        help_text="Pause zwischen zwei Preisprüfzyklen in Sekunden (1–300 s).",
     )
     div_DVA_prev_NDA_threshold_buy = models.DecimalField(
         max_digits=20,
         decimal_places=8,
         default=0,
+        verbose_name="Beschleunigung (DVA / prev NDA) – Kaufschwelle",
+        help_text="Kaufschwelle für die relative Momentum-Beschleunigung (DVA / vorherige NDA). Im Backtesting als „Beschleunigung“ einstellbar.",
     )
     deltadelta_threshold_buy = models.DecimalField(
         max_digits=20,
         decimal_places=8,
         default=0,
+        verbose_name="DeltaDelta (geglättetes Momentum) – Kaufschwelle",
+        help_text="Kaufschwelle für das geglättete Zwei-Punkt-Momentum ((NDA + vorherige NDA) / 2). Im Backtesting als „DeltaDelta“ einstellbar.",
     )
     nda_threshold_buy = models.DecimalField(
         max_digits=20,
         decimal_places=8,
         default=0,
+        verbose_name="NDA (normalisierte Preisänderung) – Kaufschwelle",
+        help_text="Kaufschwelle für die prozentuale Preisänderung zum Vorpreis (((P0 - P1) / P1) * 100). Im Backtesting als „NDA“ einstellbar.",
     )
 
     def __str__(self):

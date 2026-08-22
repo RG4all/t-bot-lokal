@@ -1,23 +1,53 @@
 # Lokale Entwicklungsumgebung
 
-## 1. Voraussetzungen
+## 1. Voraussetzungen und automatische Installation
 
-- Docker Engine mit Compose v2
-- mindestens 2 GB freier RAM
+- mindestens 2 GB RAM
 - freie TCP-Ports 8000 (Web) und interne Docker-Netze
+- Linux mit apt, pacman, dnf/yum, zypper oder apk; macOS/Windows verwenden Docker Desktop
 
-## 2. Konfiguration
+Linux-Komplettsetup:
 
 ```bash
-cp .env.docker.example .env
+scripts/setup_local.sh --install-deps
 ```
 
-Mindestens `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` in `.env` ändern. Die Datei `.env` ist durch `.gitignore` ausgeschlossen.
+Vorher gefahrlos prüfen:
+
+```bash
+scripts/install_system_dependencies.sh --dry-run
+scripts/setup_local.sh --dry-run
+```
+
+`scripts/install_system_dependencies.sh` erkennt Distribution, Paketmanager und CPU-Architektur automatisch. Unterstützt werden Debian/Ubuntu, Arch/Manjaro, Fedora, RHEL/CentOS/Rocky/Alma, openSUSE und Alpine. Installiert werden Docker/Compose, Python-Werkzeuge sowie Pango/Harfbuzz/JPEG/PostgreSQL-Client für native Diagnose. Mit `--dry-run` werden nur die Befehle ausgegeben.
+
+## 2. Automatische Hardwareoptimierung
+
+```bash
+python3 scripts/tune_local_hardware.py --output .env.local
+```
+
+Der Test misst CPU-Hashrate, sequenzielle Schreibrate, RAM, freien Datenträger und Architektur. Daraus entstehen CPU-/RAM-Limits für alle Compose-Services, Redis-Maxmemory, PostgreSQL-Cachewerte, das lokale DataLog-Schreibintervall und ein sinnvoller Standardwert von 2.500 oder 5.000 Backtest-Preispunkten. Bestehende Secrets in `.env.local` bleiben erhalten; neue Dateien erhalten Modus 0600.
+
+Die Render-Free-Simulation ist standardmäßig **aus**. Nur explizit aktivieren:
+
+```bash
+scripts/setup_local.sh --render-free-simulation
+```
 
 ## 3. Start
 
+Ein-Schritt-Setup mit nativer Hardwareoptimierung:
+
 ```bash
-docker compose up --build -d
+scripts/setup_local.sh
+```
+
+Oder manuell:
+
+```bash
+cp .env.docker.example .env.local
+docker compose --env-file .env.local up --build -d
 ```
 
 Beim Build laeuft `install.sh` im Container-Modus und installiert die zur
@@ -28,6 +58,7 @@ ein gemeinsam genutztes Volume. Redis startet daraufhin mit berechneten
 Werten fuer `maxmemory`, `maxmemory-policy` und `io-threads`; Web, Worker
 und Beat uebernehmen die empfohlenen Werte fuer Worker-Threads,
 Connection-Pools und Speicher-Limits.
+Mindestens `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` ändern. `.env.local` ist durch `.gitignore` ausgeschlossen.
 
 Services:
 
@@ -36,8 +67,12 @@ Services:
 | `tuner` | One-Shot: Hardware-Analyse und Tuning-Datei generieren | kurzlebig |
 | `web` | Django, Daphne, WebSockets, TradingBot | 512 MB, standardmaeßig 0,5 CPU |
 | `backtest-worker` | ausschließlich Queue `backtest` | 512-MB-Container, 384-MB-Celery-Child, Concurrency 1 |
-| `redis` | Broker/Result Backend | 96 MB (Default), hardwareabhaengiges Maxmemory |
-| `postgres` | lokale persistente DB | 256 MB, max. 40 Verbindungen, abgestimmte Cachewerte |
+| `redis` | Broker/Result Backend | 64 MB, keine Persistenz fuer lokale Entwicklung |
+| `postgres` | lokale persistente DB | 256 MB |
+| `web` | Django, Daphne, WebSockets, TradingBot | hardwareabhängige CPU/RAM-Cgroup |
+| `backtest-worker` | ausschließlich Queue `backtest` | eigene Cgroup, 384-MB-Celery-Child, Concurrency 1 |
+| `redis` | Broker/Result Backend | hardwareabhängiges Maxmemory, keine lokale Persistenz |
+| `postgres` | lokale persistente DB | max. 40 Verbindungen, abgestimmte Cachewerte |
 | `scheduler` | optional Celery Beat | nur Profil `scheduler` |
 
 Die automatisch berechneten Werte koennen eingesehen werden:
@@ -45,13 +80,6 @@ Die automatisch berechneten Werte koennen eingesehen werden:
 ```bash
 docker compose cp tuner:/tbot-runtime/hardware-report.txt - | less
 docker compose exec web sh -c 'cat /tbot-runtime/tuning.env'
-```
-
-Alternativ das Ein-Schritt-Setup verwenden:
-
-```bash
-scripts/setup_local.sh             # .env.local erzeugen + Stack starten
-scripts/setup_local.sh --no-up     # nur .env.local erzeugen
 ```
 
 Status prüfen:
@@ -73,9 +101,16 @@ Anwendung: <http://localhost:8000/>
 
 ## 4. Render-Free-CPU lokal simulieren
 
-In `.env`:
+Bevorzugt direkt erzeugen:
+
+```bash
+scripts/setup_local.sh --render-free-simulation
+```
+
+Oder in `.env.local` manuell setzen:
 
 ```env
+SIMULATE_RENDER_FREE=True
 WEB_CPUS=0.10
 WORKER_CPUS=0.50
 ```
@@ -83,7 +118,7 @@ WORKER_CPUS=0.50
 Danach:
 
 ```bash
-docker compose up -d --force-recreate web backtest-worker
+docker compose --env-file .env.local up -d --force-recreate web backtest-worker
 ```
 
 Der Worker besitzt weiterhin eigene Ressourcen; der Web-/Bot-Prozess wird künstlich auf 0,1 CPU begrenzt.
@@ -162,76 +197,7 @@ docker compose exec postgres psql -U tbot -d tbot -c \
 
 Der authentifizierte Endpoint `/api/backtesting/status/` liefert Worker-/Redis-Modus sowie Web-Peak-RSS, Threadzahl, Heartbeat-Alter und maximalen Scheduler-Lag.
 
-## 9. Troubleshooting
-
-### Web/Worker bleibt `health: starting` oder ist nicht erreichbar
-
-Wenn `docker compose up` erfolgreich laeuft, aber `http://localhost:8000/`
-nicht antwortet und der Web-Container immer wieder neu startet, ist fast
-immer das **Postgres-Passwort nicht konsistent** mit dem bereits
-initialisierten Volume.
-
-Ursache: Das offizielle Postgres-Image liest `POSTGRES_PASSWORD` nur beim
-**ersten** Initialisieren eines leeren Datenverzeichnisses. Ein frueherer
-Lauf mit `.env` (Default-Passwort `tbot-local-password`), mit `scripts/setup_local.sh`
-(frueher zufaellig generiertes Passwort) oder mit einer aelteren Version
-hat das Volume `postgres_data` bereits mit einem anderen Passwort
-angelegt. Neue Werte in `.env`/`.env.local` aendern das Passwort im
-bestehenden Volume **nicht**. Migrationen und `wait_for_database`
-schlagen dann fehl; Web/Worker crashen in einer Restart-Schleife.
-
-Diagnose:
-
-```bash
-docker compose logs --tail 80 web
-# Suche nach:
-#   password authentication failed for user "tbot"
-#   FATAL: password authentication failed
-```
-
-Abhilfe (lokale Datenbank zuruecksetzen):
-
-```bash
-# Ueber das Setup-Skript (bestaetigt oder mit --yes):
-scripts/setup_local.sh --reset-db --yes
-
-# Oder manuell:
-docker compose down -v
-docker compose up --build -d
-```
-
-Das `-v` loescht das benannte Volume `t-bot-local_postgres_data`; beim
-naechsten Start initialisiert Postgres mit dem aktuellen Passwort.
-
-### Web-Healthcheck startet neu durch
-
-Der Healthcheck trifft `/health/`. Wenn Daphne nach Migrationen 30-60
-Sekunden braucht, bleibt der Status zunaechst `health: starting`. Das ist
-normal; `start_period` ist auf 30 s (Web) bzw. 45 s (Worker) eingestellt.
-Nach Ablauf sollte der Status zu `healthy` wechseln. Wenn nicht:
-
-```bash
-docker compose logs -f web
-curl -i http://localhost:8000/health/
-```
-
-### Worker-Healthcheck schlaegt fehl
-
-Der Worker-Healthcheck nutzt `celery -A trading_bot_project inspect ping`.
-Voraussetzung ist, dass der Broker (Redis) erreichbar ist und der Worker
-innerhalb von `start_period` (45 s) hochgefahren ist. Wenn der Worker
-nicht startet, weil die DB nicht erreichbar ist, zuerst das Web-Problem
-oben loesen.
-
-### Ports bereits belegt
-
-Wenn Port 8000 bereits belegt ist, mit `WEB_PORT=8001` in `.env` starten:
-
-```bash
-WEB_PORT=8001 docker compose up -d
-```
-
-## 10. Beenden und Zurücksetzen
+## 9. Beenden und Zurücksetzen
 
 ```bash
 docker compose down                 # Datenbank-Volume behalten

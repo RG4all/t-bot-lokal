@@ -197,6 +197,13 @@ def simulate_candidate(
         return {"symbol": symbol, "error": str(exc)}
 
 
+_THRESHOLD_LABELS = {
+    "acc_threshold": "Beschleunigung (DVA/prev NDA)",
+    "nda_threshold": "NDA (% Preisänderung)",
+    "deltadelta_threshold": "DeltaDelta (Momentum)",
+}
+
+
 def _collect_results(results, task):
     symbol_results = {}
     errors = []
@@ -216,7 +223,8 @@ def _collect_results(results, task):
             "best_thresholds": decimal_to_str(thresholds),
             "report": decimal_to_str(best["report"]),
             "optimized_thresholds_str": ", ".join(
-                f"{key.removesuffix('_threshold')}: {value}" for key, value in thresholds.items()
+                f"{_THRESHOLD_LABELS.get(key, key.removesuffix('_threshold'))}: {value}"
+                for key, value in thresholds.items()
             ),
         }
 

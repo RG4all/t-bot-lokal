@@ -17,25 +17,47 @@ class RegistrationForm(forms.ModelForm):
     password = forms.CharField(
         label="Passwort",
         strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "new-password", "placeholder": "Sicheres Passwort eingeben"}
+        ),
+        help_text="Mindestens 8 Zeichen, nicht nur Zahlen.",
     )
     confirm_password = forms.CharField(
         label="Passwort bestätigen",
         strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "new-password", "placeholder": "Passwort wiederholen"}
+        ),
+        help_text="Muss mit dem obigen Passwort übereinstimmen.",
     )
 
     class Meta:
         model = User
         fields = ["username", "email"]
         widgets = {
-            "username": forms.TextInput(attrs={"autocomplete": "username"}),
-            "email": forms.EmailInput(attrs={"autocomplete": "email"}),
+            "username": forms.TextInput(
+                attrs={"autocomplete": "username", "placeholder": "z. B. trader1"}
+            ),
+            "email": forms.EmailInput(
+                attrs={"autocomplete": "email", "placeholder": "name@example.com"}
+            ),
+        }
+        labels = {
+            "username": "Benutzername",
+            "email": "E-Mail-Adresse",
+        }
+        help_texts = {
+            "username": "Eindeutiger Benutzername für die Anmeldung.",
+            "email": "Gültige E-Mail-Adresse für Benachrichtigungen und Accountverwaltung.",
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["email"].required = True
+        for name, field in self.fields.items():
+            field.widget.attrs["class"] = "form-control"
+            if field.help_text:
+                field.widget.attrs["title"] = field.help_text
 
     def clean(self):
         cleaned_data = super().clean()
@@ -60,13 +82,26 @@ class RegistrationForm(forms.ModelForm):
 class LoginForm(forms.Form):
     username = forms.CharField(
         label="Benutzername",
-        widget=forms.TextInput(attrs={"autocomplete": "username", "autofocus": True}),
+        widget=forms.TextInput(
+            attrs={"autocomplete": "username", "autofocus": True, "placeholder": "Benutzername"}
+        ),
+        help_text="Dein registrierter Benutzername.",
     )
     password = forms.CharField(
         label="Passwort",
         strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "current-password", "placeholder": "Passwort"}
+        ),
+        help_text="Dein Account-Passwort.",
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+            if field.help_text:
+                field.widget.attrs["title"] = field.help_text
 
 
 class ConfigurationForm(forms.ModelForm):
@@ -92,6 +127,26 @@ class ConfigurationForm(forms.ModelForm):
             "deltadelta_threshold_buy",
             "nda_threshold_buy",
         ]
+        labels = {
+            "name": "Name der Konfiguration",
+            "exchange": "Börse (Exchange)",
+            "market": "Marktart",
+            "symbols": "Handelspaare (Symbole)",
+            "start_capital": "Startkapital (USDT)",
+            "trade_amount": "Trade-Betrag pro Position (USDT)",
+            "sales_stop_threshold": "Gesamtverlustgrenze / Sales Stop (%)",
+            "take_profit": "Take Profit (%)",
+            "stop_loss": "Stop Loss (%)",
+            "fee": "Handelsgebühr je Order (%)",
+            "api_key": "API-Key (optional)",
+            "secret_key": "Secret-Key (optional)",
+            "countdown": "Start-Countdown (Minuten)",
+            "countdown_reset_indicators": "Indikatoren nach Verkauf zurücksetzen",
+            "time_interval": "Auswertungsintervall (Sekunden)",
+            "div_DVA_prev_NDA_threshold_buy": "Beschleunigung (DVA / prev NDA) – Kaufschwelle",
+            "deltadelta_threshold_buy": "DeltaDelta (geglättetes Momentum) – Kaufschwelle",
+            "nda_threshold_buy": "NDA (normalisierte Preisänderung) – Kaufschwelle",
+        }
         widgets = {
             "symbols": forms.Textarea(attrs={"rows": 3, "placeholder": "BTC/USDT, ETH/USDT"}),
             "api_key": forms.PasswordInput(attrs={"autocomplete": "off"}),
@@ -99,18 +154,29 @@ class ConfigurationForm(forms.ModelForm):
             "countdown_reset_indicators": forms.CheckboxInput(),
         }
         help_texts = {
-            "symbols": "Handelspaare durch Kommas trennen, z. B. BTC/USDT, ETH/USDT.",
-            "sales_stop_threshold": "Gesamtverlustgrenze in Prozent; 0 deaktiviert sie.",
-            "take_profit": "Take-Profit pro Position in Prozent.",
-            "stop_loss": "Stop-Loss pro Position in Prozent.",
-            "fee": "Simulierte Handelsgebühr je Order in Prozent.",
-            "countdown": "Wartezeit nach Bot-Start in Minuten.",
-            "time_interval": "Pause zwischen zwei Preiszyklen in Sekunden.",
+            "name": "Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. „Binance Spot Top 5“.",
+            "exchange": "Kryptobörse für Marktdaten und Paper-Trading: Binance, BingX, Bybit, BitMart oder Bitunix.",
+            "market": "Handelsmarkt: Spot (Kassamarkt) oder Futures (Derivate/Swaps).",
+            "symbols": "Handelspaare durch Kommas trennen, z. B. BTC/USDT, ETH/USDT. Vorschläge richten sich nach Exchange und Markt.",
+            "start_capital": "Virtuelles Anfangskapital für die Simulation in USDT.",
+            "trade_amount": "Virtueller Nominalbetrag je Position. Kaufgebühr muss zusätzlich gedeckt sein.",
+            "sales_stop_threshold": "Maximaler Gesamtverlust in % des Startkapitals, ab dem alle Trades gestoppt werden; 0 = deaktiviert.",
+            "take_profit": "Prozentualer Kursgewinn ab Kaufkurs zum automatischen Verkauf mit Gewinn.",
+            "stop_loss": "Prozentualer Kursverlust ab Kaufkurs zur automatischen Verlustbegrenzung.",
+            "fee": "Simulierte Handelsgebühr je Order in Prozent, die beim Kauf und Verkauf anfällt.",
+            "api_key": "Öffentlicher API-Schlüssel der Börse. Für Paper-Trading leer lassen.",
+            "secret_key": "Geheimer API-Schlüssel der Börse. Für Paper-Trading leer lassen.",
+            "countdown": "Wartezeit nach Bot-Start in Minuten, in der Kurse gesammelt aber noch keine Käufe ausgeführt werden.",
+            "countdown_reset_indicators": "Leert den 10-Punkte-Preisbuffer nach einem Verkauf, damit Indikatoren für den nächsten Trade neu aufgebaut werden.",
+            "time_interval": "Pause zwischen zwei Preisprüfzyklen in Sekunden (1–300 s). Für BitMart/Bitunix Spot min. 5 s.",
+            "div_DVA_prev_NDA_threshold_buy": "Untere Schwelle für die Momentum-Beschleunigung (DVA / vorherige NDA). Im Backtesting als „Beschleunigung“ einstellbar.",
+            "deltadelta_threshold_buy": "Untere Schwelle des geglätteten Zwei-Punkt-NDA-Momentums ((NDA + vorherige NDA) / 2). Im Backtesting als „DeltaDelta“ einstellbar.",
+            "nda_threshold_buy": "Untere Schwelle der normalisierten prozentualen Preisänderung zum Vorpreis (((P0 - P1) / P1) * 100). Im Backtesting als „NDA“ einstellbar.",
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field in self.fields.values():
+        for name, field in self.fields.items():
             if isinstance(field.widget, forms.CheckboxInput):
                 css_class = "form-check-input"
             elif isinstance(field.widget, forms.Select):
@@ -120,6 +186,8 @@ class ConfigurationForm(forms.ModelForm):
             field.widget.attrs["class"] = " ".join(
                 filter(None, (field.widget.attrs.get("class"), css_class))
             )
+            if field.help_text:
+                field.widget.attrs["title"] = field.help_text
         if self.instance and self.instance.pk:
             self.fields["api_key"].widget.attrs["placeholder"] = "Unverändert lassen"
             self.fields["secret_key"].widget.attrs["placeholder"] = "Unverändert lassen"
@@ -249,59 +317,109 @@ class DashboardConfigurationForm(forms.ModelForm):
             "stop_loss",
             "take_profit",
         ]
+        labels = {
+            "div_DVA_prev_NDA_threshold_buy": "Beschleunigung (DVA / prev NDA) – Kaufschwelle",
+            "deltadelta_threshold_buy": "DeltaDelta (geglättetes Momentum) – Kaufschwelle",
+            "nda_threshold_buy": "NDA (normalisierte Preisänderung) – Kaufschwelle",
+            "stop_loss": "Stop Loss (%)",
+            "take_profit": "Take Profit (%)",
+        }
+        help_texts = {
+            "div_DVA_prev_NDA_threshold_buy": "Kaufschwelle für die Momentum-Beschleunigung (DVA / vorherige NDA). Entspricht „Beschleunigung“ im Backtesting.",
+            "deltadelta_threshold_buy": "Kaufschwelle für das geglättete Zwei-Punkt-Momentum ((NDA + vorherige NDA) / 2). Entspricht „DeltaDelta“ im Backtesting.",
+            "nda_threshold_buy": "Kaufschwelle für die normalisierte Preisänderung (((P0 - P1) / P1) * 100). Entspricht „NDA“ im Backtesting.",
+            "stop_loss": "Prozentualer Verlust ab Einstieg zum automatischen Schließen der Position.",
+            "take_profit": "Prozentualer Gewinn ab Einstieg zum automatischen Schließen der Position.",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+            if field.help_text:
+                field.widget.attrs["title"] = field.help_text
 
 
 class BacktestForm(forms.Form):
     acc_from = forms.FloatField(
-        label="Beschleunigung – von",
-        help_text="Untere Schwelle für DVA / vorherige NDA.",
+        label="Beschleunigung (DVA / prev NDA) – von",
+        help_text="Startwert des Suchbereichs für die relative Momentum-Beschleunigung (DVA / vorherige NDA). Entspricht „div_DVA_prev_NDA_threshold_buy“ in der Konfiguration.",
     )
-    acc_to = forms.FloatField(label="Beschleunigung – bis")
-    acc_steps = forms.FloatField(label="Beschleunigung – Schritt", min_value=1e-12)
+    acc_to = forms.FloatField(
+        label="Beschleunigung (DVA / prev NDA) – bis",
+        help_text="Endwert des Suchbereichs für die Beschleunigung (DVA / vorherige NDA).",
+    )
+    acc_steps = forms.FloatField(
+        label="Beschleunigung (DVA / prev NDA) – Schrittweite",
+        min_value=1e-12,
+        help_text="Schrittweite für das Suchraster der Beschleunigung (z. B. 0.1).",
+    )
     nda_from = forms.FloatField(
-        label="NDA – von",
-        help_text="Untere Schwelle der normalisierten prozentualen Preisänderung.",
+        label="NDA (normalisierte Preisänderung) – von",
+        help_text="Startwert des Suchbereichs für die normalisierte Preisänderung in % (((P0 - P1) / P1) * 100). Entspricht „nda_threshold_buy“ in der Konfiguration.",
     )
-    nda_to = forms.FloatField(label="NDA – bis")
-    nda_steps = forms.FloatField(label="NDA – Schritt", min_value=1e-12)
+    nda_to = forms.FloatField(
+        label="NDA (normalisierte Preisänderung) – bis",
+        help_text="Endwert des Suchbereichs für NDA.",
+    )
+    nda_steps = forms.FloatField(
+        label="NDA (normalisierte Preisänderung) – Schrittweite",
+        min_value=1e-12,
+        help_text="Schrittweite für das Suchraster von NDA (z. B. 0.05).",
+    )
     deltadelta_from = forms.FloatField(
-        label="DeltaDelta – von",
-        help_text="Untere Schwelle des geglätteten Zwei-Punkt-NDA-Momentums.",
+        label="DeltaDelta (geglättetes Momentum) – von",
+        help_text="Startwert des Suchbereichs für das geglättete Zwei-Punkt-Momentum ((NDA + vorherige NDA) / 2). Entspricht „deltadelta_threshold_buy“ in der Konfiguration.",
     )
-    deltadelta_to = forms.FloatField(label="DeltaDelta – bis")
-    deltadelta_steps = forms.FloatField(label="DeltaDelta – Schritt", min_value=1e-12)
+    deltadelta_to = forms.FloatField(
+        label="DeltaDelta (geglättetes Momentum) – bis",
+        help_text="Endwert des Suchbereichs für DeltaDelta.",
+    )
+    deltadelta_steps = forms.FloatField(
+        label="DeltaDelta (geglättetes Momentum) – Schrittweite",
+        min_value=1e-12,
+        help_text="Schrittweite für das Suchraster von DeltaDelta (z. B. 0.05).",
+    )
     trade_amount = forms.FloatField(
-        label="Trade-Betrag",
+        label="Trade-Betrag pro Position (USDT)",
         min_value=0.00000001,
-        help_text="Virtueller Nominalbetrag je Position.",
+        help_text="Virtueller Nominalbetrag je Position für den Backtest.",
     )
     take_profit = forms.FloatField(
         label="Take Profit (%)",
         min_value=0.001,
         max_value=100,
+        help_text="Prozentualer Kursgewinn ab Einstieg zum Schließen im Backtest.",
     )
     stop_loss = forms.FloatField(
         label="Stop Loss (%)",
         min_value=0.001,
         max_value=100,
+        help_text="Prozentualer Kursverlust ab Einstieg zum Schließen im Backtest.",
     )
     fee = forms.FloatField(
-        label="Gebühr je Order (%)",
+        label="Handelsgebühr je Order (%)",
         min_value=0,
         max_value=5,
+        help_text="Simulierte Handelsgebühr in Prozent, die je Kauf und Verkauf abgezogen wird.",
     )
     max_price_points = forms.IntegerField(
         label="Maximale historische Preispunkte",
         min_value=100,
         max_value=5_000,
         initial=5_000,
-        help_text="Weniger Punkte reduzieren CPU- und RAM-Verbrauch.",
+        help_text="Anzahl der jüngsten Datenpunkte je Symbol aus DataLog (100–5.000). Kleinere Werte sparen CPU/RAM.",
     )
-    schedule_backtest = forms.BooleanField(label="Backtest planen?", required=False)
+    schedule_backtest = forms.BooleanField(
+        label="Backtest für späteren Zeitpunkt planen?",
+        required=False,
+        help_text="Aktivieren, um den Backtest zu einer geplanten Zeit statt sofort auszuführen.",
+    )
     scheduled_start_time = forms.DateTimeField(
         label="Geplante Startzeit",
         required=False,
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text="Datum und Uhrzeit in der Zukunft für die geplante Ausführung.",
     )
 
     def __init__(self, *args, start_capital=None, **kwargs):
@@ -312,6 +430,8 @@ class BacktestForm(forms.Form):
                 field.widget.attrs["class"] = "form-check-input"
             else:
                 field.widget.attrs["class"] = "form-control"
+            if field.help_text:
+                field.widget.attrs["title"] = field.help_text
 
     def clean(self):
         cleaned_data = super().clean()

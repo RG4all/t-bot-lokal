@@ -4,28 +4,16 @@ Django-/Channels-Anwendung für **Paper Trading**, Marktvisualisierung und param
 
 Binance-Kurse laufen über einen persistenten kombinierten WebSocket-Stream (kein REST-Polling/Request-Weight). BitMart Spot nutzt die aktuelle V3-Public-API; Bitunix Spot/Futures ist über öffentliche, defensiv gedrosselte Adapter integriert. Beim Speichern und Aktivieren werden alle Symbole live geprüft. Das Dashboard bietet paginierte Logs, PDF/HTML/CSV-Reports und einen doppelt bestätigten Kill-Switch.
 
-Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert. Haeufige Fragen, How-Tos und Schritt-fuer-Schritt-Diagnose bei Start-/Zugriffsproblemen stehen in [`FAQ.md`](FAQ.md); das forensische Diagnosewerkzeug ist `scripts/diagnose_local.sh`. Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: [`VERSION`](VERSION).
+Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: [`VERSION`](VERSION).
 
 ## Docker Compose (empfohlen)
 
-Ein-Schritt-Setup (empfohlen): erkennt die Hardware, schreibt `.env.local`
-(vorhandene Secrets bleiben beim Retuning erhalten) und startet den Stack:
-
 ```bash
+# Erkennt lokale Hardware, schreibt .env.local und startet den Stack:
 scripts/setup_local.sh
-# Auf frischem Linux zusaetzlich Docker/Systempakete installieren:
+
+# Auf frischem Linux zusätzlich Distribution/Paketmanager automatisch behandeln:
 scripts/setup_local.sh --install-deps
-# Nur Konfiguration erzeugen, Stack nicht starten:
-scripts/setup_local.sh --no-up
-# Render-Free-Tier-Simulation (0,1 CPU fuer Web) aktivieren:
-scripts/setup_local.sh --render-free-simulation
-```
-
-Oder manuell:
-
-```bash
-cp .env.docker.example .env
-docker compose up --build -d
 ```
 
 Beim `--build` laeuft automatisch `install.sh` (Container-Modus), das die
@@ -34,32 +22,11 @@ von Redis, PostgreSQL und der App fuehrt der One-Shot-`tuner`-Service
 `hardware-test.sh` aus und schreibt eine optimierte `tuning.env` in ein
 gemeinsam genutztes Volume. Redis startet daraufhin mit automatisch
 berechneten Werten fuer `maxmemory`, `maxmemory-policy` und `io-threads`;
-PostgreSQL uebernimmt die empfohlenen Werte fuer `max_connections`,
-`shared_buffers`, `effective_cache_size` und `work_mem`; Web/Worker/Beat
-uebernehmen die empfohlenen Werte fuer Worker-Threads, Connection-Pools
-und Speicher-Limits. Danach ist die App unter <http://localhost:8000/>
-erreichbar. Web, Worker, Redis und PostgreSQL laufen als getrennte,
-ressourcenbegrenzte Services.
-
-### Kein Zugriff auf http://localhost:8000?
-
-Zuerst pruefen, ob der Dienst ueberhaupt antwortet - **unabhaengig vom Browser**:
-
-```bash
-curl -i http://127.0.0.1:8000/health/   # sollte 200 OK + JSON liefern
-```
-
-Liefert das `200`, laeuft die App. Die Startseite `/` liefert absichtlich
-`302` auf `/gate/` (Passphrase) bzw. `/login/` - das ist normal und kein
-Fehler. Bei Problemen die automatische forensische Diagnose ausfuehren:
-
-```bash
-scripts/diagnose_local.sh
-```
-
-Weitere Details, Schritt-fuer-Schritt-Anleitungen und die vollstaendige
-Problem-Matrix gibt es in [`FAQ.md`](FAQ.md) und
-[`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md).
+Web/Worker/Beat uebernehmen die empfohlenen Werte fuer Worker-Threads,
+Connection-Pools und Speicher-Limits. Danach ist die App unter
+<http://localhost:8000/> erreichbar. Web, Worker, Redis und PostgreSQL
+laufen als getrennte, ressourcenbegrenzte Services.
+Danach: <http://localhost:8000/>. Web, Worker, Redis und PostgreSQL laufen als getrennte, automatisch dimensionierte Services. Render-Free-Simulation ist standardmäßig deaktiviert.
 
 ## Lokal ohne Docker starten
 

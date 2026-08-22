@@ -166,15 +166,26 @@ def health_view(request):
 
 @lru_cache(maxsize=1)
 def _render_manual():
-    source = (settings.BASE_DIR / "MANUAL.md").read_text(encoding="utf-8")
-    return markdown.markdown(
-        source,
-        extensions=["extra", "fenced_code", "tables", "toc", "sane_lists", "codehilite"],
-        extension_configs={
-            "codehilite": {"css_class": "codehilite", "guess_lang": False, "noclasses": False}
-        },
-        output_format="html5",
+    candidates = (
+        settings.BASE_DIR / "docs" / "MANUAL.md",
+        settings.BASE_DIR / "MANUAL.md",
     )
+    for candidate in candidates:
+        if candidate.exists():
+            source = candidate.read_text(encoding="utf-8")
+            return markdown.markdown(
+                source,
+                extensions=["extra", "fenced_code", "tables", "toc", "sane_lists", "codehilite"],
+                extension_configs={
+                    "codehilite": {
+                        "css_class": "codehilite",
+                        "guess_lang": False,
+                        "noclasses": False,
+                    }
+                },
+                output_format="html5",
+            )
+    return "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
 
 
 @require_GET

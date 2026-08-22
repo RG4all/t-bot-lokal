@@ -226,18 +226,28 @@ class Backtesting:
         )
         figure.add_trace(
             go.Scatter(
-                x=indices, y=[float(value) for value in acceleration], name="Beschleunigung"
+                x=indices,
+                y=[float(value) for value in acceleration],
+                name="Beschleunigung (DVA/prev NDA)",
             ),
             row=2,
             col=1,
         )
         figure.add_trace(
-            go.Scatter(x=indices, y=[float(value) for value in deltadelta], name="Deltadelta"),
+            go.Scatter(
+                x=indices,
+                y=[float(value) for value in deltadelta],
+                name="DeltaDelta (Momentum)",
+            ),
             row=2,
             col=1,
         )
         figure.add_trace(
-            go.Scatter(x=indices, y=[float(value) for value in nda], name="NDA"),
+            go.Scatter(
+                x=indices,
+                y=[float(value) for value in nda],
+                name="NDA (% Preisänderung)",
+            ),
             row=2,
             col=1,
         )
