@@ -237,25 +237,38 @@ start_stack() {
 
   docker compose ps || true
 
-  if [[ "${healthy}" -eq 1 ]]; then
-    info "Web ist healthy. App: http://localhost:${WEB_PORT:-8000}/"
-    return 0
+  if [ "${healthy}" -ne 1 ]; then
+    error "Web-Container wurde nicht healthy. Starte Diagnose..."
+    scripts/diagnose_local.sh || true
+    exit 1
   fi
 
-  error "Web-Container wurde nicht healthy. Haeufigste Ursache: POSTGRES_PASSWORD"
-  error "passt nicht zum bereits initialisierten Volume (stale postgres_data)."
-  error ""
-  error "Diagnose-Output:"
-  docker logs --tail 80 t-bot-local-web-1 2>&1 | sed 's/^/  | /' >&2 || true
-  echo "" >&2
-  docker logs --tail 30 t-bot-local-backtest-worker-1 2>&1 | sed 's/^/  | /' >&2 || true
-  echo "" >&2
-  error "Abhilfe (setzt die lokale Datenbank zurueck):"
-  error "  scripts/setup_local.sh --reset-db --yes"
-  error "oder manuell:"
-  error "  docker compose down -v"
-  error "  docker compose --env-file ${ENV_LOCAL} up --build -d"
-  exit 1
+  # Wenn der Container healthy ist, pruefen wir nochmal explizit vom Host aus.
+  # Das unterscheidet "Container laeuft" von "Host kann erreichen".
+  local host_http="000"
+  local port="${WEB_PORT:-8000}"
+  if command -v curl >/dev/null 2>&1; then
+    host_http="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health/" 2>/dev/null || true)"
+    host_http="${host_http:-000}"
+  elif command -v wget >/dev/null 2>&1; then
+    if wget -q -T 5 -O /dev/null "http://127.0.0.1:${port}/health/" 2>/dev/null; then host_http="200"; fi
+  fi
+
+  case "${host_http}" in
+    200|3*)
+      info "Web ist healthy und vom Host erreichbar (HTTP ${host_http})."
+      info "App: http://localhost:${port}/"
+      info "Hinweis: Die Startseite liefert 302 auf /gate/ (Passphrase) oder /login/ - das ist normal."
+      ;;
+    *)
+      error "Web-Container ist healthy, aber vom Host aus nicht erreichbar (HTTP ${host_http})."
+      error "Das ist meistens ein Docker-Desktop-/WSL2-/Firewall-/Proxy-Problem, KEIN App-Fehler."
+      error ""
+      error "Detaillierte Diagnose:"
+      scripts/diagnose_local.sh || true
+      exit 1
+      ;;
+  esac
 }
 
 main() {

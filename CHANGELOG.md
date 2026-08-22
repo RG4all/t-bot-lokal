@@ -4,6 +4,66 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [2.3.0] – 2026-08-22
 
+### Hotfix: Web-Erreichbarkeit nach erfolgreichem Healthcheck
+
+**Forensische Analyse:** Bei `docker compose up` wurden alle Container
+`healthy` (Postgres, Redis, Web, Worker), der Tuner beendete sich mit
+Exit 0, und `docker ps` zeigte `0.0.0.0:8000->8000/tcp`. Trotzdem war
+`http://localhost:8000/` vom Browser nicht erreichbar.
+
+Ausgeschlossen wurden per Code-Review und statischer Analyse:
+- Daphne-Bind-Adresse: `docker-entrypoint.sh` startet mit
+  `daphne -b 0.0.0.0 -p 8000 ...` (nicht 127.0.0.1).
+- Port-Publishing: `docker-compose.yml` enthaelt
+  `ports: ["${WEB_PORT:-8000}:8000"]`; der Worker veroeffentlicht
+  bewusst keinen Host-Port (nur `8000/tcp` expose), kann also nicht
+  kollidieren.
+- ALLOWED_HOSTS: `DEBUG=True` im Compose-Modus setzt automatisch `*`.
+- `/health/`: Liefert `200 OK` ohne DB-/Redis-Abhaengigkeit und ist von
+  `PassphraseGateMiddleware` exempt.
+- Anwendungslogik: Die Startseite `/` liefert absichtlich `302` auf
+  `/gate/` bzw. `/login/`; das ist kein Fehler.
+
+Verbleibende Ursachen liegen ausserhalb des Containers (Host-Netzwerk,
+Proxy, WSL2, Docker-Context, Browser/HSTS). Diese Version fuegt ein
+forensisches Diagnosewerkzeug und erweiterte Doku hinzu, statt an der
+Applikation zu drehen:
+
+- Neues `scripts/diagnose_local.sh` (POSIX/Bash, ShellCheck-sauber):
+  prueft Docker-/Compose-Verfuegbarkeit, Container-Status,
+  Port-Publishing auf dem Host (`docker port`, `ss -ltn`), Daphnes
+  Listen-Socket innerhalb des Containers, `GET /health/` INNERHALB des
+  Containers, `GET /health/` VOM Host, Proxy-/`NO_PROXY`-Einstellungen,
+  WSL2-Erkennung, `ufw`/`firewalld`, aktiven Docker-Context, doppelte
+  `.env`/`.env.local` mit abweichenden `WEB_PORT`, fremde Prozesse auf
+  Port 8000 und gibt einen Exit-Code != 0 bei konkreten Fehlern.
+- `scripts/setup_local.sh` prueft nach dem Hochfahren zusaetzlich per
+  `curl` vom Host aus `http://127.0.0.1:${port}/health/`. Erst dann gibt
+  es die Erfolgsmeldung aus. Schlug der Host-Aufruf fehl, startet es
+  automatisch `scripts/diagnose_local.sh` und beendet mit Exit-Code 1
+  (statt faelschlich "Web ist healthy" zu behaupten).
+  - `--no-up` erfordert kein laufendes Docker mehr und erzeugt nur
+    `.env.local`.
+  - Verhindert einen `curl ... || echo 000`-Bug, bei dem sich
+    Status-Codes zu "000000" verdoppelt haben.
+- Neue `FAQ.md` mit 14 How-To-Eintraegen inkl. vollstaendiger
+  Problem-Matrix (Connection refused, WSL2, Proxy/Firewall, doppelte
+  Konfigurationen, https-vs-http, Port-Konflikte).
+- `README.md` verweist frueh auf `FAQ.md`, `scripts/diagnose_local.sh`
+  und den `curl http://127.0.0.1:8000/health/`-Erreichbarkeitstest.
+- `LOCAL_DEVELOPMENT.md` verweist auf die neue Diagnose und den
+  Passwort-Mismatch-Fall (Volume-Reset mit `--reset-db`).
+
+Testabdeckung:
+- ShellCheck 0.11.0 fehlerfrei fuer alle Shell-Skripte (inkl.
+  `diagnose_local.sh`).
+- `bash tests/run_tests.sh`: 6/6 Test-Dateien, alle gruen.
+- `diagnose_local.sh` laeuft in der Sandbox ohne Docker und liefert die
+  erwarteten FAIL-Meldungen mit Exit-Code 1.
+- `setup_local.sh --no-up` erzeugt `.env.local` mit Mode 0600 ohne Docker.
+- Python-Module `local_hardware.py` und `tune_local_hardware.py`
+  importieren und laufen erfolgreich.
+
 ### Hotfix: Web/Worker-Start-Loop (stale Postgres-Volume)
 
 - **Root Cause:** Das offizielle Postgres-Image liest `POSTGRES_PASSWORD`
