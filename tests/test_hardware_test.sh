@@ -42,8 +42,19 @@ export MOCK_UNAME_M="x86_64"
 detect_cpu
 assert_eq "4"        "${CPU_COUNT}" "CPU-Anzahl erkannt"
 assert_eq "x86_64"   "${CPU_ARCH}"  "CPU-Architektur erkannt"
+assert_eq "amd64"    "${CPU_ARCH_NORMALIZED}" "CPU-Architektur normalisiert (amd64)"
 assert_match "Xeon"  "${CPU_MODEL}" "CPU-Modell geparst"
 assert_eq "2400"     "${CPU_MHZ}"   "CPU-Takt geparst"
+
+# Architektur-Normalisierung fuer verschiedene Plattformen pruefen.
+for arch in aarch64:arm64 armv7l:"arm/v7" ppc64le:ppc64le s390x:s390x riscv64:riscv64; do
+  raw="${arch%%:*}"; want="${arch##*:}"
+  MOCK_UNAME_M="${raw}"
+  detect_cpu
+  assert_eq "${want}" "${CPU_ARCH_NORMALIZED}" "Arch normalisiert: ${raw} -> ${want}"
+done
+MOCK_UNAME_M="x86_64"
+detect_cpu
 
 # ---------------------------------------------------------------------------
 # Test: RAM-Erkennung
@@ -66,6 +77,14 @@ assert_eq "noeviction" "${REDIS_MAXMEMORY_POLICY}" "Redis-Policy ist noeviction"
 # 10% von 4000 MB (4096000 kB / 1024) = 400 MB
 assert_eq "400"      "${REDIS_MAXMEMORY_MB}" "Redis maxmemory = 10% RAM (400 MB)"
 
+# PostgreSQL-Tuning bei 4 GB (4000 MB): shared_buffers ~25% = 1000 -> gedeckelt
+# auf 256 MB, effective_cache_size ~50% = 2000 -> gedeckelt auf 512 MB.
+# work_mem-Schwelle fuer 8 MB liegt bei 4096 MB; 4000 MB -> 4 MB.
+assert_eq "256"      "${POSTGRES_SHARED_BUFFERS_MB}"   "Postgres shared_buffers (4GB)"
+assert_eq "512"      "${POSTGRES_EFFECTIVE_CACHE_MB}"  "Postgres effective_cache (4GB)"
+assert_eq "4"        "${POSTGRES_WORK_MEM_MB}"         "Postgres work_mem (4GB)"
+assert_eq "40"       "${POSTGRES_MAX_CONNECTIONS}"     "Postgres max_connections"
+
 # ---------------------------------------------------------------------------
 # Test: Empfehlungen fuer 16 GB / 8 Kerne
 # ---------------------------------------------------------------------------
@@ -84,6 +103,10 @@ assert_eq "4"        "${REDIS_IO_THREADS}" "Redis io-threads bei 8 Kernen (cap=4
 assert_eq "1024"     "${REDIS_MAXMEMORY_MB}" "Redis maxmemory bei 16GB gedeckelt"
 # Hoehere CPU-Limits
 assert_eq "1.00"     "${WEB_CPUS}" "WEB_CPUS bei 8 Kernen"
+# 16000 MB >= 8192 -> work_mem = 16 MB
+assert_eq "16"       "${POSTGRES_WORK_MEM_MB}" "Postgres work_mem (16GB)"
+assert_eq "256"      "${POSTGRES_SHARED_BUFFERS_MB}" "Postgres shared_buffers (16GB)"
+assert_eq "512"      "${POSTGRES_EFFECTIVE_CACHE_MB}" "Postgres effective_cache (16GB)"
 
 # ---------------------------------------------------------------------------
 # Test: Kleine Maschine (1 GB / 1 Kern)
@@ -124,6 +147,8 @@ assert_file_exists "${ENV_OUT}" "Env-Datei erzeugt"
 if grep -q "^REDIS_MAXMEMORY_MB=" "${ENV_OUT}"; then pass "ENV enthaelt REDIS_MAXMEMORY_MB"; else fail "ENV: REDIS_MAXMEMORY_MB fehlt"; fi
 if grep -q "^BOT_DB_WORKERS="     "${ENV_OUT}"; then pass "ENV enthaelt BOT_DB_WORKERS";     else fail "ENV: BOT_DB_WORKERS fehlt"; fi
 if grep -q "^CELERY_WORKER_MAX_MEMORY_PER_CHILD=" "${ENV_OUT}"; then pass "ENV enthaelt CELERY_WORKER_MAX_MEMORY_PER_CHILD"; else fail "ENV: CELERY_... fehlt"; fi
+if grep -q "^POSTGRES_SHARED_BUFFERS_MB=" "${ENV_OUT}"; then pass "ENV enthaelt POSTGRES_SHARED_BUFFERS_MB"; else fail "ENV: POSTGRES_SHARED_BUFFERS_MB fehlt"; fi
+if grep -q "^CPU_ARCH=" "${ENV_OUT}"; then pass "ENV enthaelt CPU_ARCH"; else fail "ENV: CPU_ARCH fehlt"; fi
 
 # Jede Zeile sollte ein Kommentar, KEY=VALUE oder leer sein.
 bad_lines="$(grep -vE '^(#.*|[A-Z0-9_]+=.*|)$' "${ENV_OUT}" || true)"

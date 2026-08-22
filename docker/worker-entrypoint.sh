@@ -4,7 +4,18 @@ set -eu
 # shellcheck source=docker/load-tuning.sh
 . /app/docker/load-tuning.sh
 
-python manage.py wait_for_database
+log() { echo "[worker-entrypoint] $*" >&2; }
+
+log "Warte auf Datenbank..."
+python manage.py wait_for_database || {
+  log "FEHLER: Datenbank ist nicht erreichbar. Siehe Web-Container-Logs fuer Details."
+  log "  docker compose logs web"
+  log "Abhilfe (loescht die lokale Datenbank):"
+  log "  docker compose down -v && docker compose up --build -d"
+  exit 1
+}
+
+log "Starte Celery-Worker (queue=backtest, concurrency=1)..."
 exec celery -A trading_bot_project worker \
   -Q backtest \
   --loglevel="${CELERY_LOG_LEVEL:-INFO}" \

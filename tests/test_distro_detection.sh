@@ -3,7 +3,7 @@
 # tests/test_distro_detection.sh
 #
 # Testet die Distro-Erkennung von install.sh mit verschiedenen /etc/os-release
-# Fixtures (Debian, Ubuntu, Arch, Fedora, Rocky, Amazon Linux).
+# Fixtures (Debian, Ubuntu, Arch, Fedora, Rocky, Amazon Linux, Alpine, openSUSE).
 # ============================================================================
 set -u
 
@@ -57,6 +57,16 @@ assert_eq "amzn" "${DISTRO_ID}" "Amazon Linux 2023: ID"
 case "${PKG_MANAGER}" in
   dnf|yum) pass "Amazon Linux: Paketmanager ist dnf oder yum (${PKG_MANAGER})" ;;
   *) fail "Amazon Linux: unerwarteter Paketmanager '${PKG_MANAGER}'" ;;
+esac
+
+# Alpine -> apk
+run_detection_case "${FIXTURES}/alpine" "alpine" "apk" "Alpine 3.20"
+
+# openSUSE Tumbleweed (ID_LIKE=opensuse suse) -> zypper
+detect_distro "${FIXTURES}/opensuse"
+case "${PKG_MANAGER}" in
+  zypper) pass "openSUSE Tumbleweed: Paketmanager zypper" ;;
+  *) fail "openSUSE Tumbleweed: unerwarteter Paketmanager '${PKG_MANAGER}'" ;;
 esac
 
 # Edge-Case: nicht vorhandene os-release-Datei auf einem Linux-System soll

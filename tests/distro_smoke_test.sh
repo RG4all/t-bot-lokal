@@ -2,9 +2,10 @@
 # ============================================================================
 # tests/distro_smoke_test.sh
 #
-# Baut je ein minimales Docker-Image auf Debian, Arch und Fedora und fuehrt
-# darin install.sh im Container-Modus aus. Stellt sicher, dass die
-# Distro-Erkennung und Paketinstallation auf allen drei Familien funktioniert.
+# Baut je ein minimales Docker-Image auf Debian, Arch, Fedora, Alpine und
+# openSUSE und fuehrt darin install.sh im Container-Modus aus. Stellt sicher,
+# dass die Distro-Erkennung und Paketinstallation auf allen Paketmanager-
+# Familien (apt/pacman/dnf/apk/zypper) funktioniert.
 #
 # Benoetigt installiertes `docker` und wird ueblicherweise in CI ausgefuehrt.
 # Wird ohne Docker mit Exit-Code 0 (skipped) beendet, damit die Test-Suite
@@ -49,6 +50,8 @@ failures=0
 run_case "debian:bookworm-slim" "debian"  || failures=$((failures+1))
 run_case "archlinux:latest"     "arch"    || failures=$((failures+1))
 run_case "fedora:40"            "fedora"  || failures=$((failures+1))
+run_case "alpine:3.20"          "alpine"  || failures=$((failures+1))
+run_case "opensuse/tumbleweed"  "opensuse" || failures=$((failures+1))
 
 if (( failures > 0 )); then
   echo "${failures} Distro-Smoke-Test(s) fehlgeschlagen."

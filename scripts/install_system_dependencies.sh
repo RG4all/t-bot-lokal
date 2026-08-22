@@ -44,6 +44,7 @@ source_os_release() {
     source /etc/os-release
   else
     ID=unknown
+    # shellcheck disable=SC2034
     ID_LIKE=""
   fi
 }

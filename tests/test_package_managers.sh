@@ -77,10 +77,33 @@ yum_log="$(cat "${MOCK_PM_LOG}")"
 assert_contains "${yum_log}" "yum -y makecache"       "yum: makecache geloggt"
 assert_contains "${yum_log}" "yum -y install"         "yum: install geloggt"
 
+: > "${MOCK_PM_LOG}"
+
+# ---------- zypper ----------
+PKG_MANAGER="zypper"; DISTRO_ID="opensuse"
+pm_update "zypper"
+pm_install "zypper" redis
+zypper_log="$(cat "${MOCK_PM_LOG}")"
+assert_contains "${zypper_log}" "zypper"              "zypper: aufgerufen"
+assert_contains "${zypper_log}" "refresh"             "zypper: refresh geloggt"
+assert_contains "${zypper_log}" "install"             "zypper: install geloggt"
+assert_contains "${zypper_log}" "redis"               "zypper: redis enthaelt"
+
+: > "${MOCK_PM_LOG}"
+
+# ---------- apk ----------
+PKG_MANAGER="apk"; DISTRO_ID="alpine"
+pm_update "apk"
+pm_install "apk" redis
+apk_log="$(cat "${MOCK_PM_LOG}")"
+assert_contains "${apk_log}" "apk update"             "apk: update geloggt"
+assert_contains "${apk_log}" "apk add"                "apk: add geloggt"
+assert_contains "${apk_log}" "redis"                  "apk: redis enthaelt"
+
 # ---------- package_list Vollstaendigkeit ----------
 # Fuer jedes Profil und jeden Paketmanager muss mindestens redis UND python
 # (Host) bzw. die Laufzeit-Bibliotheken (Container) enthalten sein.
-for pm in apt pacman dnf yum; do
+for pm in apt pacman dnf yum zypper apk; do
   full_pkgs="$(package_list "${pm}" "full")"
   rt_pkgs="$(package_list "${pm}" "runtime")"
 
@@ -100,11 +123,21 @@ for pm in apt pacman dnf yum; do
       assert_contains "${full_pkgs}"    "python3"   "package_list(${pm}, full): python3"
       assert_contains "${rt_pkgs}" "pango"     "package_list(${pm}, runtime): pango"
       ;;
+    zypper)
+      assert_contains "${full_pkgs}"    "redis"     "package_list(${pm}, full): redis"
+      assert_contains "${full_pkgs}"    "python3"   "package_list(${pm}, full): python3"
+      assert_contains "${rt_pkgs}" "libpango-1_0-0" "package_list(${pm}, runtime): pango"
+      ;;
+    apk)
+      assert_contains "${full_pkgs}"    "redis"     "package_list(${pm}, full): redis"
+      assert_contains "${full_pkgs}"    "python3"   "package_list(${pm}, full): python3"
+      assert_contains "${rt_pkgs}" "pango"     "package_list(${pm}, runtime): pango"
+      ;;
   esac
 
   # Runtime darf keine Build-Tools enthalten.
   if [[ "${rt_pkgs}" == *"build-essential"* || "${rt_pkgs}" == *"base-devel"*
-        || "${rt_pkgs}" == *"gcc"* ]]; then
+        || "${rt_pkgs}" == *"build-base"* || "${rt_pkgs}" == *"gcc"* ]]; then
     fail "package_list(${pm}, runtime): sollte keine Build-Tools enthalten"
   else
     pass "package_list(${pm}, runtime): keine Build-Tools"

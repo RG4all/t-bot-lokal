@@ -1,103 +1,288 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+# ============================================================================
+# scripts/setup_local.sh - Ein-Schritt-Setup fuer die lokale t-bot-Umgebung
+#
+# Was das Skript macht:
+#   1. Prueft, ob Docker/Compose verfuegbar ist, und bietet optional die
+#      Installation ueber install.sh an (--install-deps).
+#   2. Fuehrt hardware-test.sh aus, um .env.local mit optimierten Werten
+#      fuer Redis, PostgreSQL und die Compose-CPU-Limits zu erzeugen.
+#      Bereits vorhandene Secrets (SECRET_KEY, PASSPHRASE, POSTGRES_PASSWORD)
+#      bleiben beim Retuning erhalten.
+#   3. Legt beim ersten Lauf .env.local an (Mode 0600), schreibt aber nie
+#      hartcodierte Credentials.
+#   4. Baut die Images und startet den isolierten Stack mit
+#      `docker compose up --build -d`.
+#
+# Nutzung:
+#   scripts/setup_local.sh                       # Setup + Start
+#   scripts/setup_local.sh --install-deps        # vorher auch Systempakete/Docker
+#   scripts/setup_local.sh --no-up               # nur .env.local erzeugen, nicht starten
+#   scripts/setup_local.sh --render-free-simulation
+#   scripts/setup_local.sh --reset-db            # bestehendes Postgres-Volume
+#                                                # zuruecksetzen (Password-Mismatch)
+#   scripts/setup_local.sh --reset-db --yes      # ohne interaktive Nachfrage
+# ============================================================================
 
-ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-cd "$ROOT_DIR"
+set -euo pipefail
 
-print_command() {
-  printf '+ '
-  printf '%q ' "$@"
-  printf '\n'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+ENV_LOCAL="${ENV_LOCAL:-.env.local}"
+TUNING_ENV="${TUNING_ENV:-config/hardware.env}"
+INSTALL_DEPS=0
+DO_UP=1
+RENDER_FREE=0
+RESET_DB=0
+FORCE_RESET_DB=0
+
+# ANSI-Farben
+if [[ -t 1 ]]; then
+  C_RED=$'\033[0;31m'; C_GREEN=$'\033[0;32m'; C_YELLOW=$'\033[0;33m'
+  C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BOLD=""; C_RESET=""
+fi
+
+info()  { printf '%s[setup]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*" >&2; }
+warn()  { printf '%s[setup]%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*" >&2; }
+error() { printf '%s[setup]%s %s\n' "${C_RED}"  "${C_RESET}" "$*" >&2; }
+die()   { error "$*"; exit 1; }
+
+usage() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
 }
 
-INSTALL_DEPS=0
-NO_START=0
-RENDER_SIM=0
-WITH_SCHEDULER=0
-DRY_RUN=0
-ENV_FILE=.env.local
-for arg in "$@"; do
-  case "$arg" in
-    --install-deps) INSTALL_DEPS=1 ;;
-    --no-start) NO_START=1 ;;
-    --render-free-simulation) RENDER_SIM=1 ;;
-    --with-scheduler) WITH_SCHEDULER=1 ;;
-    --dry-run) DRY_RUN=1 ;;
-    --env-file=*) ENV_FILE=${arg#*=} ;;
-    -h|--help)
-      cat <<'EOF'
-Usage: scripts/setup_local.sh [options]
-  --install-deps              Force distro package installation
-  --no-start                  Tune and build only
-  --render-free-simulation    Explicitly cap web to 0.1 CPU (off by default)
-  --with-scheduler            Start optional Celery Beat profile
-  --dry-run                   Print install/build/start plan without executing Docker
-  --env-file=PATH             Generated env file (default .env.local)
-EOF
-      exit 0 ;;
-    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
-  esac
-done
+parse_args() {
+  for arg in "$@"; do
+    case "${arg}" in
+      --install-deps) INSTALL_DEPS=1 ;;
+      --no-up)        DO_UP=0 ;;
+      --render-free-simulation|--render-simulation) RENDER_FREE=1 ;;
+      --reset-db)     RESET_DB=1 ;;
+      --yes|-y)       FORCE_RESET_DB=1 ;;
+      -h|--help)      usage ;;
+      *) die "Unbekannte Option: ${arg}" ;;
+    esac
+  done
+}
 
-if [[ $DRY_RUN -eq 0 ]]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    INSTALL_DEPS=1
-  elif ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
-    INSTALL_DEPS=1
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# 1. Docker/Compose pruefen (optional installieren)
+# ---------------------------------------------------------------------------
+check_docker() {
+  if have docker && docker compose version >/dev/null 2>&1; then
+    info "Docker und Compose v2 verfuegbar."
+    return 0
   fi
-fi
-if [[ $INSTALL_DEPS -eq 1 ]]; then
-  INSTALL_ARGS=()
-  [[ $DRY_RUN -eq 1 ]] && INSTALL_ARGS+=(--dry-run)
-  "$ROOT_DIR/scripts/install_system_dependencies.sh" "${INSTALL_ARGS[@]}"
-fi
 
-if [[ $DRY_RUN -eq 1 ]]; then
-  COMPOSE=(docker compose)
-elif ! command -v docker >/dev/null 2>&1; then
-  echo "Docker was installed but is not available in this shell. Re-login if the docker group changed." >&2
-  exit 1
-elif docker compose version >/dev/null 2>&1; then
-  COMPOSE=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE=(docker-compose)
-else
-  echo "Docker Compose v2 is required." >&2
-  exit 1
-fi
+  if [[ "${INSTALL_DEPS}" -eq 1 ]]; then
+    warn "Docker/Compose nicht gefunden - starte install.sh (Host-Modus)..."
+    ./install.sh --mode=host --profile=full --yes
+    have docker || die "Docker war nach der Installation nicht im PATH. Bitte neu einloggen."
+  else
+    cat >&2 <<EOF
+${C_BOLD}Docker Engine mit Compose v2 wird benoetigt.${C_RESET}
+- Docker Desktop: https://docs.docker.com/desktop/
+- Linux: https://docs.docker.com/engine/install/
+Alternativ:
+  scripts/setup_local.sh --install-deps   (versucht Systempakete zu installieren)
+EOF
+    exit 1
+  fi
+}
 
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64|amd64) export DOCKER_DEFAULT_PLATFORM=linux/amd64 ;;
-  aarch64|arm64) export DOCKER_DEFAULT_PLATFORM=linux/arm64 ;;
-  armv7l|armv7) export DOCKER_DEFAULT_PLATFORM=linux/arm/v7 ;;
-  ppc64le) export DOCKER_DEFAULT_PLATFORM=linux/ppc64le ;;
-  s390x) export DOCKER_DEFAULT_PLATFORM=linux/s390x ;;
-  *) echo "Unsupported container architecture: $ARCH" >&2; exit 1 ;;
-esac
+# ---------------------------------------------------------------------------
+# 2. Hardware-Analyse durchfuehren
+# ---------------------------------------------------------------------------
+run_hardware_test() {
+  info "Starte Hardware-Analyse -> ${TUNING_ENV}"
+  mkdir -p "$(dirname "${TUNING_ENV}")"
+  ./hardware-test.sh --env-out="${TUNING_ENV}" --format=text >&2
+}
 
-TUNER_ARGS=(--output "$ENV_FILE")
-[[ $RENDER_SIM -eq 1 ]] && TUNER_ARGS+=(--render-free-simulation)
-[[ $DRY_RUN -eq 1 ]] && TUNER_ARGS+=(--print-only)
-python3 scripts/tune_local_hardware.py "${TUNER_ARGS[@]}"
+# ---------------------------------------------------------------------------
+# 3. .env.local zusammenbauen (Secrets werden beibehalten)
+# ---------------------------------------------------------------------------
+read_existing_secret() {
+  local key="$1"
+  [[ -f "${ENV_LOCAL}" ]] || return 0
+  local val
+  val="$(grep -E "^${key}=" "${ENV_LOCAL}" | head -1 | cut -d= -f2- || true)"
+  if [[ -n "${val}" ]]; then
+    printf '%s' "${val}"
+  fi
+}
 
-echo "Building native image for $DOCKER_DEFAULT_PLATFORM with profile $ENV_FILE"
-if [[ $DRY_RUN -eq 1 ]]; then
-  print_command "${COMPOSE[@]}" --env-file "$ENV_FILE" build --pull
-  if [[ $WITH_SCHEDULER -eq 1 ]]; then PROFILE_ARGS=(--profile scheduler); else PROFILE_ARGS=(); fi
-  print_command "${COMPOSE[@]}" --env-file "$ENV_FILE" "${PROFILE_ARGS[@]}" up -d
-  printf 'Dry-run complete; Render-Free simulation=%s.\n' "$RENDER_SIM"
-  exit 0
-fi
-"${COMPOSE[@]}" --env-file "$ENV_FILE" build --pull
-if [[ $NO_START -eq 1 ]]; then
-  echo "Build complete. Start with: ${COMPOSE[*]} --env-file $ENV_FILE up -d"
-  exit 0
-fi
+random_secret() {
+  head -c 48 /dev/urandom 2>/dev/null | base64 | tr -d '/+=' | head -c 48
+}
 
-UP_ARGS=(up -d)
-[[ $WITH_SCHEDULER -eq 1 ]] && UP_ARGS=(--profile scheduler up -d)
-"${COMPOSE[@]}" --env-file "$ENV_FILE" "${UP_ARGS[@]}"
-"${COMPOSE[@]}" --env-file "$ENV_FILE" ps
+write_env_local() {
+  local secret_key passphrase pg_password web_port
+  secret_key="$(read_existing_secret SECRET_KEY)"
+  passphrase="$(read_existing_secret PASSPHRASE)"
+  pg_password="$(read_existing_secret POSTGRES_PASSWORD)"
+  web_port="$(read_existing_secret WEB_PORT)"
 
-echo "t-bot local stack is starting at http://localhost:$(grep '^WEB_PORT=' "$ENV_FILE" | cut -d= -f2-)"
+  [[ -z "${secret_key}" ]]  && secret_key="$(random_secret)"
+  [[ -z "${passphrase}" ]]   && passphrase="local-t-bot"
+  # Ein festes, nur-lokal Default-Passwort verhindert Password-Mismatches
+  # gegenueber frueheren Compose-Laeufen mit demselben Default. Wer ein
+  # individuelles Passwort moechte, kann es vor dem ersten Lauf in .env.local
+  # setzen oder dieses Skript mit --reset-db neu initialisieren.
+  [[ -z "${pg_password}" ]]  && pg_password="tbot-local-password"
+  [[ -z "${web_port}" ]]     && web_port="8000"
+
+  info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."
+  umask 077
+  {
+    echo "# ============================================================================"
+    echo "# t-bot-lokal .env.local - automatisch erzeugt von setup_local.sh"
+    echo "# Nicht committen. Bereits vorhandene Werte fuer SECRET_KEY, PASSPHRASE und"
+    echo "# POSTGRES_PASSWORD wurden beim Retuning beibehalten."
+    echo "# ============================================================================"
+    echo ""
+    echo "SECRET_KEY=${secret_key}"
+    echo "PASSPHRASE=${passphrase}"
+    echo "PASSPHRASE_GATE_ENABLED=True"
+    echo "AUTOSTART_BOTS=True"
+    echo ""
+    echo "POSTGRES_DB=tbot"
+    echo "POSTGRES_USER=tbot"
+    echo "POSTGRES_PASSWORD=${pg_password}"
+    echo "WEB_PORT=${web_port}"
+    echo ""
+    echo "# --- Hardware-Tuning (Quelle: ${TUNING_ENV}) ---"
+    if [[ -f "${TUNING_ENV}" ]]; then
+      grep -vE '^(#|$)' "${TUNING_ENV}"
+    fi
+    echo ""
+    echo "# --- Render-Free-Simulation (default aus) ---"
+    if [[ "${RENDER_FREE}" -eq 1 ]]; then
+      echo "RENDER=True"
+      echo "RENDER_SIMULATION=True"
+      echo "WEB_CPUS=0.10"
+    else
+      echo "RENDER=False"
+      echo "RENDER_SIMULATION=False"
+    fi
+  } > "${ENV_LOCAL}"
+  chmod 0600 "${ENV_LOCAL}"
+  info "${ENV_LOCAL} geschrieben."
+}
+
+# ---------------------------------------------------------------------------
+# 4. Ggf. altes Postgres-Volume zuruecksetzen
+# ---------------------------------------------------------------------------
+# Wenn ein frueherer Lauf bereits das Postgres-Volume initialisiert hat
+# (z.B. mit dem Default-Passwort aus .env.docker.example oder mit einem
+# aelteren, anderen POSTGRES_PASSWORD), akzeptiert der Server das neue
+# Passwort aus .env.local nicht (Postgres liest POSTGRES_PASSWORD nur beim
+# ersten Initialisieren eines leeren Datenverzeichnisses). Dann schlagen
+# wait_for_database/Migrationen fehl und Web/Worker crashen in einer
+# Restart-Schleife ("health: starting"). Diese Funktion erkennt die
+# Situation und setzt das Volume nach expliziter Bestaetigung zurueck.
+reset_db_if_needed() {
+  [[ "${RESET_DB}" -eq 1 ]] || return 0
+
+  if [[ "${FORCE_RESET_DB}" -ne 1 ]] && [[ -t 0 ]]; then
+    warn "Das wird das lokale Postgres-Volume (t-bot-local_postgres_data)"
+    warn "und ALLE lokalen Datenbankinhalte unwiderruflich loeschen."
+    printf '%s[setup]%s Wirklich fortfahren? [j/N] ' "${C_YELLOW}" "${C_RESET}" >&2
+    read -r answer
+    case "${answer}" in
+      j|J|y|Y|yes|YES) ;;
+      *) die "Abgebrochen." ;;
+    esac
+  fi
+
+  info "Stoppe Stack und entferne Postgres-Volume..."
+  docker compose --env-file "${ENV_LOCAL}" rm -sf postgres 2>/dev/null || true
+  docker volume rm -f t-bot-local_postgres_data 2>/dev/null || \
+    docker volume rm -f tbotlocal_postgres_data 2>/dev/null || true
+  info "Postgres-Volume zurueckgesetzt."
+}
+
+# ---------------------------------------------------------------------------
+# 5. Stack starten und auf Web-Health warten
+# ---------------------------------------------------------------------------
+start_stack() {
+  [[ "${DO_UP}" -eq 1 ]] || { info "--no-up gesetzt - Stack wird nicht gestartet."; return 0; }
+
+  # Compose liest .env automatisch; .env.local muss explizit eingebunden werden.
+  info "Lade ${ENV_LOCAL} und starte 'docker compose up --build -d'..."
+  set -a
+  # shellcheck source=/dev/null
+  . "./${ENV_LOCAL}"
+  set +a
+  docker compose --env-file "${ENV_LOCAL}" up --build -d
+
+  info "Warte bis zu 90 Sekunden auf Web-Health..."
+  local healthy=0
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+    if docker inspect --format '{{.State.Health.Status}}' t-bot-local-web-1 2>/dev/null | grep -q '^healthy$'; then
+      healthy=1; break
+    fi
+    sleep 5
+  done
+  # attempt nur fuer die Schleife benoetigt; Shellcheck-Zufriedenheit:
+  : "${attempt:-1}"
+
+  docker compose ps || true
+
+  if [ "${healthy}" -ne 1 ]; then
+    error "Web-Container wurde nicht healthy. Starte Diagnose..."
+    scripts/diagnose_local.sh || true
+    exit 1
+  fi
+
+  # Wenn der Container healthy ist, pruefen wir nochmal explizit vom Host aus.
+  # Das unterscheidet "Container laeuft" von "Host kann erreichen".
+  local host_http="000"
+  local port="${WEB_PORT:-8000}"
+  if command -v curl >/dev/null 2>&1; then
+    host_http="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health/" 2>/dev/null || true)"
+    host_http="${host_http:-000}"
+  elif command -v wget >/dev/null 2>&1; then
+    if wget -q -T 5 -O /dev/null "http://127.0.0.1:${port}/health/" 2>/dev/null; then host_http="200"; fi
+  fi
+
+  case "${host_http}" in
+    200|3*)
+      info "Web ist healthy und vom Host erreichbar (HTTP ${host_http})."
+      info "App: http://localhost:${port}/"
+      info "Hinweis: Die Startseite liefert 302 auf /gate/ (Passphrase) oder /login/ - das ist normal."
+      ;;
+    *)
+      error "Web-Container ist healthy, aber vom Host aus nicht erreichbar (HTTP ${host_http})."
+      error "Das ist meistens ein Docker-Desktop-/WSL2-/Firewall-/Proxy-Problem, KEIN App-Fehler."
+      error ""
+      error "Detaillierte Diagnose:"
+      scripts/diagnose_local.sh || true
+      exit 1
+      ;;
+  esac
+}
+
+main() {
+  parse_args "$@"
+  # --no-up erzeugt nur .env.local und benoetigt kein laufendes Docker.
+  if [[ "${DO_UP}" -eq 1 ]]; then
+    check_docker
+  else
+    info "Docker-Check uebersprungen (--no-up)."
+  fi
+  run_hardware_test
+  write_env_local
+  reset_db_if_needed
+  start_stack
+}
+
+main "$@"

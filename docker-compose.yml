@@ -12,8 +12,6 @@ x-app-environment: &app-environment
   BACKTEST_LOCAL_FALLBACK_ENABLED: "True"
   AUTOSTART_BOTS: ${AUTOSTART_BOTS:-True}
   CELERY_WORKER_MAX_MEMORY_PER_CHILD: "384000"
-  BACKTEST_DEFAULT_PRICE_POINTS: ${BACKTEST_DEFAULT_PRICE_POINTS:-5000}
-  DATA_LOG_WRITE_INTERVAL_SECONDS: ${DATA_LOG_WRITE_INTERVAL_SECONDS:-5}
 
 # Gemeinsam genutzter Ordner fuer die vom `tuner`-Container generierte
 # Hardware-Optimierungsdatei. Wird von allen App-Containern gemountet.
@@ -40,26 +38,29 @@ services:
 
   postgres:
     image: postgres:17-alpine
-    command:
-      - postgres
-      - -c
-      - max_connections=40
-      - -c
-      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
-      - -c
-      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-384MB}
+    # Der Custom-Entrypoint liest /tbot-runtime/tuning.env und uebergibt die
+    # automatisch berechneten Werte (max_connections, shared_buffers,
+    # effective_cache_size, work_mem) als postgres -c Argumente.
+    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-entrypoint.sh"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tbot}
       POSTGRES_USER: ${POSTGRES_USER:-tbot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tbot-local-password}
+      # Override in .env moeglich; werden vom Tuner sonst ueberschrieben.
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-40}
+      POSTGRES_SHARED_BUFFERS_MB: ${POSTGRES_SHARED_BUFFERS_MB:-32}
+      POSTGRES_EFFECTIVE_CACHE_MB: ${POSTGRES_EFFECTIVE_CACHE_MB:-128}
+      POSTGRES_WORK_MEM_MB: ${POSTGRES_WORK_MEM_MB:-4}
     volumes:
+      - ./docker/postgres-entrypoint.sh:/usr/local/bin/postgres-entrypoint.sh:ro
       - postgres_data:/var/lib/postgresql/data
+      - tuning_runtime:/tbot-runtime:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tbot} -d ${POSTGRES_DB:-tbot}"]
       interval: 3s
       timeout: 3s
       retries: 20
-    mem_limit: ${POSTGRES_MEMORY:-512m}
+    mem_limit: ${POSTGRES_MEMORY:-256m}
     cpus: "${POSTGRES_CPUS:-0.50}"
     restart: unless-stopped
     depends_on:
@@ -72,16 +73,17 @@ services:
     # redis-server mit den automatisch berechneten Werten fuer maxmemory,
     # maxmemory-policy und io-threads.
     entrypoint: ["/bin/sh", "/usr/local/bin/redis-entrypoint.sh"]
+    environment:
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-48mb}
     volumes:
       - ./docker/redis-entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
       - tuning_runtime:/tbot-runtime:ro
-    command: redis-server --save "" --appendonly no --maxmemory ${REDIS_MAXMEMORY:-96mb} --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
       timeout: 3s
       retries: 20
-    mem_limit: ${REDIS_MEMORY:-128m}
+    mem_limit: ${REDIS_MEMORY:-96m}
     cpus: "${REDIS_CPUS:-0.20}"
     restart: unless-stopped
     depends_on:
@@ -108,9 +110,11 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/', timeout=2)"]
       interval: 5s
-      timeout: 3s
-      retries: 20
-    mem_limit: ${WEB_MEMORY:-1024m}
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+      start_interval: 2s
+    mem_limit: 512m
     cpus: "${WEB_CPUS:-0.50}"
     restart: unless-stopped
 
@@ -135,12 +139,14 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A trading_bot_project inspect ping -d celery@$$HOSTNAME --timeout 3 | grep -q pong",
+          "celery -A trading_bot_project inspect ping -d celery@$$(hostname) --timeout 5 | grep -q pong",
         ]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 12
-    mem_limit: ${WORKER_MEMORY:-768m}
+      start_period: 45s
+      start_interval: 5s
+    mem_limit: 512m
     cpus: "${WORKER_CPUS:-0.50}"
     pids_limit: 64
     restart: unless-stopped
@@ -163,7 +169,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    mem_limit: ${SCHEDULER_MEMORY:-192m}
+    mem_limit: 192m
     cpus: "${SCHEDULER_CPUS:-0.20}"
     restart: unless-stopped
 

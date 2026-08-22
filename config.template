@@ -47,6 +47,26 @@ WEB_CONCURRENCY=2
 REDIS_MAXMEMORY_MB=128
 REDIS_MAXMEMORY_POLICY=noeviction
 REDIS_IO_THREADS=1
+# Compose-Memory-Limit fuer den Redis-Container.
+REDIS_MEMORY=96m
+# Alternativer Override in der dem Entrypoint gewohnten Form (z.B. "96mb").
+# REDIS_MAXMEMORY=48mb
+
+# ----------------------------------------------------------------------------
+# PostgreSQL-Tuning (durch hardware-test.sh gesetzt)
+# ----------------------------------------------------------------------------
+POSTGRES_MAX_CONNECTIONS=40
+POSTGRES_SHARED_BUFFERS_MB=32
+POSTGRES_EFFECTIVE_CACHE_MB=128
+POSTGRES_WORK_MEM_MB=4
+# Compose-Memory-Limit fuer den Postgres-Container.
+POSTGRES_MEMORY=256m
+
+# ----------------------------------------------------------------------------
+# CPU-Architektur (wird von hardware-test.sh normalisiert)
+# ----------------------------------------------------------------------------
+CPU_ARCH=amd64
+CPU_HASHRATE_MBPS=0
 
 # ----------------------------------------------------------------------------
 # Celery / Worker

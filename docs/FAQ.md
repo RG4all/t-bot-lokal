@@ -1,0 +1,255 @@
+# FAQ / How-Tos - t-bot-lokal
+
+Antworten auf haeufige Fragen und Schritt-fuer-Schritt-Anleitungen fuer
+Betrieb, Diagnose und Troubleshooting des lokalen Docker-Stacks.
+
+> Kurzform fuer Ungeduldige:
+> ```bash
+> git pull
+> scripts/setup_local.sh --reset-db --yes
+> scripts/diagnose_local.sh
+> curl -i http://127.0.0.1:8000/health/
+> ```
+
+---
+
+## 1. Wie starte ich den Stack?
+
+```bash
+# 1. Empfohlen: Ein-Schritt-Setup (erkennt Hardware, schreibt .env.local, startet Stack)
+scripts/setup_local.sh
+
+# 2. Mit Installation von Docker/Systemabhaengigkeiten (frisches Linux):
+scripts/setup_local.sh --install-deps
+
+# 3. Manuell:
+cp .env.docker.example .env       # PASSPHRASE/SECRET_KEY/POSTGRES_PASSWORD anpassen
+docker compose up --build -d
+```
+
+Danach oeffnen: **<http://localhost:8000/>** (http, nicht https).
+
+## 2. Welche Container laufen sollen?
+
+```bash
+docker compose ps
+```
+
+Erwartet:
+
+| Service | Status | Ports |
+|---|---|---|
+| `tuner` | `Exited (0)` | (kurzlebig; schreibt tuning.env) |
+| `postgres` | `Up (healthy)` | 5432/tcp (nur intern) |
+| `redis` | `Up (healthy)` | 6379/tcp (nur intern) |
+| `web` | `Up (healthy)` | 0.0.0.0:8000->8000/tcp |
+| `backtest-worker` | `Up (healthy)` | (nur intern) |
+| `scheduler` | nur mit Profil `scheduler` | (nur intern) |
+
+Dass `tuner` im Status `Exited` steht, ist **erwuenscht** (One-Shot-Container).
+
+## 3. Warum sehe ich nur einen 302-Redirect auf `/gate/` oder `/login/`?
+
+Das ist **normal und kein Fehler**:
+
+- `PassphraseGateMiddleware` schuetzt alle Endpunkte ausser `/health/`,
+  `/gate/`, `/static/*`.
+- `GET /` liefert `302 Found` mit `Location: /gate/?next=/` (Passphrase-Abfrage).
+- Nach Eingabe der Passphrase (Default `local-t-bot`, bzw. Wert aus `.env`)
+  folgt ein weiterer Redirect auf `/login/`.
+- Nach Registrierung/Login das Dashboard unter `/dashboard/`.
+
+Test:
+
+```bash
+curl -i http://localhost:8000/          # -> 302, Location: /gate/?next=/
+curl -i http://localhost:8000/health/   # -> 200 OK, JSON {"status":"ok"}
+curl -i http://localhost:8000/gate/     # -> 200 HTML-Formular
+```
+
+## 4. `http://localhost:8000` antwortet nicht - Container sind aber healthy
+
+Sofort-Checks:
+
+```bash
+scripts/diagnose_local.sh                       # automatische forensische Diagnose
+curl -i http://127.0.0.1:8000/health/            # bevorzugt IP statt Namen verwenden
+docker compose logs --tail 100 web
+docker compose exec web python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/health/', timeout=3).read())"
+```
+
+Haeufige Ursachen und Abhilfen:
+
+| Symptom | Ursache | Abhilfe |
+|---|---|---|
+| `Connection refused` auf `localhost:8000`, Container aber `healthy` | Docker-Desktop/Engine fuerwartet den Port nicht auf den Host (WSL2, Remote-Docker, VPN, anderer Context) | `scripts/diagnose_local.sh` prueft das. Docker-Context mit `docker context use default` zuruecksetzen. |
+| Browser "connection reset" / "nicht sicher" | Statt `http://` wurde `https://` aufgerufen | Explizit `http://127.0.0.1:8000/` aufrufen; HSTS fuer localhost im Browser loeschen. |
+| curl geht, Browser nicht | HTTP-Proxy / `HTTP_PROXY`-Variable | `localhost,127.0.0.1` in `NO_PROXY` aufnehmen. |
+| Port 8000 bereits belegt | Zweiter Server/anderes Compose-Projekt | `WEB_PORT=8001 docker compose up -d` oder `ss -ltnp \| grep 8000`. |
+| Linux-Host mit `ufw`/`firewalld` aktiv | Firewall blockiert 8000/tcp auf dem Host | `sudo ufw allow 8000/tcp` bzw. `firewall-cmd --add-port=8000/tcp`. |
+| Remote-Server / VM | Dienst lauscht zwar im Container, aber nicht auf der oeffentlichen IP des Hosts | `http://<server-ip>:8000/`; zusaetzlich `WEB_CPUS`/`WEB_PORT` in `.env.local` anpassen. |
+| Docker Desktop WSL2-Integration | Ports werden nicht zu Windows weitergereicht | Docker Desktop -> Settings -> Resources -> WSL Integration fuer die Distro aktivieren; ggf. WSL-Distro neu starten. |
+
+## 5. Container starten, werden aber nicht healthy (Restart-Loop)
+
+```bash
+docker compose logs -f web
+```
+
+Haeufigster Fall: **Postgres-Passwort-Mismatch** (Volume wurde mit einem
+anderen Passwort initialisiert). Symptom in den Logs:
+
+```
+password authentication failed for user "tbot"
+FATAL: password authentication failed for user "tbot"
+```
+
+Ursache: Das offizielle Postgres-Image liest `POSTGRES_PASSWORD` nur beim
+**ersten** Initialisieren eines leeren Datenverzeichnisses. Ein spaeteres
+Aendern der Umgebungsvariable aendert das Passwort im bestehenden Volume
+**nicht**.
+
+Abhilfe (setzt die lokale Datenbank zurueck):
+
+```bash
+scripts/setup_local.sh --reset-db --yes
+# oder manuell:
+docker compose down -v
+docker compose up --build -d
+```
+
+Dabei geht der Inhalt der **lokalen** Postgres-Datenbank verloren (nicht
+Produktion). Fuer persistente Datensicherung:
+
+```bash
+docker compose exec postgres pg_dump -U tbot tbot > backup.sql
+```
+
+## 6. Redis-Container startet nicht
+
+Wurde in `v2.3.0` auf POSIX-sh Entrypoint umgestellt. Wenn du eine alte
+Version des Repositories benutzt:
+
+```bash
+git pull
+docker compose up --build -d --force-recreate redis
+docker compose logs redis
+```
+
+Korrekte Zeile im Log:
+
+```
+[redis] maxmemory=...mb policy=noeviction io-threads=...
+```
+
+## 7. `scripts/setup_local.sh` vs. `docker compose up`
+
+| Setup | `.env` | `.env.local` | Hardware-Tuning |
+|---|---|---|---|
+| `docker compose up` | wird automatisch gelesen | nein | nur, wenn der `tuner`-Service laeuft |
+| `scripts/setup_local.sh` | unberuecksichtigt | explizit via `--env-file` | wird vor dem Start in `.env.local` geschrieben |
+
+Nicht beide gleichzeitig nutzen - es kann zu Passwort-Konflikten kommen
+(siehe Punkt 5). Empfehlung: `scripts/setup_local.sh` als Standard.
+
+## 8. Passwoerter aendern / Secret-Rotation
+
+```bash
+# 1. In .env.local aendern:
+${EDITOR:-nano} .env.local
+# 2. Postgres-Volume neu initialisieren (Postgres liest neues Passwort nur bei leerem Volume):
+scripts/setup_local.sh --reset-db --yes
+```
+
+`SECRET_KEY` und `PASSPHRASE` werden von der App bei jedem Neustart
+gelesen und benoetigen kein Volume-Reset.
+
+## 9. Render-Free-Simulation lokal testen
+
+```bash
+scripts/setup_local.sh --render-free-simulation --reset-db --yes
+```
+
+Setzt in `.env.local`:
+
+```env
+RENDER=True
+RENDER_SIMULATION=True
+WEB_CPUS=0.10
+```
+
+Zurueck zur normalen lokalen Konfiguration:
+
+```bash
+scripts/setup_local.sh --no-up
+# RENDER=False in .env.local sicherstellen
+docker compose up -d --force-recreate web backtest-worker
+```
+
+## 10. Logs und Status
+
+```bash
+docker compose logs -f web                       # App live
+docker compose logs -f backtest-worker            # Celery
+docker compose logs -f postgres redis             # Infrastruktur
+docker compose exec postgres psql -U tbot -d tbot # DB-Shell
+docker compose exec redis redis-cli info memory    # Redis-Speicher
+docker compose exec web python manage.py shell     # Django-Shell
+docker stats                                      # Live-Resourcen
+```
+
+## 11. Hardware-/Tuning-Werte anpassen
+
+Die automatisch berechneten Werte stehen in `config/hardware.env` und im
+Container unter `/tbot-runtime/tuning.env`:
+
+```bash
+docker compose cp tuner:/tbot-runtime/hardware-report.txt - | less
+docker compose exec web cat /tbot-runtime/tuning.env
+```
+
+Einzelne Werte in `.env.local` ueberschreiben (z.B. `REDIS_MAXMEMORY_MB=64`)
+und den Stack neu starten:
+
+```bash
+docker compose up -d --force-recreate redis web backtest-worker
+```
+
+## 12. Sauberes Zuruecksetzen
+
+```bash
+docker compose down -v       # Container + Volumes (Datenbank!) loeschen
+docker image rm t-bot-local-app redis:7.4-alpine postgres:17-alpine  # optional Images
+git clean -fdx               # ACHTUNG: entfernt alle unversionierten Dateien
+```
+
+## 13. Tests ausfuehren
+
+```bash
+# Shell-Test-Suite
+bash tests/run_tests.sh
+
+# Shellcheck
+shellcheck install.sh hardware-test.sh docker-entrypoint.sh docker/*.sh \
+  tests/*.sh tests/fixtures/mock-bin/* scripts/setup_local.sh \
+  scripts/install_system_dependencies.sh
+
+# Distro-Smoke-Tests (erfordert Docker)
+tests/distro_smoke_test.sh
+```
+
+## 14. Haeufige Irrtuemer
+
+1. **`tuner` ist `Exited (0)`** - das ist beabsichtigt.
+2. **Port-Spalte `8000/tcp` ohne `0.0.0.0:8000->`** = der Port ist nicht
+   auf den Host veroeffentlicht. In `docker-compose.yml` muss unter `web`
+   `ports: ["${WEB_PORT:-8000}:8000"]` stehen.
+3. **`0.0.0.0` im Container** heisst "im Container-Netzwerk"; auf dem Host
+   ist der Dienst ueber `localhost` erreichbar, solange Docker den Port
+   forwardet.
+4. **302 auf `/gate/`** ist kein Fehler, sondern die Passphrase-Schutz-
+   middleware.
+5. **`docker compose up` ohne `--build`** nutzt ein altes Image; nach
+   `git pull` immer `--build` verwenden.
+6. **Die Startseite braucht Datenbank/Redis**; `/health/` ist davon
+   unabhaengig und der beste erste Erreichbarkeitstest.

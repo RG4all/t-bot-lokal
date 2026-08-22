@@ -201,6 +201,10 @@ detect_distro() {
       elif have yum; then PKG_MANAGER="yum"
       else PKG_MANAGER="dnf"
       fi ;;
+    opensuse|opensuse-leap|opensuse-tumbleweed|suse|sles)
+      PKG_MANAGER="zypper" ;;
+    alpine)
+      PKG_MANAGER="apk" ;;
     *)
       # Auch ID_LIKE beruecksichtigen
       if [[ " ${DISTRO_ID_LIKE} " == *" debian "* ]] || \
@@ -212,6 +216,18 @@ detect_distro() {
            [[ " ${DISTRO_ID_LIKE} " == *" fedora "* ]] || \
            [[ " ${DISTRO_ID_LIKE} " == *" centos "* ]]; then
         if have dnf; then PKG_MANAGER="dnf"; else PKG_MANAGER="yum"; fi
+      elif [[ " ${DISTRO_ID_LIKE} " == *" suse "* ]] || \
+           [[ " ${DISTRO_ID_LIKE} " == *" opensuse "* ]]; then
+        PKG_MANAGER="zypper"
+      elif [[ " ${DISTRO_ID_LIKE} " == *" alpine "* ]]; then
+        PKG_MANAGER="apk"
+      # Wenn keine ID passt, aber ein bekannter PM vorhanden ist: verwenden.
+      elif have apt-get; then PKG_MANAGER="apt"
+      elif have pacman;  then PKG_MANAGER="pacman"
+      elif have dnf;     then PKG_MANAGER="dnf"
+      elif have yum;     then PKG_MANAGER="yum"
+      elif have zypper;  then PKG_MANAGER="zypper"
+      elif have apk;     then PKG_MANAGER="apk"
       else
         PKG_MANAGER=""
       fi
@@ -313,6 +329,51 @@ package_list() {
         redis
       )
       ;;
+    zypper)
+      runtime_pkgs=(
+        ca-certificates
+        coreutils
+        dejavu-fonts
+        gawk
+        grep
+        libharfbuzz0
+        libpango-1_0-0
+        procps
+        sed
+      )
+      host_extra=(
+        curl
+        postgresql-devel
+        python3
+        python3-devel
+        python3-pip
+        redis
+      )
+      # 'devel_basis' ist das aequivalent zu build-essential/base-devel und
+      # wird als Pattern nach dem Paketblock installiert.
+      ;;
+    apk)
+      runtime_pkgs=(
+        ca-certificates
+        coreutils
+        dejavu-fonts
+        gawk
+        grep
+        harfbuzz
+        pango
+        procps
+        sed
+      )
+      host_extra=(
+        build-base
+        curl
+        postgresql-dev
+        python3
+        python3-dev
+        py3-pip
+        redis
+      )
+      ;;
     *)
       die "package_list: unbekannter Paketmanager '${pm}'"
       ;;
@@ -358,6 +419,12 @@ pm_update() {
         fi
       fi
       ;;
+    zypper)
+      run_logged zypper --non-interactive --gpg-auto-import-keys refresh
+      ;;
+    apk)
+      run_logged apk update
+      ;;
   esac
 }
 
@@ -385,6 +452,16 @@ pm_install() {
       ;;
     yum)
       run_logged yum -y install "${pkgs[@]}"
+      ;;
+    zypper)
+      run_logged zypper --non-interactive install --no-recommends "${pkgs[@]}"
+      # openSUSE-Build-Toolchain als Pattern (aquirivalent zu build-essential).
+      if [[ "${PROFILE}" == "full" ]]; then
+        run_logged zypper --non-interactive install -t pattern devel_basis || true
+      fi
+      ;;
+    apk)
+      run_logged apk add --no-cache "${pkgs[@]}"
       ;;
   esac
 }
@@ -427,10 +504,9 @@ have_openrc()   { have rc-service; }
 
 redis_service_name() {
   case "${PKG_MANAGER}" in
-    apt)     echo "redis-server" ;;
-    pacman)  echo "redis" ;;
-    dnf|yum) echo "redis" ;;
-    *)       echo "redis" ;;
+    apt)         echo "redis-server" ;;
+    pacman|dnf|yum|zypper|apk) echo "redis" ;;
+    *)           echo "redis" ;;
   esac
 }
 

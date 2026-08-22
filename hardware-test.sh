@@ -48,11 +48,15 @@ FORMAT="auto"
 CPU_COUNT=0
 CPU_MHZ=0
 CPU_ARCH=""
+CPU_ARCH_NORMALIZED=""
 CPU_MODEL=""
+CPU_HASHRATE_MBPS=0
 RAM_TOTAL_KB=0
 RAM_AVAILABLE_KB=0
+DISK_FREE_KB=0
 DISK_WRITE_MBPS=0
 DISK_READ_MBPS=0
+FSYNC_LATENCY_MS=0
 
 # Empfehlungen
 REDIS_MAXMEMORY_MB=0
@@ -67,6 +71,10 @@ POSTGRES_CPUS=0.50
 SCHEDULER_CPUS=0.20
 CELERY_WORKER_MAX_MEMORY_PER_CHILD=384000
 WEB_CONCURRENCY=1
+POSTGRES_MAX_CONNECTIONS=40
+POSTGRES_SHARED_BUFFERS_MB=32
+POSTGRES_EFFECTIVE_CACHE_MB=128
+POSTGRES_WORK_MEM_MB=4
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -118,12 +126,56 @@ detect_cpu() {
   [[ "${CPU_COUNT}" =~ ^[0-9]+$ ]] || CPU_COUNT=1
 
   CPU_ARCH="$("${HW_UNAME_CMD}" -m 2>/dev/null || echo "unknown")"
+  # Normalisierung auf Docker-Platform-kompatible Bezeichner.
+  case "${CPU_ARCH}" in
+    x86_64|amd64)        CPU_ARCH_NORMALIZED="amd64" ;;
+    aarch64|arm64)       CPU_ARCH_NORMALIZED="arm64" ;;
+    armv7*|armhf)        CPU_ARCH_NORMALIZED="arm/v7" ;;
+    ppc64le)             CPU_ARCH_NORMALIZED="ppc64le" ;;
+    s390x)               CPU_ARCH_NORMALIZED="s390x" ;;
+    riscv64)             CPU_ARCH_NORMALIZED="riscv64" ;;
+    *)                   CPU_ARCH_NORMALIZED="${CPU_ARCH}" ;;
+  esac
 
   if [[ -r "${HW_CPUINFO}" ]]; then
     CPU_MODEL="$(grep -m1 -E '^model name' "${HW_CPUINFO}" | cut -d: -f2- | sed 's/^[[:space:]]*//' || true)"
+    # ARM nutzt "Hardware" / "model name" je nach Kernel; leer bleiben ist ok.
+    [[ -z "${CPU_MODEL}" ]] && CPU_MODEL="$(grep -m1 -E '^(Hardware|Processor)' "${HW_CPUINFO}" | cut -d: -f2- | sed 's/^[[:space:]]*//' || true)"
     CPU_MHZ="$(grep -m1 -E '^cpu MHz' "${HW_CPUINFO}" | cut -d: -f2- | awk '{printf "%d", $1}' || echo 0)"
   fi
   [[ -n "${CPU_MODEL}" ]] || CPU_MODEL="unknown"
+}
+
+# ---------------------------------------------------------------------------
+# CPU-Hashrate: misst, wie viele MB SHA-256 pro Sekunde verarbeitet werden
+# koennen. Gibt einen ungefaehren Anhaltspunkt fuer Single-Core-Durchsatz.
+# Sicher: nur /dev/zero lesen, keine Dateien schreiben.
+# ---------------------------------------------------------------------------
+measure_cpu_hashrate() {
+  local tool=""
+  if have openssl; then tool="openssl"
+  elif have sha256sum; then tool="sha256sum"
+  else log_warn "Weder openssl noch sha256sum verfuegbar - CPU-Hashrate uebersprungen."; return 0
+  fi
+
+  local start end bytes
+  bytes=$(( 64 * 1024 * 1024 ))  # 64 MB
+  start="$(date +%s.%N 2>/dev/null || date +%s)"
+  if [[ "${tool}" == "openssl" ]]; then
+    # openssl speed -bytes 16384 sha256 misst viele kleine Bloecke; wir
+    # nehmen stattdessen einen 64-MB-Block ueber Pipe.
+    if head -c "${bytes}" /dev/zero 2>/dev/null | openssl dgst -sha256 >/dev/null 2>&1; then
+      :
+    fi
+  else
+    head -c "${bytes}" /dev/zero 2>/dev/null | sha256sum >/dev/null 2>&1 || true
+  fi
+  end="$(date +%s.%N 2>/dev/null || date +%s)"
+
+  local dur
+  dur="$(awk -v s="${start}" -v e="${end}" 'BEGIN { d=e-s; if (d<=0) d=1; printf "%.3f", d }')"
+  CPU_HASHRATE_MBPS="$(awk -v b="${bytes}" -v d="${dur}" 'BEGIN { printf "%.0f", (b/1048576)/d }')"
+  : "${CPU_HASHRATE_MBPS:=0}"
 }
 
 detect_memory() {
@@ -138,6 +190,47 @@ detect_memory() {
   fi
   : "${RAM_TOTAL_KB:=0}"
   : "${RAM_AVAILABLE_KB:=0}"
+}
+
+# ---------------------------------------------------------------------------
+# Freien Plattenspeicher im Test-Verzeichnis messen (in KB).
+# ---------------------------------------------------------------------------
+detect_disk_free() {
+  local dir="${DISK_TEST_DIR:-${TMPDIR:-/tmp}}"
+  mkdir -p "${dir}" 2>/dev/null || true
+  # POSIX-portabel: df -P (eine Zeile pro Dateisystem).
+  DISK_FREE_KB="$(df -Pk "${dir}" 2>/dev/null | awk 'NR==2 {print $4}')"
+  : "${DISK_FREE_KB:=0}"
+}
+
+# ---------------------------------------------------------------------------
+# fsync-Latenz: 32-mal eine kleine Datei erstellen, mit conv=fdatasync
+# schreiben und die durchschnittliche Dauer in Millisekunden berichten.
+# ---------------------------------------------------------------------------
+measure_fsync_latency() {
+  [[ "${SKIP_DISK_TEST}" -eq 1 ]] && return 0
+  have dd || return 0
+  local dir="${DISK_TEST_DIR:-${TMPDIR:-/tmp}}"
+  mkdir -p "${dir}"
+  local f; f="$(mktemp "${dir}/tbot-fsync.XXXXXXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -f '${f}'" RETURN
+
+  local runs=32 i start end dur total=0
+  for ((i=0; i<runs; i++)); do
+    start="$(date +%s%N 2>/dev/null || echo 0)"
+    dd if=/dev/zero of="${f}" bs=4k count=1 conv=fdatasync status=none 2>/dev/null || true
+    end="$(date +%s%N 2>/dev/null || echo 0)"
+    if [[ "${start}" != "0" && "${end}" != "0" ]]; then
+      dur=$(( (end - start) / 1000000 ))
+      total=$(( total + dur ))
+    fi
+  done
+  if (( runs > 0 )); then
+    FSYNC_LATENCY_MS=$(( total / runs ))
+  else
+    FSYNC_LATENCY_MS=0
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -270,6 +363,25 @@ compute_recommendations() {
     WEB_CPUS=0.35; WORKER_CPUS=0.35; POSTGRES_CPUS=0.35
     REDIS_CPUS=0.15; SCHEDULER_CPUS=0.15
   fi
+
+  # --- PostgreSQL (lokal) ---
+  # Max. 40 Verbindungen (Sicherheitsabstand zu den Free-Tier-Slots),
+  # skaliert mit RAM. shared_buffers ~25% RAM (max 256 MB lokal),
+  # effective_cache_size ~50% RAM (max 512 MB), work_mem ~4 MB.
+  local shared=$(( total_mb / 4 ))
+  local cache=$(( total_mb / 2 ))
+  local wmem=4
+  (( shared < 32 ))  && shared=32
+  (( shared > 256 )) && shared=256
+  (( cache  < 64 ))  && cache=64
+  (( cache  > 512 )) && cache=512
+  if   (( total_mb >= 8192 )); then wmem=16
+  elif (( total_mb >= 4096 )); then wmem=8
+  fi
+  POSTGRES_SHARED_BUFFERS_MB="${shared}"
+  POSTGRES_EFFECTIVE_CACHE_MB="${cache}"
+  POSTGRES_WORK_MEM_MB="${wmem}"
+  POSTGRES_MAX_CONNECTIONS=40
 }
 
 # ---------------------------------------------------------------------------
@@ -279,6 +391,9 @@ render_env() {
   cat <<EOF
 # Auto-generated by ${SCRIPT_NAME} - $(date -u +%Y-%m-%dT%H:%M:%SZ)
 # DO NOT EDIT MANUALLY. Re-run hardware-test.sh to regenerate.
+CPU_ARCH=${CPU_ARCH_NORMALIZED}
+CPU_COUNT=${CPU_COUNT}
+CPU_HASHRATE_MBPS=${CPU_HASHRATE_MBPS}
 REDIS_MAXMEMORY_MB=${REDIS_MAXMEMORY_MB}
 REDIS_MAXMEMORY_POLICY=${REDIS_MAXMEMORY_POLICY}
 REDIS_IO_THREADS=${REDIS_IO_THREADS}
@@ -288,6 +403,10 @@ WEB_CONCURRENCY=${WEB_CONCURRENCY}
 WEB_CPUS=${WEB_CPUS}
 WORKER_CPUS=${WORKER_CPUS}
 POSTGRES_CPUS=${POSTGRES_CPUS}
+POSTGRES_MAX_CONNECTIONS=${POSTGRES_MAX_CONNECTIONS}
+POSTGRES_SHARED_BUFFERS_MB=${POSTGRES_SHARED_BUFFERS_MB}
+POSTGRES_EFFECTIVE_CACHE_MB=${POSTGRES_EFFECTIVE_CACHE_MB}
+POSTGRES_WORK_MEM_MB=${POSTGRES_WORK_MEM_MB}
 REDIS_CPUS=${REDIS_CPUS}
 SCHEDULER_CPUS=${SCHEDULER_CPUS}
 CELERY_WORKER_MAX_MEMORY_PER_CHILD=${CELERY_WORKER_MAX_MEMORY_PER_CHILD}
@@ -306,9 +425,10 @@ Host: $(uname -n 2>/dev/null || echo unknown)
 CPU
 ---
   Anzahl logischer Kerne : ${CPU_COUNT}
-  Architektur            : ${CPU_ARCH}
+  Architektur            : ${CPU_ARCH} (${CPU_ARCH_NORMALIZED})
   Modell                 : ${CPU_MODEL}
   Takt                   : ${CPU_MHZ} MHz
+  SHA-256 Durchsatz      : ${CPU_HASHRATE_MBPS} MB/s
 
 Speicher
 --------
@@ -317,8 +437,10 @@ Speicher
 
 Disk
 ----
+  Freier Speicher        : $((DISK_FREE_KB / 1024)) MB
   Schreibdurchsatz       : ${DISK_WRITE_MBPS} MB/s
   Lesedurchsatz          : ${DISK_READ_MBPS} MB/s
+  fsync-Latenz (Mittel)  : ${FSYNC_LATENCY_MS} ms
 
 Empfohlene Konfiguration
 ------------------------
@@ -332,6 +454,12 @@ Empfohlene Konfiguration
     DB_POOL_SIZE         : ${DB_POOL_SIZE}
     WEB_CONCURRENCY      : ${WEB_CONCURRENCY}
     CELERY_WORKER_...    : ${CELERY_WORKER_MAX_MEMORY_PER_CHILD} KB
+
+  PostgreSQL
+    max_connections      : ${POSTGRES_MAX_CONNECTIONS}
+    shared_buffers       : ${POSTGRES_SHARED_BUFFERS_MB} MB
+    effective_cache_size : ${POSTGRES_EFFECTIVE_CACHE_MB} MB
+    work_mem             : ${POSTGRES_WORK_MEM_MB} MB
 
   Docker-Compose CPU-Limits
     WEB_CPUS             : ${WEB_CPUS}
@@ -349,16 +477,20 @@ render_json() {
   "cpu": {
     "count": ${CPU_COUNT},
     "arch": "${CPU_ARCH}",
+    "arch_normalized": "${CPU_ARCH_NORMALIZED}",
     "model": "${CPU_MODEL//\"/\\\"}",
-    "mhz": ${CPU_MHZ}
+    "mhz": ${CPU_MHZ},
+    "sha256_mbps": ${CPU_HASHRATE_MBPS}
   },
   "memory_mb": {
     "total": $((RAM_TOTAL_KB / 1024)),
     "available": $((RAM_AVAILABLE_KB / 1024))
   },
-  "disk_mbps": {
-    "write": ${DISK_WRITE_MBPS},
-    "read": ${DISK_READ_MBPS}
+  "disk": {
+    "free_mb": $((DISK_FREE_KB / 1024)),
+    "write_mbps": ${DISK_WRITE_MBPS},
+    "read_mbps": ${DISK_READ_MBPS},
+    "fsync_latency_ms": ${FSYNC_LATENCY_MS}
   },
   "recommendations": {
     "redis": {
@@ -371,6 +503,12 @@ render_json() {
       "db_pool_size": ${DB_POOL_SIZE},
       "web_concurrency": ${WEB_CONCURRENCY},
       "celery_worker_max_memory_per_child_kb": ${CELERY_WORKER_MAX_MEMORY_PER_CHILD}
+    },
+    "postgres": {
+      "max_connections": ${POSTGRES_MAX_CONNECTIONS},
+      "shared_buffers_mb": ${POSTGRES_SHARED_BUFFERS_MB},
+      "effective_cache_mb": ${POSTGRES_EFFECTIVE_CACHE_MB},
+      "work_mem_mb": ${POSTGRES_WORK_MEM_MB}
     },
     "compose_cpus": {
       "web": ${WEB_CPUS},
@@ -400,8 +538,11 @@ write_outputs() {
 main() {
   parse_args "$@"
   detect_cpu
+  measure_cpu_hashrate
   detect_memory
+  detect_disk_free
   disk_test
+  measure_fsync_latency
   compute_recommendations
   write_outputs
 

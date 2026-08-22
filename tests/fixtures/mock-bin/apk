@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+LOG="${MOCK_PM_LOG:-/tmp/tbot-mock-pm.log}"
+echo "apk $*" >>"${LOG}"
+exit 0

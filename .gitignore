@@ -19,6 +19,11 @@ media/
 .env.*
 !.env.example
 !.env.docker.example
+.env.local
+
+# Generierte lokale Konfiguration (install.sh / hardware-test.sh)
+config/
+!config.template
 
 # Generierte lokale Konfiguration (install.sh / hardware-test.sh)
 config/
