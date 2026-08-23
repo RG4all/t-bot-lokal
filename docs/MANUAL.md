@@ -42,9 +42,11 @@ Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelist
 | **Name der Konfiguration** | `name` | Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. `Binance Spot Top 5`. | Eindeutiger Name zur Unterscheidung im Dashboard. |
 | **Börse (Exchange)** | `exchange` | Binance, BingX, Bybit, BitMart oder Bitunix. | Bestimmt den Marktdaten-Provider und das Verbindungsmodell. |
 | **Marktart** | `market` | `Spot` (Kassamarkt) oder `Futures` (Derivate/Swaps). | Unterscheidet Handelsinstrumente und Ticker-Endpunkte. |
+| **Hebel (nur Futures)** | `leverage` | Hebel für Futures, Standard `1` (ohne Hebel). Begrenzt durch `EXCHANGE_MAX_LEVERAGE` je Börse. | Nominalvolumen = Trade-Betrag (Margin) × Hebel; Spot rechnet immer mit 1. |
+| **Handelsrichtung** | `trade_direction` | `Nur Long`, `Nur Short` oder `Long und Short`. Standard `Nur Long`. | Short ist ausschließlich im Futures-Markt möglich. |
 | **Handelspaare (Symbole)** | `symbols` | Kommagetrennte CCXT-Notation, z. B. `BTC/USDT, ETH/USDT`. | Autovervollständigung bietet passende Symbole; Live-Prüfung bei Save. |
 | **Startkapital (USDT)** | `start_capital` | Virtuelles Anfangskapital (z. B. `100`). | Basis für Cash, Gesamt-Equity und Verlustgrenzen. |
-| **Trade-Betrag pro Position (USDT)** | `trade_amount` | Virtueller Nominalbetrag je Kauforder (z. B. `10`). | Muss inkl. Kaufgebühr durch Startkapital gedeckt sein. |
+| **Trade-Betrag pro Position (USDT)** | `trade_amount` | Eingesetzte Margin je Position (z. B. `10`). Ohne Hebel entspricht sie dem Nominalbetrag. | Muss inkl. Eröffnungsgebühr durch Startkapital gedeckt sein. |
 | **Take Profit (%)** | `take_profit` | Prozentualer Kursgewinn ab Einstiegskurs zum automatischen Verkauf (z. B. `0.5 %`). | Löst Gewinnmitnahme bei Erreichen aus. |
 | **Stop Loss (%)** | `stop_loss` | Prozentualer Kursverlust ab Einstiegskurs zur Verlustbegrenzung (z. B. `0.5 %`). | Löst Notverkauf bei Kursrückgang aus. |
 | **Gesamtverlustgrenze / Sales Stop (%)** | `sales_stop_threshold` | Maximal zulässiger Gesamtverlust in % des Startkapitals; `0` = deaktiviert. | Globaler Schutz: stoppt neue Trades und schließt Positionen. |
@@ -228,6 +230,42 @@ Im Dashboard stehen drei Exportformate bereit:
 
 Dateinamenschema: `username_exchange_config-id_YYYYMMDD_HHMMSS.ext` (z. B. `anna_binance_5_20260820_184501.pdf`).
 
+## 10b. Futures, Hebel und Short-Positionen
+
+t-bot handelt Futures ausschließlich als Paper-Trading, rechnet dabei aber
+marktnah:
+
+| Größe | Formel | Hinweis |
+|---|---|---|
+| Margin | `Trade-Betrag` | Gebundenes Eigenkapital je Position |
+| Nominalvolumen | `Margin × Hebel` | Basis für Menge und Gebühren |
+| Menge | `Nominalvolumen / Einstiegskurs` | 8 Nachkommastellen, kaufmännisch gerundet |
+| ROI | `Kursbewegung × Hebel` | Rendite auf die Margin |
+| Liquidation | `(1 − Erhaltungsmarge) / Hebel` | Standard-Erhaltungsmarge 0,5 % |
+
+**Long und Short.** `NDA` und `DeltaDelta` werden für Short-Signale am
+Nullpunkt gespiegelt; die richtungsneutrale Beschleunigung (`DVA / vorherige
+NDA`) bleibt unverändert. Take-Profit und Stop-Loss werden aus Sicht der
+Position gemessen: Ein Short gewinnt bei fallenden Kursen. Short setzt den
+Futures-Markt voraus und wird im Spot-Markt von Formular und Bot abgelehnt.
+
+**Hebel je Börse konfigurieren.** Voreinstellung und harte Obergrenze werden
+zentral gepflegt und pro Börse überschrieben:
+
+```bash
+EXCHANGE_LEVERAGE=binance:5,bybit:3
+EXCHANGE_MAX_LEVERAGE=binance:20,bybit:10
+DEFAULT_FUTURES_LEVERAGE=1
+FUTURES_MAINTENANCE_MARGIN_RATE=0.005
+```
+
+Reihenfolge: Konfigurationswert → börsenspezifische Voreinstellung → globaler
+Fallback, immer begrenzt durch `EXCHANGE_MAX_LEVERAGE`. Sind API-Schlüssel
+hinterlegt, überträgt der Bot den Hebel zusätzlich per `set_leverage` an die
+Börse; schlägt das fehl, laufen Marktdaten und Simulation unbeeinflusst weiter.
+Ein Stop-Loss jenseits der Liquidationsschwelle wird von den Formularen
+abgelehnt, weil er nie auslösen könnte.
+
 ## 11. Backtesting
 
 Das Backtesting-Modul optimiert die drei Kaufschwellen über konfigurierbare Suchraster:
@@ -235,7 +273,12 @@ Das Backtesting-Modul optimiert die drei Kaufschwellen über konfigurierbare Suc
 - **Beschleunigung – von / bis / Schrittweite** (`acc_from`, `acc_to`, `acc_steps`)
 - **NDA – von / bis / Schrittweite** (`nda_from`, `nda_to`, `nda_steps`)
 - **DeltaDelta – von / bis / Schrittweite** (`deltadelta_from`, `deltadelta_to`, `deltadelta_steps`)
-- **Trading-Parameter:** Trade-Betrag, Take Profit, Stop Loss, Gebühr und maximale historische Preispunkte.
+- **Trading-Parameter:** Trade-Betrag (Margin), Handelsrichtung, Hebel, Take Profit, Stop Loss, Gebühr und maximale historische Preispunkte.
+
+Über die Schaltfläche **Dokumentation** auf den Backtesting-Seiten wird
+`docs/backtesting.md` direkt im Arbeitsbereich gerendert – in derselben
+Darstellung wie dieses Handbuch. Alternativ ist das Kapitel unter
+`/docs/backtesting/` als eigene, druckbare Seite erreichbar.
 
 Für jedes Symbol wird das Threshold-Set ermittelt, welches das höchste
 Endkapital erzielt. Die Ergebnisansicht zeigt zusätzlich Profit pro Markt,

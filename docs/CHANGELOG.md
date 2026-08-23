@@ -2,6 +2,41 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.5.0] – 2026-08-23
+
+### Futures-Hebel je Börse, Long-/Short-Handel und eingebettete Backtesting-Dokumentation
+
+- **Hebel je Börse konfigurierbar:** Neue Einstellungen `EXCHANGE_LEVERAGE`
+  (Voreinstellung je Börse), `EXCHANGE_MAX_LEVERAGE` (harte Obergrenze je Börse),
+  `DEFAULT_FUTURES_LEVERAGE` und `FUTURES_MAINTENANCE_MARGIN_RATE` sind über
+  `.env` bzw. `config/local.env` steuerbar. Jede Konfiguration besitzt ein Feld
+  `leverage`, das auf das Börsenmaximum begrenzt wird; Spot rechnet unverändert
+  mit Hebel 1.
+- **Marktnahe Futures-Rechnung:** Der Trade-Betrag ist die eingesetzte Margin,
+  das Nominalvolumen beträgt Margin × Hebel. Gebühren fallen auf das
+  Nominalvolumen an, gebunden wird nur die Margin. Eine simulierte Liquidation
+  bei `(1 − Erhaltungsmarge) / Hebel` begrenzt den Verlust auf die Margin.
+  Sind API-Schlüssel hinterlegt, wird der Hebel zusätzlich per `set_leverage`
+  an die Börse übertragen (Fehler werden nur protokolliert).
+- **Long und Short in einer Engine:** Das neue Modul `trading/strategy.py` ist
+  die gemeinsame Quelle für Signal-, Richtungs- und Hebelmathematik von Live-Bot
+  und Backtest. `NDA` und `DeltaDelta` werden für Shorts am Nullpunkt
+  gespiegelt, die richtungsneutrale Beschleunigung (`DVA / vorherige NDA`)
+  bewusst nicht. Take-Profit, Stop-Loss, Equity-Kurve, Reports, CSV-Exporte und
+  das Dashboard sind vollständig richtungsabhängig.
+- **Sicherheitsprüfungen:** Short wird im Spot-Markt von Formularen und Bot
+  abgelehnt; ein Stop-Loss jenseits der Liquidationsschwelle ist unzulässig.
+  Bestehende Konfigurationen und Payloads ohne die neuen Felder bleiben gültig
+  (Standard: Hebel 1, Richtung Long).
+- **Dokumentation im Backtesting-UI:** Die Schaltfläche **Dokumentation**
+  rendert `docs/backtesting.md` über `/api/docs/backtesting/` direkt im
+  Arbeitsbereich – mit derselben Markdown-Pipeline wie die Hilfe. Zusätzlich
+  steht `/docs/<slug>/` als eigenständige, druckbare Seite bereit; nur
+  registrierte Dokumente sind erreichbar.
+- **Tests:** 33 neue Tests in `trading/tests/test_futures_short.py` decken
+  Hebelauflösung, Formularvalidierung, Short-Bot-Trades, Liquidation,
+  Backtest-Richtungen und die Dokumentationsansicht ab (insgesamt 108 Tests).
+
 ## [2.4.0] – 2026-08-23
 
 ### Help-Seite, adaptive Backtests und geprüfte Marktvorlagen

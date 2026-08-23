@@ -5,6 +5,10 @@ Grenzen der Ergebnisse. Es richtet sich an Menschen, die eine Strategie
 reproduzierbar untersuchen möchten – nicht an eine automatische
 Gewinnversprechung. t-bot führt im Backtest **keine echten Orders** aus.
 
+Diese Datei wird in der Anwendung direkt gerendert: Auf den Backtesting-Seiten
+öffnet die Schaltfläche **Dokumentation** dieses Kapitel im Arbeitsbereich – in
+derselben Darstellung wie das Handbuch unter „Hilfe“.
+
 > **Risikohinweis:** Historische Ergebnisse sind keine Garantie für die
 > Zukunft. Kryptowährungen können schnell und vollständig an Wert verlieren.
 > Ein Backtest ersetzt weder ein Risikobudget noch einen Stop-Loss-Plan, eine
@@ -22,10 +26,13 @@ gesammelt hat.
 Für jede Kombination aus drei Kaufschwellen wird eine eigene Simulation
 berechnet:
 
-1. Ein Kauf wird ausgelöst, wenn alle drei Indikatoren ihre Schwelle
-   **überschreiten** und genügend virtuelles Kapital vorhanden ist.
-2. Die Position wird beim Take-Profit, beim Stop-Loss oder am Ende der
-   Historie geschlossen.
+1. Eine Position wird eröffnet, wenn alle drei Indikatoren ihre Schwelle
+   **überschreiten** und genügend virtuelles Kapital vorhanden ist. Je nach
+   gewählter Handelsrichtung entsteht daraus ein Long oder ein Short
+   (siehe Abschnitt 3).
+2. Die Position wird beim Take-Profit, beim Stop-Loss, bei der simulierten
+   Liquidation (nur mit Hebel, siehe Abschnitt 4) oder am Ende der Historie
+   geschlossen.
 3. Die Kauf- und Verkaufsgebühr wird jeweils abgezogen.
 4. Das beste Endkapital wird pro Symbol ausgewählt. Bei gleichen Ergebnissen
    entscheidet die Reihenfolge des Rasters.
@@ -81,7 +88,109 @@ DeltaDelta = (current_NDA + previous_NDA) / 2
 Der Zwei-Punkt-Mittelwert glättet das Momentum etwas, entfernt aber weder
 Marktrauschen noch Sprünge durch schlechte Ticks.
 
-## 3. Suchraster richtig aufbauen
+## 3. Handelsrichtung: Long und Short
+
+t-bot simuliert wahlweise nur Long, nur Short oder beide Richtungen. Short ist
+ausschließlich im Futures-Markt möglich – ein Spot-Bestand kann nicht
+leerverkauft werden. Die Auswahl erfolgt im Backtest-Formular („Handelsrichtung“)
+und in der Konfiguration (`trade_direction`).
+
+### Wie das Short-Signal entsteht
+
+`NDA` und `DeltaDelta` sind vorzeichenbehaftete Momentumgrößen. Für ein
+Short-Signal werden sie am Nullpunkt gespiegelt und danach gegen dieselbe
+Schwelle geprüft:
+
+```text
+Long-Einstieg:   Beschleunigung > Schwelle_acc
+                 NDA            > Schwelle_nda
+                 DeltaDelta     > Schwelle_dd
+
+Short-Einstieg:  Beschleunigung > Schwelle_acc
+                 -NDA           > Schwelle_nda
+                 -DeltaDelta    > Schwelle_dd
+```
+
+Die **Beschleunigung** wird bewusst *nicht* gespiegelt. Sie ist der Quotient
+`DVA / vorherige NDA` und damit bereits richtungsneutral: In einem
+Abwärtsimpuls sind Zähler und Nenner beide negativ, der Quotient bleibt
+positiv, wenn sich der bestehende Impuls verstärkt. Ein zusätzliches Spiegeln
+würde die Bedeutung umkehren – das ist der klassische Fehler beim Nachrüsten
+von Short-Logik. Die Richtungsprüfung übernehmen ausschließlich NDA und
+DeltaDelta.
+
+### Ergebnisrechnung der Short-Position
+
+```text
+Rohergebnis  = (Einstiegskurs - Ausstiegskurs) × Menge
+Nettoergebnis = Rohergebnis - Eröffnungsgebühr - Schließungsgebühr
+```
+
+Take-Profit und Stop-Loss bleiben Kursschwellen und werden aus Sicht der
+Position gemessen: Für einen Short ist ein fallender Kurs ein Gewinn. Ein
+Short mit Take-Profit 1 % schließt also 1 % **unter** dem Einstieg.
+
+> **Risikohinweis:** Der maximale Verlust eines Shorts ist rechnerisch nicht
+> begrenzt, weil ein Kurs beliebig steigen kann. In der Praxis begrenzen
+> Stop-Loss und Liquidation den Verlust auf die eingesetzte Margin.
+
+## 4. Futures-Hebel je Börse
+
+Der Hebel wirkt ausschließlich im Futures-Markt. Im Spot-Markt rechnet t-bot
+immer mit Hebel 1 – bestehende Spot-Konfigurationen verhalten sich nach einem
+Update daher unverändert.
+
+### Kapital- und Gebührenrechnung
+
+```text
+Margin         = Trade-Betrag
+Nominalvolumen = Margin × Hebel
+Menge          = Nominalvolumen / Einstiegskurs
+Gebühr         = Nominalvolumen × Gebührensatz
+ROI            = Kursbewegung × Hebel
+```
+
+Gebunden wird nur die Margin zuzüglich der bereits gezahlten
+Eröffnungsgebühr; der Rest des Kapitals bleibt für weitere Positionen frei.
+Bei Hebel 1 entspricht die Margin exakt dem Nominalvolumen – die bisherige
+Berechnung bleibt damit bitgenau erhalten.
+
+### Liquidation
+
+Die Simulation schließt eine Position, sobald die Margin rechnerisch
+aufgezehrt ist:
+
+```text
+Liquidationsbewegung = (1 - Erhaltungsmarge) / Hebel × 100 %
+```
+
+Mit der Standard-Erhaltungsmarge von 0,5 % liegt die Schwelle bei Hebel 10 bei
+9,95 % adverser Kursbewegung, bei Hebel 25 bei 3,98 %. Ein Stop-Loss jenseits
+dieser Schwelle wäre wirkungslos und wird von den Formularen abgelehnt.
+
+### Konfiguration je Börse
+
+Voreinstellung und Obergrenze werden je Börse gesetzt und lassen sich über
+Environment-Variablen (`config/local.env`, `.env`) überschreiben:
+
+```bash
+# Voreingestellter Hebel je Börse, wenn eine Konfiguration keinen Wert setzt
+EXCHANGE_LEVERAGE=binance:5,bybit:3,bingx:5,bitmart:3,bitunix:5
+# Harte Obergrenze je Börse (niemals überschreitbar)
+EXCHANGE_MAX_LEVERAGE=binance:20,bybit:10,bingx:20,bitmart:10,bitunix:20
+# Fallback für nicht genannte Börsen
+DEFAULT_FUTURES_LEVERAGE=1
+# Erhaltungsmarge der simulierten Liquidation (0.005 = 0,5 %)
+FUTURES_MAINTENANCE_MARGIN_RATE=0.005
+```
+
+Die wirksame Reihenfolge lautet: Konfigurationswert → börsenspezifische
+Voreinstellung → globaler Fallback, jeweils begrenzt durch
+`EXCHANGE_MAX_LEVERAGE`. Werden Hebel oder Richtung im Backtest-Formular
+gesetzt, gelten sie nur für diesen Testlauf; die Live-Konfiguration bleibt
+unverändert.
+
+## 5. Suchraster richtig aufbauen
 
 Für jeden der drei Indikatoren werden **Von**, **Bis** und **Schrittweite**
 eingegeben. Die Anzahl der Werte eines Bereichs ist:
@@ -120,7 +229,7 @@ Gesamt:     5 × 11 × 11 × 2 = 1.210 Simulationen
 Ein sehr feines Raster auf demselben Datensatz findet leicht Zufallswerte, die
 nur in genau dieser Historie gut aussehen. Das nennt man Overfitting.
 
-## 4. Templates
+## 6. Templates
 
 Das Formular bietet drei Templates. Sie ändern die Live-Konfiguration nicht,
 sondern füllen nur den neuen Auftrag aus.
@@ -149,7 +258,7 @@ Nach der Auswahl können alle Werte manuell geändert werden. Die Anzeige im
 Formular berechnet die Anzahl der Simulationen erneut, sobald ein Feld
 geändert wird.
 
-## 5. Preispunktgröße und Speicher
+## 7. Preispunktgröße und Speicher
 
 `Maximale historische Preispunkte` legt fest, wie viele jüngste Punkte je
 Symbol aus `DataLog` gelesen werden. `Maximale Rasterpunkte je Parameter`
@@ -169,7 +278,7 @@ Das Hardwareprofil begrenzt den Formularwert zusätzlich. Ein explizit gesetztes
 reduzieren. Die Anwendung überschreibt dabei nie die sichere Untergrenze von
 100 Punkten im Formular, wenn das Hardwareprofil korrekt ermittelt wurde.
 
-## 6. Variable Raster- und Kombinationsgrenze
+## 8. Variable Raster- und Kombinationsgrenze
 
 Das Feld `Maximale Kombinationen (Hard-Limit)` ist eine harte Obergrenze über
 alle Symbole. Es ist keine Empfehlung und kann einen Auftrag ablehnen, bevor
@@ -191,7 +300,7 @@ Dimension, abgeleitet aus der dritten Wurzel des Kombinationsbudgets. Sie ist
 ein Orientierungspunkt. Entscheidend ist immer das Produkt der drei
 Dimensionen und der Symbolanzahl.
 
-## 7. Hardwareprofil und Laufzeitschätzung
+## 9. Hardwareprofil und Laufzeitschätzung
 
 t-bot liest beim ersten Bedarf CPU-Anzahl, RAM und freien Speicher. In Docker
 werden cgroup-Limits vor den Hostwerten bevorzugt. Das verhindert, dass ein
@@ -217,7 +326,7 @@ Die Diagnose-API `/api/resources/` zeigt den Snapshot. Dort sind insbesondere
 neu gelesen. Das normale Formular verwendet den gecachten Snapshot und führt
 keinen I/O-Benchmark bei jedem Seitenaufruf aus.
 
-## 8. Ausführung und Isolation
+## 10. Ausführung und Isolation
 
 Backtests laufen über die Celery-Queue `backtest`. Der Worker verwendet
 standardmäßig einen Prozess beziehungsweise eine Aufgabe gleichzeitig,
@@ -240,7 +349,7 @@ Pause und Abbruch sind kooperativ. Der Worker prüft den Zustand regelmäßig;
 eine bereits laufende einzelne Simulation wird nicht mitten in jeder
 Arithmetik unterbrochen.
 
-## 9. Datenqualität und Reproduzierbarkeit
+## 11. Datenqualität und Reproduzierbarkeit
 
 Vor dem Start sollte geprüft werden:
 
@@ -269,7 +378,7 @@ Erst wenn die Regel in beiden Abschnitten plausibel ist, sollte sie in einem
 Paper-Trading-Lauf beobachtet werden. Bei einem Wechsel der Marktstruktur ist
 eine weitere Prüfung nötig.
 
-## 10. Interpretation der Ergebnisse
+## 12. Interpretation der Ergebnisse
 
 Das Modul zeigt pro Symbol Endkapital, Profit, Käufe/Verkäufe, Win-Rate,
 Brutto-Gewinn und -Verlust, Gebühren, Profit-Faktor, maximalen Drawdown und die
@@ -293,7 +402,7 @@ Stabilität über mehrere Zeiträume geprüft werden. Eine Konfiguration, die nu
 bei einer einzigen Schwelle oder einem einzigen Coin gewinnt, ist besonders
 fragil.
 
-## 11. Top-Gainer-/Loser-Vorlage und Risiko-Filter
+## 13. Top-Gainer-/Loser-Vorlage und Risiko-Filter
 
 Im Konfigurationsformular kann der öffentliche Markt-Scanner für die gewählte
 Exchange und Marktart aufgerufen werden. Er zeigt bis zu fünf Gainer und fünf
@@ -331,7 +440,7 @@ festgelegtes Risiko, eine passende Stop-Loss-Strategie und eine Positionsgröße
 die einen Totalverlust des eingesetzten Betrags verkraftbar macht. Bei
 Futures kommen Liquidations-, Funding- und Hebelrisiken hinzu.
 
-## 12. Praktische Beispielkonfiguration
+## 14. Praktische Beispielkonfiguration
 
 Angenommen, die Konfiguration enthält zwei Symbole und die aktuellen
 Schwellen sind `Beschleunigung = 0`, `NDA = 0` und `DeltaDelta = 0`.
@@ -351,7 +460,7 @@ mit 2.500 oder 5.000 Punkten erneut geprüft werden. Das zweite Ergebnis
 sollte nicht blind in die Live-Konfiguration kopiert werden: zuerst Gebühren,
 Stop-Loss, Datenqualität, Ausreißer und einen separaten Zeitraum kontrollieren.
 
-## 13. Fehlersuche
+## 15. Fehlersuche
 
 ### „Mindestens drei Preispunkte benötigt“
 
@@ -380,7 +489,7 @@ explizit aktiviert werden. Für einen produktiven Betrieb Redis, einen
 separaten Celery-Worker und gegebenenfalls Celery Beat bereitstellen. Ein
 Prozessneustart kann einen lokalen Auftrag unterbrechen.
 
-## 14. Checkliste vor dem produktiven Paper-Trading
+## 16. Checkliste vor dem produktiven Paper-Trading
 
 - [ ] Test auf einem getrennten Zeitabschnitt wiederholt.
 - [ ] Gebühren und Slippage konservativ angesetzt.
@@ -390,6 +499,9 @@ Prozessneustart kann einen lokalen Auftrag unterbrechen.
 - [ ] Hard-Limit und Ressourcenprofil zur Maschine passend.
 - [ ] Backtest-Ergebnis und Parameter dokumentiert.
 - [ ] Verlustgrenze beziehungsweise Sales Stop in der Konfiguration gesetzt.
+- [ ] Hebel bewusst gewählt und Stop-Loss deutlich vor der Liquidationsschwelle.
+- [ ] Short-Ergebnisse gesondert geprüft: Finanzierungskosten (Funding) sind in
+      der Simulation **nicht** enthalten und verschlechtern reale Short-Renditen.
 
 Ein guter Backtest ist ein Werkzeug zum Verstehen einer Strategie. Er ist
 nicht der letzte Schritt vor einem Risiko, sondern ein Baustein in einem
