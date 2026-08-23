@@ -147,21 +147,38 @@
     <div id="result-{{ task.id }}" class="accordion-collapse collapse" data-bs-parent="#results">
         <div class="accordion-body">
             {% if task.status == 'completed' and task.result.symbol_results %}
-            <a class="btn btn-sm btn-outline-primary mb-3" target="_blank" rel="noopener" href="{% url 'generate_backtest_pdf' task.id %}">PDF öffnen</a>
-            {% for symbol, result in task.result.symbol_results.items %}
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="{% url 'generate_backtest_pdf' task.id %}">PDF öffnen</a>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'generate_backtest_html' task.id %}">HTML exportieren</a>
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'generate_backtest_csv' task.id %}">CSV exportieren</a>
+            </div>
+            <div class="row g-2 mb-3">
+                <div class="col-md-3"><strong>Gesamtprofit:</strong> {{ task.result.global_results.total_profit }}</div>
+                <div class="col-md-3"><strong>Rendite:</strong> {{ task.result.global_results.return_percentage|floatformat:2 }} %</div>
+                <div class="col-md-3"><strong>Gebühren:</strong> {{ task.result.global_results.total_fees }}</div>
+                <div class="col-md-3"><strong>Ø Haltedauer:</strong> {{ task.result.global_results.average_trade_duration_points|floatformat:1 }} Punkte</div>
+            </div>
+            {% for item in task.report_results %}
             <div class="card mb-3">
-                <div class="card-header"><strong>{{ symbol }}</strong></div>
+                <div class="card-header"><strong>{{ item.symbol }}</strong></div>
                 <div class="card-body">
-                    <p>{{ result.optimized_thresholds_str }}</p>
-                    <div class="row">
-                        <div class="col-md-4"><strong>Endkapital:</strong> {{ result.best_capital }}</div>
-                        <div class="col-md-4"><strong>Verkäufe:</strong> {{ result.report.num_sells }}</div>
-                        <div class="col-md-4"><strong>Win Rate:</strong> {{ result.report.win_rate|floatformat:2 }} %</div>
+                    <p>{{ item.result.optimized_thresholds_str }}</p>
+                    <div class="row g-2">
+                        <div class="col-md-3"><strong>Endkapital:</strong> {{ item.result.best_capital }}</div>
+                        <div class="col-md-3"><strong>Profit:</strong> {{ item.report.net_profit }}</div>
+                        <div class="col-md-3"><strong>Verkäufe:</strong> {{ item.report.num_sells }}</div>
+                        <div class="col-md-3"><strong>Win Rate:</strong> {{ item.report.win_rate|floatformat:2 }} %</div>
+                        <div class="col-md-3"><strong>Bruttogewinn:</strong> {{ item.report.gross_profit }}</div>
+                        <div class="col-md-3"><strong>Bruttoverlust:</strong> {{ item.report.gross_loss }}</div>
+                        <div class="col-md-3"><strong>Gebühren:</strong> {{ item.report.total_fees }}</div>
+                        <div class="col-md-3"><strong>Max. Drawdown:</strong> {{ item.report.max_drawdown_percentage|floatformat:2 }} %</div>
+                        <div class="col-md-6"><strong>Ø Haltedauer:</strong> {{ item.report.average_trade_duration_points|floatformat:1 }} Punkte{% if item.report.average_trade_duration_seconds != None %} / {{ item.report.average_trade_duration_seconds|floatformat:1 }} s{% endif %}</div>
                     </div>
+                    {% if item.equity_svg %}<div class="mt-3"><h4 class="h6">Equity-Kurve (mark-to-market)</h4>{{ item.equity_svg }}</div>{% endif %}
                     <div class="table-responsive mt-3">
                     <table class="table table-sm">
-                        <thead><tr><th>Typ</th><th>Index</th><th>Preis</th><th>Gebühr</th><th>Kapital danach</th><th>Profit</th></tr></thead>
-                        <tbody>{% for trade in result.report.trades %}<tr><td>{{ trade.type }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_after }}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>{% endfor %}</tbody>
+                        <thead><tr><th>Typ</th><th>Zeitpunkt</th><th>Index</th><th>Preis</th><th>Gebühr</th><th>Kapital danach</th><th>Haltedauer</th><th>Profit</th></tr></thead>
+                        <tbody>{% for trade in item.report.trades %}<tr><td>{{ trade.type }}</td><td>{{ trade.timestamp|default:"–" }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_after }}</td><td>{% if trade.duration_points != None %}{{ trade.duration_points }} Punkte{% if trade.duration_seconds != None %} / {{ trade.duration_seconds|floatformat:1 }} s{% endif %}{% else %}–{% endif %}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>{% endfor %}</tbody>
                     </table>
                     </div>
                 </div>

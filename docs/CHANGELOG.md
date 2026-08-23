@@ -11,8 +11,10 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - Docker startet lokal ohne Passphrase-Gate und verwendet den Standard-Port `8369`. Compose übernimmt nun auch die ermittelten Speichergrenzen.
 - `trading.resource_optimizer` liest CPU, RAM, cgroup-Limits und freien Speicher und leitet daraus sichere Preispunkt-, Raster- und Kombinationsgrenzen ab. Hard-Limits werden im Formular und im Worker erneut geprüft.
 - Backtesting bietet Schnellprüfung, Ausgewogen und Feinoptimierung, eine variable Preispunktzahl, ein variables Kombinations-Hard-Limit und eine sichtbare Laufzeitschätzung.
-- Der öffentliche Markt-Scanner erstellt pro Exchange bis zu fünf Gainer und Loser nach Volatilität, Volumen-Ausreißer, Orderbuch-Tiefe, Volumen/Marktkapitalisierung und konservativer Utility-Prüfung. Die UI zeigt die Risiko-Warnung und kann qualifizierte Symbole in die Konfiguration übernehmen.
-- Zusätzliche Python-, Django- und Shell-Tests decken Ressourcenheuristik, Cache, Marktfilter, Formulare und lokale Start-/Portkonfiguration ab.
+- Der öffentliche Markt-Scanner erstellt pro Exchange bis zu fünf Gainer und Loser nach Volatilität, Volumen-Ausreißer, Orderbuch-Tiefe, Volumen/Marktkapitalisierung und konservativer Utility-Prüfung. Vier UI-Schieberegler steuern diese Schwellen; fehlende Fundamental-, Volumen- oder beidseitige Orderbuchdaten führen weiterhin zwingend zum Ausschluss.
+- Binance lädt 24h-Ticker kompakt ohne überlange `symbols=[...]`-URL und validiert Spot- sowie aktive Perpetual-Futures-Symbole gegen die maßgeblichen Exchange-Kataloge. Bitunix nutzt die dokumentierten Spot-/Futures-Marktdatenpfade statt des nicht vorhandenen Spot-Ticker-Endpunkts.
+- Backtest-Ergebnisse enthalten Profit pro Markt, Brutto-Gewinn/-Verlust, Gebühren, Profit-Faktor, maximalen Drawdown, durchschnittliche Trade-Dauer, zeitgestempelte Trades und Mark-to-Market-Equity-Kurven. Nutzergebundene Exporte stehen als A4-Querformat-PDF, eigenständiges HTML und erweitertes UTF-8-CSV bereit.
+- Zusätzliche Python-, Django- und Shell-Tests decken Ressourcenheuristik, Cache, Marktfilter, Exchange-Adapter, Symbolkataloge, Backtest-Berichte, Exporte, Formulare und lokale Start-/Portkonfiguration ab.
 
 ## [2.3.1] – 2026-08-22
 

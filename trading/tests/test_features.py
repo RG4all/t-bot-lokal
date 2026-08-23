@@ -5,7 +5,13 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, TestCase
 
 from trading.backtest_templates import build_backtest_templates
-from trading.market_scanner import scan_market_opportunities
+from trading.market_scanner import (
+    MarketScannerError,
+    MarketScannerFilterError,
+    _BitunixScannerExchange,
+    _orderbook_depth,
+    scan_market_opportunities,
+)
 from trading.models import Configuration
 from trading.resource_optimizer import (
     ServerResources,
@@ -176,3 +182,285 @@ class ScannerTests(SimpleTestCase):
         self.assertEqual(result["losers"][0]["symbol"], "ETH/USDT")
         self.assertEqual(len(result["gainers"]), 1)
         self.assertIn("Stop-Loss", result["risk_warning"])
+
+    def test_binance_bulk_ticker_does_not_send_a_symbols_query(self):
+        calls = []
+
+        class FakeExchange:
+            def __init__(self, config=None):
+                pass
+
+            def load_markets(self):
+                return {
+                    symbol: {"active": True, "spot": True}
+                    for symbol in ("BTC/USDT", "ETH/USDT", "SOL/USDT")
+                }
+
+            def fetch_tickers(self, symbols=None):
+                calls.append(symbols)
+                return {
+                    "BTC/USDT": {
+                        "percentage": 20,
+                        "last": 100,
+                        "quoteVolume": 1_000_000,
+                        "info": {"marketCap": 2_000_000},
+                    },
+                    "ETH/USDT": {
+                        "percentage": 1,
+                        "last": 100,
+                        "quoteVolume": 100_000,
+                        "info": {"marketCap": 2_000_000},
+                    },
+                    "SOL/USDT": {
+                        "percentage": 1,
+                        "last": 100,
+                        "quoteVolume": 100_000,
+                        "info": {"marketCap": 2_000_000},
+                    },
+                }
+
+            def fetch_order_book(self, symbol, limit=20):
+                return {"bids": [[100, 100]], "asks": [[101, 100]]}
+
+            def close(self):
+                pass
+
+        with patch("trading.market_scanner.ccxt.binance", FakeExchange):
+            scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(calls, [None])
+
+    def test_binance_internal_type_error_does_not_trigger_large_compatibility_request(self):
+        calls = []
+
+        class FakeExchange:
+            def __init__(self, config=None):
+                pass
+
+            def load_markets(self):
+                return {"BTC/USDT": {"active": True, "spot": True}}
+
+            def fetch_tickers(self, symbols=None):
+                calls.append(symbols)
+                raise TypeError("interner Adapterfehler")
+
+            def close(self):
+                pass
+
+        with (
+            patch("trading.market_scanner.ccxt.binance", FakeExchange),
+            self.assertRaisesRegex(MarketScannerError, "interner Adapterfehler"),
+        ):
+            scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(calls, [None])
+
+    def test_missing_market_cap_is_excluded_instead_of_inferred(self):
+        class FakeExchange:
+            def __init__(self, config=None):
+                pass
+
+            def load_markets(self):
+                return {
+                    symbol: {"active": True, "spot": True}
+                    for symbol in ("BTC/USDT", "ETH/USDT", "SOL/USDT")
+                }
+
+            def fetch_tickers(self, symbols=None):
+                return {
+                    "BTC/USDT": {
+                        "percentage": 20,
+                        "last": 100,
+                        "quoteVolume": 1_000_000,
+                        "info": {"marketCap": 2_000_000},
+                    },
+                    "ETH/USDT": {
+                        "percentage": -20,
+                        "last": 100,
+                        "quoteVolume": 1_000_000,
+                        "info": {},
+                    },
+                    "SOL/USDT": {
+                        "percentage": 1,
+                        "last": 100,
+                        "quoteVolume": 100_000,
+                        "info": {"marketCap": 2_000_000},
+                    },
+                }
+
+            def fetch_order_book(self, symbol, limit=20):
+                return {"bids": [[100, 100]], "asks": [[101, 100]]}
+
+            def close(self):
+                pass
+
+        with (
+            patch("trading.market_scanner.ccxt.binance", FakeExchange),
+            patch("trading.market_scanner._coingecko_market_caps", return_value={}),
+        ):
+            result = scan_market_opportunities(
+                "binance",
+                "spot",
+                refresh=True,
+                volume_spike_multiple=1,
+            )
+        eth = next(row for row in result["rows"] if row["symbol"] == "ETH/USDT")
+        self.assertFalse(eth["eligible"])
+        self.assertIsNone(eth["market_cap"])
+        self.assertTrue(
+            any("unbekannt" in reason for reason in eth["exclusion_reasons"]),
+            eth["exclusion_reasons"],
+        )
+
+    def test_bitunix_spot_uses_documented_pair_kline_and_depth_endpoints(self):
+        adapter = _BitunixScannerExchange("spot")
+        requests = []
+
+        def fake_json(url, **kwargs):
+            requests.append((url, kwargs.get("params")))
+            if url.endswith("/common/coin_pair/list"):
+                return {
+                    "code": 0,
+                    "data": [
+                        {
+                            "id": "123",
+                            "base": "BTC",
+                            "quote": "USDT",
+                            "isOpen": "1",
+                            "precisions": ["0.01"],
+                        }
+                    ],
+                }
+            if url.endswith("/market/kline/history"):
+                return {
+                    "code": 0,
+                    "data": [
+                        {
+                            "ts": f"2026-01-01T{hour:02d}:00:00Z",
+                            "open": str(100 + hour),
+                            "close": str(101 + hour),
+                            "baseVolume": "10",
+                        }
+                        for hour in reversed(range(24))
+                    ],
+                }
+            if url.endswith("/market/depth"):
+                return {
+                    "code": 0,
+                    "data": {
+                        "bids": [{"price": "100", "volume": "2"}],
+                        "asks": [{"price": "101", "volume": "2"}],
+                    },
+                }
+            raise AssertionError(url)
+
+        adapter.provider._json = fake_json
+        markets = adapter.load_markets()
+        ticker = adapter.fetch_tickers(list(markets))["BTC/USDT"]
+        depth = adapter.fetch_order_book("BTC/USDT")
+        adapter.close()
+        self.assertEqual(set(markets), {"BTC/USDT"})
+        self.assertEqual(ticker["open"], 100)
+        self.assertEqual(ticker["last"], 124)
+        self.assertGreater(ticker["quoteVolume"], 0)
+        self.assertEqual(depth["bids"][0]["price"], "100")
+        self.assertFalse(any(url.endswith("/tickers") for url, _params in requests))
+        depth_url, depth_params = next(
+            (url, params) for url, params in requests if url.endswith("/depth")
+        )
+        self.assertTrue(depth_url.endswith("/api/spot/v1/market/depth"))
+        self.assertEqual(depth_params["precision"], "0.01")
+
+    def test_bitunix_spot_does_not_invent_missing_volume(self):
+        adapter = _BitunixScannerExchange("spot")
+        adapter.provider._json = lambda _url, **_kwargs: {
+            "code": 0,
+            "data": [
+                {
+                    "ts": f"2026-01-01T{hour:02d}:00:00Z",
+                    "open": "100",
+                    "close": "101",
+                }
+                for hour in range(24)
+            ],
+        }
+        ticker = adapter._spot_ticker("BTC/USDT")
+        adapter.close()
+        self.assertIsNone(ticker["baseVolume"])
+        self.assertIsNone(ticker["quoteVolume"])
+
+    def test_bitunix_spot_does_not_guess_volume_from_array_positions(self):
+        values = _BitunixScannerExchange._kline_values(
+            [1_700_000_000_000, "100", "110", "90", "101", "999999"]
+        )
+        self.assertIsNone(values["base_volume"])
+        self.assertIsNone(values["quote_volume"])
+
+    def test_missing_bitunix_spot_volume_returns_explicitly_excluded_rows(self):
+        class FakeExchange:
+            def load_markets(self):
+                return {"BTC/USDT": {"active": True, "spot": True}}
+
+            def fetch_tickers(self, symbols):
+                self.asserted_symbols = symbols
+                return {
+                    "BTC/USDT": {
+                        "last": 120,
+                        "percentage": 20,
+                        "quoteVolume": None,
+                        "info": {"marketCap": 1_000_000},
+                    }
+                }
+
+            def fetch_order_book(self, _symbol, limit=20):
+                raise AssertionError("Fehlendes Tagesvolumen muss vor dem Orderbuch ausschließen")
+
+            def close(self):
+                pass
+
+        exchange = FakeExchange()
+        with patch("trading.market_scanner._market_scanner_exchange", return_value=exchange):
+            result = scan_market_opportunities("bitunix", "spot", refresh=True)
+        self.assertEqual(exchange.asserted_symbols, ["BTC/USDT"])
+        self.assertEqual(result["gainers"], [])
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertFalse(result["rows"][0]["eligible"])
+        self.assertTrue(
+            any(
+                "24h-Quotevolumen fehlt" in reason
+                for reason in result["rows"][0]["exclusion_reasons"]
+            )
+        )
+
+    def test_orderbook_depth_requires_two_sides_and_ignores_far_levels(self):
+        class FakeExchange:
+            def __init__(self, book):
+                self.book = book
+
+            def fetch_order_book(self, _symbol, limit=20):
+                return self.book
+
+        depth, error = _orderbook_depth(
+            FakeExchange({"bids": [[100, 2]], "asks": []}),
+            "BTC/USDT",
+            {},
+        )
+        self.assertIsNone(depth)
+        self.assertIn("Bid- und Ask", error)
+        depth, error = _orderbook_depth(
+            FakeExchange(
+                {
+                    "bids": [[100, 2], [50, 1000]],
+                    "asks": [[101, 3], [150, 1000]],
+                }
+            ),
+            "BTC/USDT",
+            {},
+        )
+        self.assertIsNone(error)
+        self.assertEqual(depth["quote"], 100 * 2 + 101 * 3)
+        self.assertEqual(depth["mid"], 100.5)
+
+    def test_scanner_parameters_are_bounded(self):
+        with self.assertRaises(MarketScannerFilterError):
+            scan_market_opportunities("binance", "spot", volatility_threshold=0)
+        with self.assertRaises(MarketScannerFilterError):
+            scan_market_opportunities("binance", "spot", min_orderbook_depth_ratio="nan")

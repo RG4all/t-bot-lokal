@@ -42,6 +42,27 @@
         <button type="button" class="btn btn-outline-secondary" id="scan-all-markets">Alle Exchanges</button>
       </div>
     </div>
+    <fieldset class="mt-3" aria-label="Marktscanner-Filter">
+      <legend class="h6 mb-2">Filter anpassen</legend>
+      <div class="row g-3">
+        <div class="col-sm-6 col-xl-3">
+          <label class="form-label small mb-1" for="scanner-volatility">Kursausschlag: <output id="scanner-volatility-value" for="scanner-volatility">10 %</output></label>
+          <input class="form-range scanner-filter" type="range" id="scanner-volatility" min="1" max="50" step="0.5" value="10" data-output="scanner-volatility-value" data-suffix=" %">
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <label class="form-label small mb-1" for="scanner-volume-spike">Volumen-Ausreißer: <output id="scanner-volume-spike-value" for="scanner-volume-spike">1,5×</output></label>
+          <input class="form-range scanner-filter" type="range" id="scanner-volume-spike" min="1" max="5" step="0.1" value="1.5" data-output="scanner-volume-spike-value" data-suffix="×">
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <label class="form-label small mb-1" for="scanner-market-cap">Tagesvolumen/Market Cap: <output id="scanner-market-cap-value" for="scanner-market-cap">10 %</output></label>
+          <input class="form-range scanner-filter" type="range" id="scanner-market-cap" min="0.1" max="100" step="0.1" value="10" data-output="scanner-market-cap-value" data-suffix=" %">
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <label class="form-label small mb-1" for="scanner-orderbook">Orderbuch/Tagesvolumen: <output id="scanner-orderbook-value" for="scanner-orderbook">0,1 %</output></label>
+          <input class="form-range scanner-filter" type="range" id="scanner-orderbook" min="0.01" max="5" step="0.01" value="0.1" data-output="scanner-orderbook-value" data-suffix=" %">
+        </div>
+      </div>
+    </fieldset>
     <div id="market-scan-message" class="small mt-3" role="status"></div>
     <div id="market-risk-warning" class="alert alert-warning small mt-3 mb-0 d-none" role="alert"></div>
     <div class="table-responsive mt-3 d-none" id="market-scan-table-wrap">
@@ -51,6 +72,6 @@
       </table>
       <button type="button" class="btn btn-sm btn-primary" id="use-market-selection" disabled>Ausgewählte Märkte in Symbole übernehmen</button>
     </div>
-    <p class="form-text mt-3 mb-0">Filter: Kursausschlag über 10 %, Volumen-Ausreißer, mindestens 10 % Tagesvolumen/Marktkapitalisierung und belastbare Orderbuch-Tiefe. Fehlende Fundamental- oder Liquiditätsdaten werden nicht schöngerechnet.</p>
+    <p class="form-text mt-3 mb-0">Alle vier Schwellenwerte sind einstellbar. Fundamental- und Liquiditätsdaten bleiben verpflichtend: unbekannte Marktkapitalisierung, unvollständige 24h-Daten oder ein nicht belastbar messbares Orderbuch führen immer zum Ausschluss und werden nicht schöngerechnet.</p>
   </div>
 </div>
