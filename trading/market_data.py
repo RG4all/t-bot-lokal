@@ -105,7 +105,7 @@ class PublicHTTPMarketData:
 
 
 class BinancePublicSymbolCatalog(PublicHTTPMarketData):
-    """Authoritative Binance Spot/Futures catalog used for discovery and validation."""
+    """Maßgeblicher Binance-Spot-/Futures-Katalog für Vorschläge und Validierung."""
 
     endpoints = {
         "spot": "https://api.binance.com/api/v3/exchangeInfo",
@@ -140,9 +140,7 @@ class BinancePublicSymbolCatalog(PublicHTTPMarketData):
             if base and quote:
                 available.add(f"{str(base).upper()}/{str(quote).upper()}")
         if not available:
-            raise MarketDataConnectionError(
-                f"Binance lieferte keine aktiven {self.market}-Symbole"
-            )
+            raise MarketDataConnectionError(f"Binance lieferte keine aktiven {self.market}-Symbole")
         self._available_symbols = available
         return available
 
@@ -175,7 +173,13 @@ class BinancePublicMarketData:
     @property
     def websocket_base_urls(self):
         if self.market == "futures":
-            return ("wss://fstream.binance.com/stream",)
+            # Zweiter dokumentierter USDT-M-Futures-Endpunkt als Ausweichpfad:
+            # Der Reconnect rotiert die Endpunkte und übersteht damit auch den
+            # Ausfall eines einzelnen Binance-Stream-Frontends.
+            return (
+                "wss://fstream.binance.com/stream",
+                "wss://fstream.binance.com:9443/stream",
+            )
         return (
             "wss://stream.binance.com:443/stream",
             "wss://stream.binance.com:9443/stream",
@@ -349,9 +353,12 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 compact = item
                 active = True
             else:
-                compact = item.get("symbol") or item.get("symbolName") or (
-                    f"{item.get('base', '')}{item.get('quote', '')}"
-                ) or item.get("id")
+                compact = (
+                    item.get("symbol")
+                    or item.get("symbolName")
+                    or (f"{item.get('base', '')}{item.get('quote', '')}")
+                    or item.get("id")
+                )
                 status = str(item.get("symbolStatus", item.get("isOpen", "OPEN"))).upper()
                 active = status in {"OPEN", "1", "TRUE"}
             if compact and active:

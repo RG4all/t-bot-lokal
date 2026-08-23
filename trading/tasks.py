@@ -16,6 +16,7 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 from .backtesting import Backtesting
 from .models import BacktestTask, Configuration, DataLog
 from .resource_optimizer import get_backtest_resource_profile
+from .strategy import normalize_direction, resolve_leverage
 
 logger = logging.getLogger(__name__)
 _MAX_TOTAL_COMBINATIONS = min(100_000, getattr(settings, "BACKTEST_MAX_COMBINATIONS", 20_000))
@@ -76,7 +77,7 @@ def _dispatch_local(task, args, kwargs):
 
 
 def dispatch_task(task, *args, force_local=False, **kwargs):
-    """Celery first; local serial fallback only when explicitly enabled."""
+    """Zuerst Celery; der lokale serielle Fallback nur nach ausdrücklicher Freigabe."""
     if force_local or getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
         return _dispatch_local(task, args, kwargs)
     try:
@@ -115,7 +116,7 @@ def _parameter_values(start, end, step):
 
 
 def _historical_data(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
-    """Loads aligned prices and timestamps in chronological order."""
+    """Lädt Preise und Zeitstempel paarweise in chronologischer Reihenfolge."""
     profile = get_backtest_resource_profile()
     limit = max(
         100,
@@ -134,7 +135,7 @@ def _historical_data(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
 
 
 def _historical_prices(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
-    """Backward-compatible price-only helper for external integrations."""
+    """Rückwärtskompatible Hilfsfunktion, die nur Preise liefert."""
     return _historical_data(config_id, symbol, limit)["prices"]
 
 
@@ -161,6 +162,17 @@ def _simulate_candidate(
             "take_profit": params.get("take_profit", config.take_profit),
             "stop_loss": params.get("stop_loss", config.stop_loss),
             "fee_percentage": params.get("fee", config.fee),
+            # Hebel und Richtung stammen aus dem Formular; ohne Angabe gilt
+            # die Konfiguration (Spot erzwingt Hebel 1 und Long).
+            "leverage": resolve_leverage(
+                config.exchange,
+                config.market,
+                params.get("leverage", config.leverage),
+            ),
+            "direction": normalize_direction(
+                params.get("direction") or config.trade_direction,
+                config.market,
+            ),
         },
         indicator_rows=indicator_rows,
         timestamps=timestamps,
@@ -293,9 +305,9 @@ def _collect_results(results, task):
             )
             continue
 
-        # Backward compatibility for compact reports from external Celery
-        # callers which predate detailed trade rows. New backtests always use
-        # the individual sell durations above as their authoritative source.
+        # Rückwärtskompatibilität für kompakte Reports externer Celery-Aufrufer
+        # ohne detaillierte Trade-Zeilen. Neue Backtests nutzen immer die oben
+        # ermittelten Einzeldauern als maßgebliche Quelle.
         sell_count = int(report.get("num_sells", 0))
         average_points = report.get("average_trade_duration_points")
         if sell_count and average_points is not None:

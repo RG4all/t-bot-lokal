@@ -11,6 +11,8 @@ class ConfigurationAdmin(admin.ModelAdmin):
         "user",
         "exchange",
         "market",
+        "leverage",
+        "trade_direction",
         "symbols",
         "start_capital",
         "trade_amount",
@@ -25,6 +27,7 @@ class ConfigurationAdmin(admin.ModelAdmin):
     list_filter = (
         "exchange",
         "market",
+        "trade_direction",
         "user",
     )
 
@@ -37,7 +40,20 @@ class ConfigurationAdmin(admin.ModelAdmin):
     readonly_fields = ()
 
     fieldsets = (
-        ("Grunddaten", {"fields": ("name", "user", "exchange", "market", "symbols")}),
+        (
+            "Grunddaten",
+            {
+                "fields": (
+                    "name",
+                    "user",
+                    "exchange",
+                    "market",
+                    "leverage",
+                    "trade_direction",
+                    "symbols",
+                )
+            },
+        ),
         (
             "Kapital & Risiko",
             {"fields": ("start_capital", "trade_amount", "take_profit", "stop_loss", "fee")},
@@ -67,6 +83,8 @@ class TradingLogAdmin(admin.ModelAdmin):
         "configuration",
         "symbol",
         "action",
+        "direction",
+        "leverage",
         "price",
         "amount",
         "pl_nominal",
@@ -74,7 +92,7 @@ class TradingLogAdmin(admin.ModelAdmin):
         "total_pl",
     )
 
-    list_filter = ("symbol", "action")
+    list_filter = ("symbol", "action", "direction")
     search_fields = ("symbol",)
     ordering = ("-timestamp",)
 

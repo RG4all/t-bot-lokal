@@ -1,5 +1,16 @@
 from decimal import ROUND_HALF_UP, Decimal
 
+from .strategy import (
+    LONG,
+    SHORT,
+    entry_signal,
+    gross_pnl,
+    is_liquidated,
+    normalize_direction,
+    position_size,
+    price_change_percent,
+)
+
 _EIGHT_PLACES = Decimal("0.00000001")
 
 
@@ -95,6 +106,12 @@ class Backtesting:
         take_profit = _decimal(simulation_params.get("take_profit"), "5")
         stop_loss = _decimal(simulation_params.get("stop_loss"), "100")
         fee_percentage = _decimal(simulation_params.get("fee_percentage"), "0.1")
+        # Hebel und Handelsrichtung. Ohne Angabe verhält sich die Simulation
+        # exakt wie bisher: Long ohne Hebel.
+        leverage = _decimal(simulation_params.get("leverage"), "1")
+        if leverage <= 0:
+            leverage = Decimal(1)
+        direction = normalize_direction(simulation_params.get("direction") or LONG)
         acc_threshold = _decimal(acc_threshold)
         nda_threshold = _decimal(nda_threshold)
         deltadelta_threshold = _decimal(deltadelta_threshold)
@@ -118,17 +135,18 @@ class Backtesting:
                 continue
 
             if position is None:
-                should_buy = (
-                    acceleration > acc_threshold
-                    and current_nda > nda_threshold
-                    and deltadelta > deltadelta_threshold
+                signal = entry_signal(
+                    acceleration,
+                    deltadelta,
+                    current_nda,
+                    (acc_threshold, nda_threshold, deltadelta_threshold),
+                    direction,
                 )
-                buy_fee = trade_amount * fee_percentage / Decimal(100)
-                if should_buy and capital >= trade_amount + buy_fee:
-                    amount = (trade_amount / current_price).quantize(
-                        _EIGHT_PLACES,
-                        rounding=ROUND_HALF_UP,
-                    )
+                # Gebühren fallen auf das Nominalvolumen (Margin × Hebel) an,
+                # gebunden wird nur die Margin.
+                buy_fee = trade_amount * leverage * fee_percentage / Decimal(100)
+                if signal and capital >= trade_amount + buy_fee:
+                    amount = position_size(trade_amount, current_price, leverage)
                     capital_before = capital
                     capital -= trade_amount + buy_fee
                     position = {
@@ -137,11 +155,17 @@ class Backtesting:
                         "buy_fee": buy_fee,
                         "index": index,
                         "timestamp": timestamps[index],
+                        "direction": signal,
+                        "leverage": leverage,
+                        "margin": trade_amount,
                     }
                     if trades is not None:
                         trades.append(
                             {
                                 "type": "buy",
+                                "direction": signal,
+                                "leverage": leverage,
+                                "margin": trade_amount,
                                 "price": current_price,
                                 "index": index,
                                 "timestamp": Backtesting._timestamp_text(timestamps[index]),
@@ -152,10 +176,18 @@ class Backtesting:
                         )
 
             if position is not None:
-                price_change = (
-                    (current_price - position["price"]) / position["price"] * Decimal(100)
+                # Kursbewegung aus Sicht der Position: Für Shorts zählt ein
+                # fallender Kurs als Gewinn.
+                price_change = price_change_percent(
+                    position["price"],
+                    current_price,
+                    position["direction"],
                 )
-                if price_change >= take_profit or price_change <= -stop_loss:
+                if (
+                    price_change >= take_profit
+                    or price_change <= -stop_loss
+                    or is_liquidated(price_change, position["leverage"])
+                ):
                     capital = Backtesting._close_position(
                         capital,
                         position,
@@ -168,9 +200,17 @@ class Backtesting:
                     )
                     position = None
             if include_details:
-                equity_values.append(
-                    capital + (position["amount"] * current_price if position else Decimal(0))
-                )
+                # Mark-to-Market: freies Kapital plus Margin plus schwebendes
+                # Ergebnis der offenen Position (richtungs- und hebelrichtig).
+                open_value = Decimal(0)
+                if position:
+                    open_value = position["margin"] + gross_pnl(
+                        position["price"],
+                        current_price,
+                        position["amount"],
+                        position["direction"],
+                    )
+                equity_values.append(capital + open_value)
 
         if position is not None and prices:
             # Falls die Reihe mit ungültigen Ticks endet, wird am letzten
@@ -179,7 +219,11 @@ class Backtesting:
                 index for index in range(len(prices) - 1, -1, -1) if prices[index] > 0
             )
             final_price = prices[final_index]
-            price_change = (final_price - position["price"]) / position["price"] * Decimal(100)
+            price_change = price_change_percent(
+                position["price"],
+                final_price,
+                position["direction"],
+            )
             capital = Backtesting._close_position(
                 capital,
                 position,
@@ -310,16 +354,20 @@ class Backtesting:
         trades,
         price_change,
     ):
-        gross_proceeds = position["amount"] * price
-        sell_fee = gross_proceeds * fee_percentage / Decimal(100)
-        net_proceeds = gross_proceeds - sell_fee
-        profit = net_proceeds - (position["amount"] * position["price"]) - position["buy_fee"]
+        sell_fee = position["amount"] * price * fee_percentage / Decimal(100)
+        # Rückfluss auf das Konto: Margin + Rohergebnis − Schließungsgebühr.
+        # Die Eröffnungsgebühr wurde bereits beim Einstieg abgezogen.
+        raw_profit = gross_pnl(position["price"], price, position["amount"], position["direction"])
+        profit = raw_profit - position["buy_fee"] - sell_fee
         capital_before = capital
-        capital += net_proceeds
+        capital += position["margin"] + raw_profit - sell_fee
         if trades is not None:
             trades.append(
                 {
                     "type": "sell",
+                    "direction": position["direction"],
+                    "leverage": position["leverage"],
+                    "margin": position["margin"],
                     "price": price,
                     "index": index,
                     "timestamp": Backtesting._timestamp_text(timestamp),
@@ -334,6 +382,12 @@ class Backtesting:
                     "fee": sell_fee,
                     "profit_percentage": price_change,
                     "profit_nominal": profit,
+                    # Rendite auf das eingesetzte Eigenkapital (Margin + Gebühr).
+                    "roi_percentage": (
+                        profit / (position["margin"] + position["buy_fee"]) * Decimal(100)
+                        if (position["margin"] + position["buy_fee"])
+                        else Decimal(0)
+                    ),
                 }
             )
         return capital
@@ -387,18 +441,30 @@ class Backtesting:
             col=1,
         )
 
-        for trade_type, color, symbol in (
-            ("buy", "green", "triangle-up"),
-            ("sell", "red", "triangle-down"),
-        ):
-            trades = [trade for trade in report.get("trades", []) if trade["type"] == trade_type]
+        # Ein- und Ausstiege werden nach Handelsrichtung getrennt dargestellt,
+        # damit Long- und Short-Trades im Chart unterscheidbar bleiben.
+        marker_styles = (
+            ("buy", LONG, "green", "triangle-up", "Long-Einstiege"),
+            ("sell", LONG, "darkgreen", "triangle-down", "Long-Ausstiege"),
+            ("buy", SHORT, "red", "triangle-down", "Short-Einstiege"),
+            ("sell", SHORT, "darkred", "triangle-up", "Short-Ausstiege"),
+        )
+        for trade_type, trade_direction, color, marker, label in marker_styles:
+            trades = [
+                trade
+                for trade in report.get("trades", [])
+                if trade["type"] == trade_type
+                and (trade.get("direction") or LONG) == trade_direction
+            ]
+            if not trades:
+                continue
             figure.add_trace(
                 go.Scatter(
                     x=[trade["index"] for trade in trades],
                     y=[float(trade["price"]) for trade in trades],
                     mode="markers",
-                    marker={"symbol": symbol, "size": 12, "color": color},
-                    name=f"{trade_type.title()}-Signale",
+                    marker={"symbol": marker, "size": 12, "color": color},
+                    name=label,
                 ),
                 row=1,
                 col=1,

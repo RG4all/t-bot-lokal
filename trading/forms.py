@@ -1,5 +1,6 @@
 import math
 import re
+from decimal import Decimal
 
 from django import forms
 from django.conf import settings
@@ -10,12 +11,67 @@ from django.utils import timezone
 from .backtest_templates import template_choices
 from .market_data import MarketDataError, SymbolValidationError, validate_exchange_symbols
 from .models import Configuration
+from .strategy import (
+    BOTH,
+    DIRECTION_CHOICES,
+    LONG,
+    SHORT,
+    liquidation_move_percent,
+    max_leverage,
+    resolve_leverage,
+)
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9._-]+/[A-Z0-9._:-]+$")
 # Sicherheitsabsolute; das wirksame Limit wird zusätzlich pro Hardwareprofil
 # und über die Environment-Konfiguration begrenzt.
 _MAX_BACKTEST_COMBINATIONS = min(100_000, getattr(settings, "BACKTEST_MAX_COMBINATIONS", 20_000))
 _MAX_BACKTEST_PRICE_POINTS = min(50_000, getattr(settings, "BACKTEST_MAX_PRICE_POINTS", 5_000))
+
+
+def validate_leverage_and_direction(form, cleaned_data, exchange, market):
+    """Prüft Hebel und Handelsrichtung gegen Markt und Börsenlimit.
+
+    Regeln:
+    * Spot kennt weder Hebel noch Short – beides wird klar abgewiesen.
+    * Der Hebel darf den je Börse konfigurierten Maximalhebel nicht
+      überschreiten (siehe ``EXCHANGE_MAX_LEVERAGE``).
+    * Der Stop-Loss muss vor der Liquidationsschwelle greifen, sonst wäre
+      die Margin bereits verloren, bevor der Stop überhaupt auslöst.
+    """
+    leverage = cleaned_data.get("leverage")
+    direction = cleaned_data.get("trade_direction") or LONG
+    stop_loss = cleaned_data.get("stop_loss")
+    if not exchange or not market:
+        return
+    if market != "futures":
+        if leverage not in (None, 1):
+            form.add_error(
+                "leverage",
+                "Im Spot-Markt ist nur Hebel 1 möglich. Für Hebel bitte Futures wählen.",
+            )
+        if direction in {SHORT, BOTH}:
+            form.add_error(
+                "trade_direction",
+                "Short-Positionen sind nur im Futures-Markt möglich.",
+            )
+        return
+    limit = max_leverage(exchange)
+    if leverage is not None and leverage > limit:
+        form.add_error(
+            "leverage",
+            f"{dict(Configuration.EXCHANGE_CHOICES).get(exchange, exchange)} erlaubt in "
+            f"dieser Installation höchstens Hebel {limit}x.",
+        )
+        return
+    effective = resolve_leverage(exchange, market, leverage)
+    if stop_loss is not None:
+        liquidation = liquidation_move_percent(effective)
+        if Decimal(str(stop_loss)) >= liquidation:
+            form.add_error(
+                "stop_loss",
+                f"Bei Hebel {int(effective)}x wird die Position bereits ab "
+                f"{liquidation:.2f} % Kursverlust liquidiert. Stop-Loss kleiner wählen.",
+            )
 
 
 class RegistrationForm(forms.ModelForm):
@@ -116,6 +172,8 @@ class ConfigurationForm(forms.ModelForm):
             "name",
             "exchange",
             "market",
+            "leverage",
+            "trade_direction",
             "symbols",
             "start_capital",
             "trade_amount",
@@ -136,6 +194,8 @@ class ConfigurationForm(forms.ModelForm):
             "name": "Name der Konfiguration",
             "exchange": "Börse (Exchange)",
             "market": "Marktart",
+            "leverage": "Hebel (nur Futures)",
+            "trade_direction": "Handelsrichtung",
             "symbols": "Handelspaare (Symbole)",
             "start_capital": "Startkapital (USDT)",
             "trade_amount": "Trade-Betrag pro Position (USDT)",
@@ -162,6 +222,8 @@ class ConfigurationForm(forms.ModelForm):
             "name": "Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. „Binance Spot Top 5“.",
             "exchange": "Kryptobörse für Marktdaten und Paper-Trading: Binance, BingX, Bybit, BitMart oder Bitunix.",
             "market": "Handelsmarkt: Spot (Kassamarkt) oder Futures (Derivate/Swaps).",
+            "leverage": "Hebel für Futures (1 = ohne Hebel). Der Trade-Betrag ist die eingesetzte Margin, das Nominalvolumen beträgt Margin × Hebel. Im Spot-Markt wird immer mit Hebel 1 gerechnet.",
+            "trade_direction": "Long (steigende Kurse), Short (fallende Kurse) oder beide Richtungen. Short setzt den Futures-Markt voraus.",
             "symbols": "Handelspaare durch Kommas trennen, z. B. BTC/USDT, ETH/USDT. Vorschläge richten sich nach Exchange und Markt.",
             "start_capital": "Virtuelles Anfangskapital für die Simulation in USDT.",
             "trade_amount": "Virtueller Nominalbetrag je Position. Kaufgebühr muss zusätzlich gedeckt sein.",
@@ -196,6 +258,17 @@ class ConfigurationForm(forms.ModelForm):
         if self.instance and self.instance.pk:
             self.fields["api_key"].widget.attrs["placeholder"] = "Unverändert lassen"
             self.fields["secret_key"].widget.attrs["placeholder"] = "Unverändert lassen"
+        # Rückwärtskompatibilität: Formulare und Integrationen, die Hebel und
+        # Handelsrichtung nicht mitsenden, bleiben gültig und erhalten die
+        # risikofreien Standardwerte (Hebel 1, Long).
+        self.fields["leverage"].required = False
+        self.fields["trade_direction"].required = False
+
+    def clean_leverage(self):
+        return self.cleaned_data.get("leverage") or 1
+
+    def clean_trade_direction(self):
+        return self.cleaned_data.get("trade_direction") or LONG
 
     def full_clean(self):
         super().full_clean()
@@ -284,6 +357,7 @@ class ConfigurationForm(forms.ModelForm):
         exchange = cleaned_data.get("exchange")
         market = cleaned_data.get("market")
         symbols_value = cleaned_data.get("symbols")
+        validate_leverage_and_direction(self, cleaned_data, exchange, market)
         if (
             exchange in {"bitmart", "bitunix"}
             and market == "spot"
@@ -321,6 +395,8 @@ class DashboardConfigurationForm(forms.ModelForm):
             "nda_threshold_buy",
             "stop_loss",
             "take_profit",
+            "leverage",
+            "trade_direction",
         ]
         labels = {
             "div_DVA_prev_NDA_threshold_buy": "Beschleunigung (DVA / prev NDA) – Kaufschwelle",
@@ -328,6 +404,8 @@ class DashboardConfigurationForm(forms.ModelForm):
             "nda_threshold_buy": "NDA (normalisierte Preisänderung) – Kaufschwelle",
             "stop_loss": "Stop Loss (%)",
             "take_profit": "Take Profit (%)",
+            "leverage": "Hebel (nur Futures)",
+            "trade_direction": "Handelsrichtung",
         }
         help_texts = {
             "div_DVA_prev_NDA_threshold_buy": "Kaufschwelle für die Momentum-Beschleunigung (DVA / vorherige NDA). Entspricht „Beschleunigung“ im Backtesting.",
@@ -335,14 +413,42 @@ class DashboardConfigurationForm(forms.ModelForm):
             "nda_threshold_buy": "Kaufschwelle für die normalisierte Preisänderung (((P0 - P1) / P1) * 100). Entspricht „NDA“ im Backtesting.",
             "stop_loss": "Prozentualer Verlust ab Einstieg zum automatischen Schließen der Position.",
             "take_profit": "Prozentualer Gewinn ab Einstieg zum automatischen Schließen der Position.",
+            "leverage": "Hebel für Futures (1 = ohne Hebel). Gilt erst für neu eröffnete Positionen.",
+            "trade_direction": "Long, Short oder beide Richtungen. Short setzt den Futures-Markt voraus.",
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Wie im Konfigurationsformular optional, damit bestehende
+        # Dashboard-Formulare ohne die neuen Felder weiter funktionieren.
+        self.fields["leverage"].required = False
+        self.fields["trade_direction"].required = False
         for field in self.fields.values():
-            field.widget.attrs["class"] = "form-control"
+            if isinstance(field.widget, forms.Select):
+                field.widget.attrs["class"] = "form-select"
+            else:
+                field.widget.attrs["class"] = "form-control"
             if field.help_text:
                 field.widget.attrs["title"] = field.help_text
+
+    def clean_leverage(self):
+        return self.cleaned_data.get("leverage") or 1
+
+    def clean_trade_direction(self):
+        return self.cleaned_data.get("trade_direction") or LONG
+
+    def clean(self):
+        # Börse und Markt sind im Dashboard nicht editierbar; geprüft wird
+        # deshalb gegen die gespeicherte Konfiguration.
+        cleaned_data = super().clean()
+        instance = self.instance
+        validate_leverage_and_direction(
+            self,
+            cleaned_data,
+            getattr(instance, "exchange", None),
+            getattr(instance, "market", None),
+        )
+        return cleaned_data
 
 
 class BacktestForm(forms.Form):
@@ -394,7 +500,19 @@ class BacktestForm(forms.Form):
     trade_amount = forms.FloatField(
         label="Trade-Betrag pro Position (USDT)",
         min_value=0.00000001,
-        help_text="Virtueller Nominalbetrag je Position für den Backtest.",
+        help_text="Eingesetzte Margin je Position. Das Nominalvolumen beträgt Margin × Hebel.",
+    )
+    direction = forms.ChoiceField(
+        label="Handelsrichtung",
+        choices=DIRECTION_CHOICES,
+        required=False,
+        help_text="Simulierte Richtung: Long, Short oder beide. Short setzt Futures voraus.",
+    )
+    leverage = forms.IntegerField(
+        label="Hebel (nur Futures)",
+        required=False,
+        min_value=1,
+        help_text="Hebel für die Simulation. Im Spot-Markt wird immer mit 1 gerechnet.",
     )
     take_profit = forms.FloatField(
         label="Take Profit (%)",
@@ -455,10 +573,29 @@ class BacktestForm(forms.Form):
         start_capital=None,
         resource_profile=None,
         symbol_count=1,
+        exchange=None,
+        market=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.start_capital = start_capital
+        self.exchange = exchange
+        self.market = market
+        if market is not None and market != "futures":
+            # Spot: Hebel und Short sind fachlich ausgeschlossen, deshalb wird
+            # das Feld gar nicht erst zur Eingabe angeboten.
+            self.fields["leverage"].disabled = True
+            self.fields["leverage"].initial = 1
+            self.fields["direction"].choices = [
+                choice for choice in DIRECTION_CHOICES if choice[0] == LONG
+            ]
+        elif exchange:
+            limit = max_leverage(exchange)
+            self.fields["leverage"].max_value = limit
+            self.fields["leverage"].help_text = (
+                f"Hebel für die Simulation (1 bis {limit}x auf dieser Börse). "
+                "Der Trade-Betrag ist die eingesetzte Margin."
+            )
         self.resource_profile = resource_profile
         self.symbol_count = max(1, int(symbol_count or 1))
         profile_max_points = getattr(
@@ -489,8 +626,41 @@ class BacktestForm(forms.Form):
             if field.help_text:
                 field.widget.attrs["title"] = field.help_text
 
+    def _clean_leverage_and_direction(self, cleaned_data):
+        """Normalisiert Hebel und Richtung und prüft sie gegen die Börse."""
+        market = (self.market or "").strip().lower()
+        direction = cleaned_data.get("direction") or LONG
+        leverage = cleaned_data.get("leverage") or 1
+        if market and market != "futures":
+            if direction in {SHORT, BOTH}:
+                self.add_error("direction", "Short ist nur im Futures-Markt simulierbar.")
+            cleaned_data["direction"] = LONG
+            cleaned_data["leverage"] = 1
+            return
+        if self.exchange:
+            limit = max_leverage(self.exchange)
+            if leverage > limit:
+                self.add_error(
+                    "leverage",
+                    f"Diese Börse erlaubt höchstens Hebel {limit}x.",
+                )
+                return
+        effective = int(resolve_leverage(self.exchange or "", market or "futures", leverage))
+        stop_loss = cleaned_data.get("stop_loss")
+        if stop_loss is not None:
+            liquidation = liquidation_move_percent(effective)
+            if Decimal(str(stop_loss)) >= liquidation:
+                self.add_error(
+                    "stop_loss",
+                    f"Bei Hebel {effective}x liegt die Liquidation bereits bei "
+                    f"{liquidation:.2f} % Kursverlust.",
+                )
+        cleaned_data["direction"] = direction
+        cleaned_data["leverage"] = effective
+
     def clean(self):
         cleaned_data = super().clean()
+        self._clean_leverage_and_direction(cleaned_data)
         scheduled = cleaned_data.get("schedule_backtest")
         start_time = cleaned_data.get("scheduled_start_time")
         if scheduled and not start_time:
@@ -500,10 +670,12 @@ class BacktestForm(forms.Form):
 
         trade_amount = cleaned_data.get("trade_amount")
         fee = cleaned_data.get("fee") or 0
+        # Gebunden wird die Margin; die Gebühr fällt auf Margin × Hebel an.
+        leverage = float(cleaned_data.get("leverage") or 1)
         if (
             self.start_capital is not None
             and trade_amount is not None
-            and trade_amount * (1 + fee / 100) > float(self.start_capital)
+            and trade_amount * (1 + leverage * fee / 100) > float(self.start_capital)
         ):
             self.add_error(
                 "trade_amount",

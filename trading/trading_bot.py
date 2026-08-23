@@ -32,6 +32,18 @@ from .market_data import (
     WebSocketReconnectError,
 )
 from .models import Configuration, DataLog, ErrorLog, TradingLog
+from .strategy import (
+    LONG,
+    SHORT,
+    entry_signal,
+    gross_pnl,
+    is_liquidated,
+    liquidation_price,
+    normalize_direction,
+    position_size,
+    price_change_percent,
+    resolve_leverage,
+)
 
 logger = logging.getLogger("trading")
 _EIGHT_PLACES = Decimal("0.00000001")
@@ -244,6 +256,9 @@ def db_restore_state(config_id):
             "amount",
             "fee_amount",
             "pl_nominal",
+            "direction",
+            "leverage",
+            "margin",
         )
     )
 
@@ -264,6 +279,8 @@ class TradingBot(threading.Thread):
         self.on_exit = on_exit
         self.running = True
         self.loop = None
+        self.leverage = resolve_leverage(config.exchange, config.market, config.leverage)
+        self.direction = normalize_direction(config.trade_direction, config.market)
         self.exchange = self._setup_exchange()
         self.symbols = []
         self.price_buffer = {}
@@ -299,15 +316,69 @@ class TradingBot(threading.Thread):
         exchange_class = getattr(ccxt, exchange_id, None)
         if exchange_class is None:
             raise ValueError(f"Unbekannte Exchange: {self.config.exchange}")
-        default_type = "swap" if self.config.market == "futures" else "spot"
+        is_futures = self.config.market == "futures"
+        options = {"defaultType": "swap" if is_futures else "spot"}
+        if is_futures:
+            # Perpetual-Swaps werden isoliert und linear (USDT-besichert)
+            # gehandelt. Die Optionen wirken auch auf reine Marktdatenabrufe,
+            # weil ccxt damit den korrekten Kontraktmarkt auflöst.
+            options.update(
+                {
+                    "defaultSubType": "linear",
+                    "marginMode": "isolated",
+                    "defaultMarginMode": "isolated",
+                    "leverage": int(self.leverage),
+                    "adjustForTimeDifference": True,
+                }
+            )
         params = {
             "enableRateLimit": True,
             "timeout": 15_000,
-            "options": {"defaultType": default_type},
+            "options": options,
         }
         if self.config.api_key and self.config.secret_key:
             params.update(apiKey=self.config.api_key, secret=self.config.secret_key)
-        return exchange_class(params)
+        exchange = exchange_class(params)
+        if is_futures and self.config.api_key and self.config.secret_key:
+            self._apply_exchange_leverage(exchange)
+        return exchange
+
+    def _apply_exchange_leverage(self, exchange):
+        """Überträgt den Hebel je Symbol an die Börse, sofern unterstützt.
+
+        Paper-Trading benötigt das nicht; sind jedoch Schlüssel hinterlegt,
+        soll die Börsenseite denselben Hebel führen wie die Simulation. Fehler
+        werden bewusst nur protokolliert: Marktdaten und Simulation dürfen an
+        einer nicht unterstützten Hebel-API niemals scheitern.
+        """
+        set_leverage = getattr(exchange, "set_leverage", None)
+        if not callable(set_leverage):
+            return
+        symbols = [symbol.strip() for symbol in self.config.symbols.split(",") if symbol.strip()]
+        for symbol in symbols:
+            try:
+                set_leverage(int(self.leverage), symbol, {"marginMode": "isolated"})
+            except Exception as exc:
+                logger.warning(
+                    "Hebel %sx konnte für %s auf %s nicht gesetzt werden: %s",
+                    int(self.leverage),
+                    symbol,
+                    self.config.exchange,
+                    exc,
+                )
+
+    def _sync_risk_settings(self):
+        """Übernimmt geänderten Hebel/Handelsrichtung aus der Konfiguration.
+
+        Offene Positionen behalten den Hebel ihres Einstiegs; nur neue
+        Positionen verwenden den aktualisierten Wert.
+        """
+        self.leverage = resolve_leverage(
+            self.config.exchange,
+            self.config.market,
+            self.config.leverage,
+        )
+        self.direction = normalize_direction(self.config.trade_direction, self.config.market)
 
     def _sync_symbols(self):
         configured = [symbol.strip() for symbol in self.config.symbols.split(",") if symbol.strip()]
@@ -327,10 +398,19 @@ class TradingBot(threading.Thread):
         )
         for log in logs:
             if log["action"] == "buy":
+                leverage = log.get("leverage") or Decimal(1)
+                amount = log["amount"]
+                price = log["price"]
+                margin = log.get("margin") or (
+                    amount * price / leverage if leverage else amount * price
+                )
                 self.positions[log["symbol"]] = {
-                    "price": log["price"],
-                    "amount": log["amount"],
+                    "price": price,
+                    "amount": amount,
                     "buy_fee": log["fee_amount"],
+                    "direction": normalize_direction(log.get("direction") or LONG),
+                    "leverage": Decimal(leverage),
+                    "margin": Decimal(margin),
                 }
             elif log["action"] == "sell":
                 self.positions.pop(log["symbol"], None)
@@ -413,6 +493,7 @@ class TradingBot(threading.Thread):
                     self._last_config_refresh = time.monotonic()
                     try:
                         self.config = await db_get_config(self.config_id)
+                        self._sync_risk_settings()
                         self._sync_symbols()
                     except (OperationalError, InterfaceError):
                         # Mit der letzten validierten Konfiguration weiterlaufen.
@@ -627,9 +708,14 @@ class TradingBot(threading.Thread):
         return self.realized_pl <= -limit
 
     def _available_capital(self):
+        """Freies Kapital: Startkapital + realisiertes Ergebnis − gebundene Margin.
+
+        Gebunden ist ausschließlich die hinterlegte Margin zuzüglich der bereits
+        gezahlten Eröffnungsgebühr. Bei Hebel 1 entspricht die Margin dem
+        vollen Nominalwert – die bisherige Spot-Rechnung bleibt identisch.
+        """
         allocated = sum(
-            position["amount"] * position["price"] + position["buy_fee"]
-            for position in self.positions.values()
+            position["margin"] + position["buy_fee"] for position in self.positions.values()
         )
         return self.config.start_capital + self.realized_pl - allocated
 
@@ -642,29 +728,79 @@ class TradingBot(threading.Thread):
             return
 
         if symbol in self.positions:
-            entry_price = self.positions[symbol]["price"]
-            profit_percent = (price - entry_price) / entry_price * 100
+            position = self.positions[symbol]
+            direction = position["direction"]
+            leverage = position["leverage"]
+            # Kursbewegung aus Sicht der Position: Für Shorts ist ein
+            # fallender Kurs ein Gewinn. Take-Profit und Stop-Loss bleiben
+            # damit in beiden Richtungen reine Kursschwellen.
+            profit_percent = price_change_percent(position["price"], price, direction)
+            liquidated = is_liquidated(profit_percent, leverage)
+            if liquidated:
+                logger.warning(
+                    "Position %s (%s, %sx) erreicht die Liquidationsschwelle bei %s",
+                    symbol,
+                    direction,
+                    leverage,
+                    price,
+                )
+                await self._persist_error(
+                    f"liquidation:{symbol}",
+                    "trading_bot.liquidation",
+                    (
+                        f"{symbol}: Liquidationsschwelle bei Hebel {leverage}x erreicht "
+                        f"(Kursbewegung {profit_percent:.4f} %)."
+                    ),
+                    severity="critical",
+                    details={
+                        "symbol": symbol,
+                        "direction": direction,
+                        "leverage": str(leverage),
+                        "entry_price": str(position["price"]),
+                        "price": str(price),
+                        "liquidation_price": str(
+                            liquidation_price(position["price"], leverage, direction)
+                        ),
+                    },
+                )
             if (
-                profit_percent >= self.config.take_profit
+                liquidated
+                or profit_percent >= self.config.take_profit
                 or profit_percent <= -self.config.stop_loss
                 or self._global_loss_limit_reached()
             ):
                 await self.execute_trade(symbol, "sell")
             return
 
-        buy_fee = self.config.trade_amount * self.config.fee / Decimal(100)
+        # Die Eröffnungsgebühr fällt auf das Nominalvolumen (Margin × Hebel) an.
+        notional = self.config.trade_amount * self.leverage
+        open_fee = notional * self.config.fee / Decimal(100)
         if self._global_loss_limit_reached() or self._available_capital() < (
-            self.config.trade_amount + buy_fee
+            self.config.trade_amount + open_fee
         ):
             return
-        if (
-            nda > self.config.nda_threshold_buy
-            and deltadelta > self.config.deltadelta_threshold_buy
-            and acceleration > self.config.div_DVA_prev_NDA_threshold_buy
-        ):
-            await self.execute_trade(symbol, "buy")
+        signal = entry_signal(
+            acceleration,
+            deltadelta,
+            nda,
+            (
+                self.config.div_DVA_prev_NDA_threshold_buy,
+                self.config.nda_threshold_buy,
+                self.config.deltadelta_threshold_buy,
+            ),
+            self.direction,
+        )
+        if signal:
+            await self.execute_trade(symbol, "buy", direction=signal)
 
-    async def execute_trade(self, symbol, side):
+    async def execute_trade(self, symbol, side, direction=None):
+        """Eröffnet (``buy``) oder schließt (``sell``) eine Paper-Position.
+
+        ``direction`` bestimmt beim Eröffnen die Handelsrichtung (Long/Short);
+        beim Schließen wird sie der offenen Position entnommen. Die Aktion im
+        TradingLog bleibt bewusst ``buy``/``sell``, damit sämtliche bestehenden
+        Auswertungen (Reports, Dashboard, CSV) unverändert funktionieren.
+        """
         if symbol not in self.price_buffer or not self.price_buffer[symbol]:
             raise ValueError(f"Kein aktueller Preis für {symbol}")
         price = self.price_buffer[symbol][-1]
@@ -673,35 +809,46 @@ class TradingBot(threading.Thread):
         if side == "buy":
             if symbol in self.positions:
                 raise ValueError(f"Für {symbol} ist bereits eine Position offen")
-            amount = (self.config.trade_amount / price).quantize(
-                _EIGHT_PLACES,
-                rounding=ROUND_HALF_UP,
-            )
-            cost = amount * price
-            fee = cost * self.config.fee / Decimal(100)
-            if self._available_capital() < cost + fee:
+            # Bewusst ohne Markt-Normalisierung: Ein ausdrücklich angeforderter
+            # Short im Spot-Markt ist ein Programmfehler und muss laut scheitern,
+            # statt still in einen Long umgedeutet zu werden.
+            direction = normalize_direction(direction or self.direction)
+            if direction == SHORT and self.config.market != "futures":
+                raise ValueError("Short-Positionen sind nur im Futures-Markt möglich")
+            leverage = self.leverage
+            margin = self.config.trade_amount
+            amount = position_size(margin, price, leverage)
+            notional = amount * price
+            fee = notional * self.config.fee / Decimal(100)
+            if self._available_capital() < margin + fee:
                 raise ValueError("Nicht genügend simuliertes Kapital")
-            self.positions[symbol] = {
+            position = {
                 "price": price,
                 "amount": amount,
                 "buy_fee": fee,
+                "direction": direction,
+                "leverage": leverage,
+                "margin": margin,
             }
+            self.positions[symbol] = position
         elif side == "sell":
             if symbol not in self.positions:
                 raise ValueError(f"Keine offene Position für {symbol}")
             position = self.positions.pop(symbol)
+            direction = position["direction"]
+            leverage = position["leverage"]
             amount = position["amount"]
-            proceeds = amount * price
-            fee = proceeds * self.config.fee / Decimal(100)
-            invested = amount * position["price"]
-            pl_nominal = proceeds - invested - position["buy_fee"] - fee
+            fee = amount * price * self.config.fee / Decimal(100)
+            pl_nominal = (
+                gross_pnl(position["price"], price, amount, direction) - position["buy_fee"] - fee
+            )
             self.realized_pl += pl_nominal
         else:
             raise ValueError(f"Unbekannte Orderseite: {side}")
 
-        return_basis = (
-            amount * position["price"] + position["buy_fee"] if side == "sell" else amount * price
-        )
+        # Renditebasis ist das eingesetzte Eigenkapital (Margin + Eröffnungs-
+        # gebühr). Bei Hebel 1 entspricht das exakt der bisherigen Berechnung.
+        return_basis = position["margin"] + position["buy_fee"]
         # `current_capital` ist der verfügbare Cash-Kontostand. Bei einem Buy
         # muss der gebundene Positionswert inklusive Kaufgebühr sofort sinken.
         current_capital = self._available_capital()
@@ -709,6 +856,9 @@ class TradingBot(threading.Thread):
             "configuration_id": self.config_id,
             "symbol": symbol,
             "action": side,
+            "direction": position["direction"],
+            "leverage": _bounded(position["leverage"]),
+            "margin": _bounded(position["margin"]),
             "price": _bounded(price),
             "amount": _bounded(amount),
             "fee_amount": _bounded(fee),
@@ -717,7 +867,7 @@ class TradingBot(threading.Thread):
             "total_pl": _bounded(self.realized_pl),
             "current_capital": _bounded(current_capital),
             "tank": _bounded(self.realized_pl),
-            "order_id": f"paper_{side}_{time.time_ns()}",
+            "order_id": f"paper_{position['direction']}_{side}_{time.time_ns()}",
         }
         saved = await db_create_tradinglog_safe(**payload)
         if not saved:
