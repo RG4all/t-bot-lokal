@@ -41,6 +41,39 @@ def env_float(name, default, minimum=0.1):
         return default
 
 
+def env_int_map(name, defaults, minimum=1, maximum=None):
+    """Liest eine Zuordnung „schlüssel:zahl“ aus einer Environment-Variable.
+
+    Format: ``binance:5,bybit:3``. Unbekannte oder fehlerhafte Einträge werden
+    protokolliert und ignoriert, damit eine unsaubere Konfigurationsdatei den
+    Prozessstart niemals verhindert. Nicht genannte Schlüssel behalten ihren
+    Standardwert – das garantiert Rückwärtskompatibilität.
+    """
+    values = dict(defaults)
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return values
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        key, separator, number = entry.partition(":")
+        key = key.strip().lower()
+        if not separator or not key:
+            logger.warning("Ungültiger Eintrag „%s“ in %s; wird ignoriert", entry, name)
+            continue
+        try:
+            parsed = int(float(number.strip()))
+        except (TypeError, ValueError):
+            logger.warning("Ungültiger Zahlenwert „%s“ in %s; wird ignoriert", entry, name)
+            continue
+        parsed = max(minimum, parsed)
+        if maximum is not None:
+            parsed = min(maximum, parsed)
+        values[key] = parsed
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Sicherheit / Grundkonfiguration
 # ---------------------------------------------------------------------------
@@ -141,6 +174,46 @@ BACKTEST_MAX_PRICE_POINTS = min(
 BACKTEST_DEFAULT_PRICE_POINTS = min(
     BACKTEST_MAX_PRICE_POINTS,
     env_int("BACKTEST_DEFAULT_PRICE_POINTS", 5_000, minimum=100),
+)
+
+# ---------------------------------------------------------------------------
+# Futures: Hebel je Börse
+# ---------------------------------------------------------------------------
+# Der Hebel ist ausschließlich im Futures-Markt wirksam. Spot-Konfigurationen
+# rechnen immer mit Hebel 1. Die Obergrenzen bilden die real dokumentierten
+# Maximalhebel der jeweiligen Börse ab und begrenzen jede Konfiguration hart.
+# Beide Zuordnungen lassen sich über Environment-Variablen (und damit über
+# config/local.env bzw. .env) je Börse überschreiben, z. B.
+#   EXCHANGE_LEVERAGE=binance:5,bybit:3
+#   EXCHANGE_MAX_LEVERAGE=binance:20,bitunix:25
+EXCHANGE_MAX_LEVERAGE = env_int_map(
+    "EXCHANGE_MAX_LEVERAGE",
+    {
+        "binance": 125,
+        "bingx": 125,
+        "bybit": 100,
+        "bitmart": 100,
+        "bitunix": 125,
+    },
+    minimum=1,
+    maximum=125,
+)
+# Voreinstellung je Börse, wenn eine Konfiguration keinen eigenen Hebel setzt.
+# Standard ist bewusst 1 (kein Hebel), damit bestehende Konfigurationen ihr
+# Risikoprofil nach einem Update unverändert behalten.
+EXCHANGE_LEVERAGE = env_int_map(
+    "EXCHANGE_LEVERAGE",
+    {exchange: 1 for exchange in EXCHANGE_MAX_LEVERAGE},
+    minimum=1,
+    maximum=125,
+)
+# Fallback für Börsen ohne eigenen Eintrag.
+DEFAULT_FUTURES_LEVERAGE = env_int("DEFAULT_FUTURES_LEVERAGE", 1, minimum=1)
+# Erhaltungsmarge (Maintenance Margin Rate) für die simulierte Liquidation.
+# 0.5 % entspricht der typischen niedrigsten Risikostufe großer Perpetual-Börsen.
+FUTURES_MAINTENANCE_MARGIN_RATE = min(
+    0.5,
+    env_float("FUTURES_MAINTENANCE_MARGIN_RATE", 0.005, minimum=0.0),
 )
 
 # ---------------------------------------------------------------------------

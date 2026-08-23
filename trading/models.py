@@ -8,6 +8,9 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from .strategy import ABSOLUTE_MAX_LEVERAGE, DIRECTION_CHOICES, LONG, normalize_direction
+from .strategy import resolve_leverage as _resolve_leverage
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +40,26 @@ class Configuration(models.Model):
         default="spot",
         verbose_name="Marktart",
         help_text="Handelsmarkt: Spot (Kassamarkt) oder Futures (Derivate/Swaps).",
+    )
+    leverage = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(ABSOLUTE_MAX_LEVERAGE)],
+        verbose_name="Hebel (nur Futures)",
+        help_text=(
+            "Hebel für den Futures-Markt. 1 = ohne Hebel. Der Wert wird zusätzlich "
+            "auf den je Börse konfigurierten Maximalhebel begrenzt; im Spot-Markt "
+            "wird immer ohne Hebel gerechnet."
+        ),
+    )
+    trade_direction = models.CharField(
+        max_length=10,
+        choices=DIRECTION_CHOICES,
+        default=LONG,
+        verbose_name="Handelsrichtung",
+        help_text=(
+            "Long (steigende Kurse), Short (fallende Kurse) oder beide Richtungen. "
+            "Short ist ausschließlich im Futures-Markt möglich."
+        ),
     )
     sales_stop_threshold = models.FloatField(
         default=0.0,
@@ -151,6 +174,16 @@ class Configuration(models.Model):
         help_text="Kaufschwelle für die prozentuale Preisänderung zum Vorpreis (((P0 - P1) / P1) * 100). Im Backtesting als „NDA“ einstellbar.",
     )
 
+    @property
+    def effective_leverage(self):
+        """Tatsächlich wirksamer Hebel (Spot = 1, Futures auf Börsenmaximum begrenzt)."""
+        return _resolve_leverage(self.exchange, self.market, self.leverage)
+
+    @property
+    def effective_direction(self):
+        """Tatsächlich wirksame Handelsrichtung (Spot ist immer Long)."""
+        return normalize_direction(self.trade_direction, self.market)
+
     def __str__(self):
         return self.name or f"Konfiguration {self.pk}"
 
@@ -195,6 +228,11 @@ class TradingLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     symbol = models.CharField(max_length=30)
     action = models.CharField(max_length=10)
+    # "buy" eröffnet, "sell" schließt eine Position. Die Handelsrichtung steht
+    # in `direction`; dadurch bleiben alle bestehenden Auswertungen gültig.
+    direction = models.CharField(max_length=10, default=LONG)
+    leverage = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal(1))
+    margin = models.DecimalField(max_digits=20, decimal_places=8, default=Decimal(0))
     price = models.DecimalField(max_digits=20, decimal_places=8)
     amount = models.DecimalField(max_digits=20, decimal_places=8)
     fee_amount = models.DecimalField(max_digits=20, decimal_places=8)

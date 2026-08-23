@@ -76,6 +76,18 @@ BACKTEST_MAX_PRICE_POINTS=5000
 BACKTEST_DEFAULT_PRICE_POINTS=5000
 
 # ----------------------------------------------------------------------------
+# Futures: Hebel je Boerse (nur im Futures-Markt wirksam, Spot = 1)
+# ----------------------------------------------------------------------------
+# Voreingestellter Hebel je Boerse, wenn eine Konfiguration keinen Wert setzt.
+EXCHANGE_LEVERAGE=binance:1,bingx:1,bybit:1,bitmart:1,bitunix:1
+# Harte Obergrenze je Boerse; eine Konfiguration kann sie nie ueberschreiten.
+EXCHANGE_MAX_LEVERAGE=binance:125,bingx:125,bybit:100,bitmart:100,bitunix:125
+# Fallback fuer Boersen ohne eigenen Eintrag.
+DEFAULT_FUTURES_LEVERAGE=1
+# Erhaltungsmarge (Maintenance Margin Rate) der simulierten Liquidation.
+FUTURES_MAINTENANCE_MARGIN_RATE=0.005
+
+# ----------------------------------------------------------------------------
 # Celery / Worker
 # ----------------------------------------------------------------------------
 CELERY_LOG_LEVEL=INFO
