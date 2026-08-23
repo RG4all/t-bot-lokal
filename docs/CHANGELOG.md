@@ -2,6 +2,58 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.5.2] – 2026-08-23
+
+### Bybit-/Bitunix-Fixes, Hilfe-Alias und Stabilisierung der Live-Vorschau
+
+- **Bybit: eigener Public-Adapter:** Neue Klassen `BybitPublicSymbolCatalog`
+  und `BybitPublicMarketData` in `trading/market_data.py` nutzen die
+  dokumentierten Endpunkte `/v5/market/instruments-info` (mit Cursor-Pagination)
+  und `/v5/market/tickers` statt ausschließlich CCXT. Statusfilter
+  (`Trading`), Fehlercode-Prüfung (`retCode != 0`) und leere Antworten führen
+  zu `MarketDataConnectionError` mit klarer Meldung, statt zu einem
+  stillen Leerlauf. `validate_exchange_symbols` und `get_available_symbols`
+  verwenden nun Bybit direkt; Autocomplete hat einen konservativen Fallback
+  (`BTC/USDT`, `ETH/USDT`, …) wenn Bybit offline ist.
+- **Bitunix: robustere Fehlerbehandlung:** `BitunixPublicMarketData`
+  prüft `code != 0`, leere `data`-Listen und fehlende `lastPrice`-Felder
+  explizit. `fetch_tickers` validiert vor dem Preisabruf; fehlende Preise
+  werden als `MarketDataConnectionError` mit Symbol-Liste gemeldet. Spot nutzt
+  weiterhin `/market/last_price` je Symbol, Futures `/tickers?symbols=…` im Batch.
+- **Trading-Bot:** `TradingBot._setup_exchange` nutzt für Bybit nun
+  `BybitPublicMarketData` für Marktdaten (statt CCXT-`fetch_ticker`), behält
+  aber die Hebel-Übertragung via CCXT (`set_leverage`, isoliert, linear) wenn
+  API-Schlüssel hinterlegt sind. Binance, BitMart und Bitunix bleiben bei ihren
+  Public-Adaptern.
+- **Hilfe-Alias:** `help_view` akzeptiert `?doc=backtesting` (und jeden anderen
+  registrierten Slug) als Alias für `/docs/<slug>/`. Unbekannte Werte fallen
+  sicher auf das Handbuch zurück. Damit liefern `/config/`, `/help/`,
+  `/help/?doc=backtesting`, `/docs/backtesting/` und `/backtesting/` alle HTTP
+  200 in der Live-Vorschau (mit Login, sonst Redirect).
+- **Tests:** 56 neue Tests in `trading/tests/test_bybit_bitunix_fixes.py`
+  decken Bybit-Katalog (Trading-Filter, Pagination, Fehlercode, leere Antworten,
+  Symbol-Validierung), Bybit-Ticker (Erfolg, fehlende Preise, Fehlercode),
+  Bitunix-Spot/Futures (Dict-Wrapping, Fehlercode, leere Listen, fehlende Preise),
+  BitMart, Binance-Filter, `validate_exchange_symbols`, Autocomplete-Fallback und
+  alle Hilfe-/Backtesting-Seiten (200, Dokumentations-Button, DOM-Struktur) ab.
+  Gesamt: 166 Tests OK (zuvor 110), `ruff check .` sauber, `node --check` für
+  `bootstrap.bundle.min.js`, `plotly-3.0.0.min.js` und das Doku-Panel bestanden.
+- **Nicht prüfbar hier:** echte HTTPS-Calls zu Bybit/Bitunix (ausgehendes TLS
+  ist in der Sandbox gesperrt). Fehlerbilder wurden exakt nachgebaut und gegen
+  die Fixes verifiziert – ein Abschlusstest gegen die Live-Börsen bleibt vor dem
+  Produktiveinsatz empfohlen.
+
+## [2.5.1] – 2026-08-23
+
+### Symbol-Autocomplete und Katalog-Fallbacks stabilisiert
+
+- `trading/symbols.py` erhält `_BYBIT_FALLBACK` und nutzt `BybitPublicSymbolCatalog`
+  für Bybit-Vorschläge. Bei `MarketDataConnectionError` liefert der Autocomplete
+  weiterhin bedienbare Vorschläge, während die verbindliche Prüfung beim Speichern
+  keinen Fallback nutzt.
+- `BinancePublicSymbolCatalog` und `BybitPublicSymbolCatalog` cachen ihre
+  Ergebnisse und vermeiden wiederholte Netzwerk-Calls im selben Prozess.
+
 ## [2.5.0] – 2026-08-23
 
 ### Futures-Hebel je Börse, Long-/Short-Handel und eingebettete Backtesting-Dokumentation

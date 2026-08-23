@@ -26,6 +26,7 @@ from .market_data import (
     BinancePublicMarketData,
     BitMartPublicMarketData,
     BitunixPublicMarketData,
+    BybitPublicMarketData,
     MarketDataConnectionError,
     RateLimitError,
     SymbolValidationError,
@@ -308,6 +309,8 @@ class TradingBot(threading.Thread):
         exchange_id = self.config.exchange.strip().lower()
         if exchange_id == "binance":
             return BinancePublicMarketData(self.config.market)
+        if exchange_id == "bybit":
+            return BybitPublicMarketData(self.config.market)
         if exchange_id == "bitmart":
             return BitMartPublicMarketData(self.config.market)
         if exchange_id == "bitunix":

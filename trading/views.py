@@ -337,7 +337,11 @@ def _document_context(slug):
 
 @require_GET
 def help_view(request):
-    return render(request, "trading/help.html", _document_context("manual"))
+    # Unterstützt /help/?doc=backtesting als Alias für /docs/backtesting/
+    # und bleibt rückwärtskompatibel: Unbekannte Werte fallen auf das Handbuch zurück.
+    requested = (request.GET.get("doc") or "").strip().lower()
+    slug = requested if requested in DOCUMENTS else "manual"
+    return render(request, "trading/help.html", _document_context(slug))
 
 
 @require_GET

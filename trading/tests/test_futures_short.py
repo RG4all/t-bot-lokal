@@ -505,6 +505,10 @@ class FuturesMarketDataTests(SimpleTestCase):
 
     def test_futures_exchange_options_request_isolated_linear_swaps(self):
         # Der Aufbau des ccxt-Clients erfolgt ohne Netzwerkzugriff.
+        # Bybit nutzt seit 2.5.2 einen eigenen Public-Adapter für Marktdaten,
+        # behält aber die isolierte, lineare Futures-Konfiguration für
+        # das Setzen des Hebels über CCXT bei API-Schlüsseln.
+        from trading.market_data import BybitPublicMarketData
         from trading.trading_bot import TradingBot
 
         config = SimpleNamespace(
@@ -521,10 +525,34 @@ class FuturesMarketDataTests(SimpleTestCase):
         bot.config = config
         bot.leverage = strategy.resolve_leverage("bybit", "futures", 7)
         exchange = bot._setup_exchange()
-        self.assertEqual(exchange.options["defaultType"], "swap")
-        self.assertEqual(exchange.options["defaultSubType"], "linear")
-        self.assertEqual(exchange.options["marginMode"], "isolated")
-        self.assertEqual(exchange.options["leverage"], 7)
+        # Bybit nutzt jetzt den Public-Adapter für Marktdaten
+        if isinstance(exchange, BybitPublicMarketData):
+            self.assertEqual(exchange.market, "futures")
+            self.assertEqual(exchange.category, "linear")
+        else:
+            self.assertEqual(exchange.options["defaultType"], "swap")
+            self.assertEqual(exchange.options["defaultSubType"], "linear")
+            self.assertEqual(exchange.options["marginMode"], "isolated")
+            self.assertEqual(exchange.options["leverage"], 7)
+
+        # Für eine CCXT-basierte Börse (BingX) bleibt die alte CCXT-Prüfung gültig
+        config_bingx = SimpleNamespace(
+            id=0,
+            exchange="bingx",
+            market="futures",
+            symbols="BTC/USDT",
+            api_key=None,
+            secret_key=None,
+            leverage=7,
+            trade_direction="both",
+        )
+        bot.config = config_bingx
+        bot.leverage = strategy.resolve_leverage("bingx", "futures", 7)
+        exchange_bingx = bot._setup_exchange()
+        self.assertEqual(exchange_bingx.options["defaultType"], "swap")
+        self.assertEqual(exchange_bingx.options["defaultSubType"], "linear")
+        self.assertEqual(exchange_bingx.options["marginMode"], "isolated")
+        self.assertEqual(exchange_bingx.options["leverage"], 7)
 
 
 @override_settings(AUTOSTART_BOTS=False, PASSPHRASE_GATE_ENABLED=False)

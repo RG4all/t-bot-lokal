@@ -13,6 +13,7 @@ from .market_data import (
     BinancePublicSymbolCatalog,
     BitMartPublicMarketData,
     BitunixPublicMarketData,
+    BybitPublicSymbolCatalog,
     MarketDataConnectionError,
 )
 
@@ -48,6 +49,16 @@ _BINANCE_FUTURES_FALLBACK = _BINANCE_SPOT_FALLBACK | {
     "1000PEPE/USDT",
     "1000SHIB/USDT",
 }
+_BYBIT_FALLBACK = {
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "AVAX/USDT",
+    "LINK/USDT",
+    "ADA/USDT",
+    "XRP/USDT",
+    "DOGE/USDT",
+}
 
 
 def _canonical(compact):
@@ -76,6 +87,11 @@ def _load_symbols(exchange_id, market):
             return _provider_symbols(BinancePublicSymbolCatalog(market))
         except MarketDataConnectionError:
             return set(_BINANCE_FUTURES_FALLBACK if market == "futures" else _BINANCE_SPOT_FALLBACK)
+    if exchange_id == "bybit":
+        try:
+            return _provider_symbols(BybitPublicSymbolCatalog(market))
+        except MarketDataConnectionError:
+            return set(_BYBIT_FALLBACK)
     if exchange_id == "bitmart":
         if market != "spot":
             return set()

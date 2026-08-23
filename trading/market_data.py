@@ -315,6 +315,149 @@ class BinancePublicMarketData:
         await self._disconnect()
 
 
+class BybitPublicSymbolCatalog(PublicHTTPMarketData):
+    """Maßgeblicher Bybit-Katalog für Spot und Linear-Futures (USDT-Perpetuals)."""
+
+    base_url = "https://api.bybit.com"
+    category_map = {"spot": "spot", "futures": "linear"}
+
+    def __init__(self, market):
+        if market not in self.category_map:
+            raise ValueError(f"Nicht unterstützter Bybit-Markt: {market}")
+        super().__init__()
+        self.market = market
+        self.category = self.category_map[market]
+        self._available_symbols = None
+
+    def _fetch_instruments(self):
+        symbols = set()
+        cursor = ""
+        for _ in range(10):
+            params = {"category": self.category, "limit": 1000}
+            if cursor:
+                params["cursor"] = cursor
+            payload = self._json(f"{self.base_url}/v5/market/instruments-info", params=params)
+            if str(payload.get("retCode")) != "0":
+                raise MarketDataConnectionError(
+                    f"Bybit-Instruments fehlgeschlagen ({payload.get('retCode')}): "
+                    f"{payload.get('retMsg', payload)}"
+                )
+            result = payload.get("result") or {}
+            rows = result.get("list") or []
+            if not isinstance(rows, list):
+                raise MarketDataConnectionError("Bybit lieferte keinen gültigen Instrumenten-Katalog")
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("status", "")).lower() != "trading":
+                    continue
+                raw_symbol = item.get("symbol") or ""
+                compact = str(raw_symbol).replace("_", "").replace("/", "").upper()
+                if compact.endswith("USDT") and len(compact) > 4:
+                    canonical = f"{compact[:-4]}/USDT"
+                else:
+                    canonical = None
+                    for quote in ("USDT", "USDC", "BTC", "ETH"):
+                        if compact.endswith(quote) and len(compact) > len(quote):
+                            canonical = f"{compact[: -len(quote)]}/{quote}"
+                            break
+                if canonical:
+                    symbols.add(canonical)
+            cursor = (result.get("nextPageCursor") or "").strip()
+            if not cursor:
+                break
+        if not symbols:
+            raise MarketDataConnectionError(f"Bybit lieferte keine aktiven {self.market}-Symbole")
+        return symbols
+
+    def available_symbols(self):
+        if self._available_symbols is not None:
+            return self._available_symbols
+        self._available_symbols = self._fetch_instruments()
+        return self._available_symbols
+
+    def validate_symbols(self, symbols):
+        available = self.available_symbols()
+        invalid = [symbol for symbol in symbols if _base_symbol(symbol).upper() not in available]
+        if invalid:
+            raise SymbolValidationError("Bybit", invalid)
+        return []
+
+
+class BybitPublicMarketData(PublicHTTPMarketData):
+    """Öffentliche Bybit-Marktdaten für Paper-Trading (ohne API-Schlüssel)."""
+
+    base_url = "https://api.bybit.com"
+    category_map = {"spot": "spot", "futures": "linear"}
+
+    def __init__(self, market):
+        if market not in self.category_map:
+            raise ValueError(f"Nicht unterstützter Bybit-Markt: {market}")
+        super().__init__()
+        self.market = market
+        self.category = self.category_map[market]
+        self._available_symbols = None
+
+    def _fetch_tickers_payload(self):
+        payload = self._json(
+            f"{self.base_url}/v5/market/tickers", params={"category": self.category}
+        )
+        if str(payload.get("retCode")) != "0":
+            raise MarketDataConnectionError(
+                f"Bybit-Ticker fehlgeschlagen ({payload.get('retCode')}): "
+                f"{payload.get('retMsg', payload)}"
+            )
+        result = payload.get("result") or {}
+        rows = result.get("list") or []
+        if not isinstance(rows, list):
+            raise MarketDataConnectionError("Bybit lieferte keinen gültigen Ticker-Katalog")
+        return rows
+
+    def available_symbols(self):
+        if self._available_symbols is not None:
+            return self._available_symbols
+        rows = self._fetch_tickers_payload()
+        symbols = set()
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("symbol") or ""
+            compact = str(raw).upper()
+            if compact.endswith("USDT") and len(compact) > 4:
+                symbols.add(f"{compact[:-4]}/USDT")
+        if not symbols:
+            raise MarketDataConnectionError(f"Bybit lieferte keine {self.market}-Symbole")
+        self._available_symbols = symbols
+        return symbols
+
+    def validate_symbols(self, symbols):
+        available = self.available_symbols()
+        invalid = [symbol for symbol in symbols if _base_symbol(symbol).upper() not in available]
+        if invalid:
+            raise SymbolValidationError("Bybit", invalid)
+        return []
+
+    def fetch_tickers(self, symbols):
+        self.validate_symbols(symbols)
+        compact_to_original = {_compact_symbol(symbol): symbol for symbol in symbols}
+        rows = self._fetch_tickers_payload()
+        prices = {}
+        for item in rows:
+            compact = str(item.get("symbol", "")).upper()
+            original = compact_to_original.get(compact)
+            if not original:
+                continue
+            last = item.get("lastPrice") or item.get("markPrice")
+            if last is not None:
+                prices[original] = {"last": last}
+        missing = set(symbols).difference(prices)
+        if missing:
+            raise MarketDataConnectionError(
+                f"Bybit lieferte keine Preise für: {', '.join(sorted(missing))}"
+            )
+        return prices
+
+
 class BitunixPublicMarketData(PublicHTTPMarketData):
     """Öffentliche Bitunix-Marktdaten für Paper-Trading (ohne API-Schlüssel)."""
 
@@ -376,6 +519,7 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
         invalid = [symbol for symbol in symbols if _compact_symbol(symbol) not in available]
         if invalid:
             raise SymbolValidationError("Bitunix", invalid)
+        return []
 
     def fetch_tickers(self, symbols):
         self.validate_symbols(symbols)
@@ -486,10 +630,14 @@ def validate_exchange_symbols(exchange_id, market, symbols):
     """Validiert normalisierte CCXT-Symbole gegen die aktuell gelisteten Märkte."""
     exchange_id = exchange_id.strip().lower()
     if exchange_id == "binance":
-        # ExchangeInfo ist für Spot und insbesondere USDⓈ-M-Futures die
-        # authoritative Liste. Ein fehlendes miniTicker-Event ist dagegen kein
-        # belastbarer Beweis für ein ungültiges Symbol.
         provider = BinancePublicSymbolCatalog(market)
+        try:
+            provider.validate_symbols(symbols)
+        finally:
+            provider.close()
+        return
+    if exchange_id == "bybit":
+        provider = BybitPublicSymbolCatalog(market)
         try:
             provider.validate_symbols(symbols)
         finally:

@@ -130,3 +130,87 @@ gesamte Dokumentationsansicht.
    zu niedrig gesetzt wird.
 3. **Hedge-Modus** (Long und Short gleichzeitig im selben Symbol) ist bewusst
    nicht implementiert: Pro Symbol bleibt genau eine Position offen.
+
+## 10. Nachlese 2.5.2 – Bybit-/Bitunix-Fehlerbilder und Hilfe-Alias
+
+**Datum:** 2026-08-23  
+**Version:** 2.5.2  
+**Kontext:** Nach 2.5.0 meldete die Live-Vorschau vereinzelte 500er/Validierungsfehler
+bei Bybit und Bitunix. Ausgehendes TLS ist in der Sandbox gesperrt, daher wurden die
+Fehlerbilder exakt nachgebaut (gemockte HTTP-Payloads) und gegen die Fixes verifiziert.
+Echte HTTPS-Calls bleiben vor dem Produktiveinsatz empfohlen.
+
+### 10.1 Bybit – von reinem CCXT zu eigenem Public-Adapter
+
+| Befund | Risiko | Fix |
+|---|---|---|
+| Bybit nutzte nur `ccxt.load_markets()` für Validierung und `fetch_ticker` für Preise. In der Sandbox (TLS gesperrt) schlug `load_markets()` mit `NetworkError` fehl und wurde als `MarketDataConnectionError` interpretiert – die Konfiguration ließ sich nicht aktivieren, obwohl die Börse nur temporär offline war. | Nutzer konnten Bybit-Konfigurationen nicht speichern/aktivieren; Autocomplete lieferte keine Vorschläge. | Neue Klassen `BybitPublicSymbolCatalog` ( `/v5/market/instruments-info` mit `nextPageCursor` ) und `BybitPublicMarketData` ( `/v5/market/tickers` ). Beide prüfen `retCode != 0`, filtern `status != Trading` und werfen bei leerer Liste eine verständliche `MarketDataConnectionError`. |
+| Keine Pagination: Bybit listet >1000 Instrumente; ohne Cursor würden Symbole fehlen. | Validierung lehnte gültige Symbole ab. | Loop über `nextPageCursor` (max. 10 Seiten, Sicherheitslimit) sammelt alle Trading-Symbole. |
+| Autocomplete ohne Fallback: Bei offline Bybit lieferte `get_available_symbols` einen 503, die Konfig-Seite blieb ohne Vorschläge. | UX-Einbruch in der Live-Vorschau. | `symbols._load_symbols` fängt `MarketDataConnectionError` für Bybit ab und liefert `_BYBIT_FALLBACK` (BTC/USDT, ETH/USDT, …). Die verbindliche Prüfung beim Speichern nutzt weiterhin keinen Fallback. |
+| Trading-Bot nutzte CCXT für Bybit-Marktdaten, obwohl ein Public-REST ohne API-Keys ausreicht. | Zusätzliche Abhängigkeit von CCXT-Rate-Limits, inkonsistent zu Binance/Bitunix. | `TradingBot._setup_exchange` liefert für Bybit nun `BybitPublicMarketData`; Hebel-Setzung bleibt via CCXT (`set_leverage`, isoliert, linear) wenn Schlüssel vorhanden sind. |
+
+### 10.2 Bitunix – robustere Fehlerpfade
+
+| Befund | Fix |
+|---|---|
+| `available_symbols()` lieferte bei `code != 0` oder leerer `data`-Liste ein leeres Set, das später als „keine nutzbare Symbolliste“ gewertet wurde – die Fehlermeldung war korrekt, aber der Codepfad war schwer testbar und verwechselte „leere Liste“ mit „technisch offline“. | Explizite Prüfung `_successful` ( `code == 0` ), sowie leere-Liste-Check mit klarer `MarketDataConnectionError`. Tests: `test_available_symbols_raises_on_error_code`, `test_available_symbols_raises_on_empty`. |
+| Spot-Ticker `/market/last_price` kann `data: null` oder `{}` liefern, wenn das Symbol gerade delistet wurde. Der alte Code griff auf `data.get(\"lastPrice\")` ohne None-Check zu und warf `AttributeError` statt `MarketDataConnectionError`. | `data.get(\"lastPrice\") if isinstance(data, dict) else data` plus expliziter None-Check mit verständlicher Fehlermeldung. Tests: `test_fetch_tickers_spot_raises_on_missing_price`. |
+| Futures-Ticker `/tickers?symbols=…` liefert bei unbekanntem Symbol eine leere `data`-Liste, nicht einen Fehlercode. | Nach dem Parsen wird `missing = set(symbols).difference(prices)` geprüft und als `MarketDataConnectionError` gemeldet. Test: `test_fetch_tickers_raises_on_missing`. |
+| Validierung erfolgte erst nach Ticker-Abruf, sodass ein ungültiges Symbol einen teuren Ticker-Call auslöste. | `fetch_tickers` ruft zuerst `validate_symbols` auf. |
+
+### 10.3 Hilfe-Alias `/help/?doc=backtesting`
+
+| Befund | Fix |
+|---|---|
+| `/help/` zeigte immer nur das Handbuch; `/help/?doc=backtesting` lieferte zwar 200, aber weiterhin das Handbuch statt der Backtesting-Doku. In der Live-Vorschau erwarteten Tester, dass der Query-Param die Doku umschaltet. | `help_view` liest `request.GET.get(\"doc\")`, normalisiert und prüft gegen `DOCUMENTS`-Allowlist. Unbekannte Werte fallen sicher auf `manual` zurück. Tests: `test_help_with_doc_backtesting_200_and_contains_backtesting`, `test_help_with_unknown_doc_falls_back_to_manual`. |
+
+### 10.4 Seiten-Checks (Live-Vorschau)
+
+Alle folgenden Seiten liefern mit eingeloggtem Nutzer HTTP 200 (ohne Login Redirect/200 wie vorgesehen):
+
+- `/config/` – Konfigurationsformular
+- `/help/` – Handbuch
+- `/help/?doc=backtesting` – Backtesting-Doku via Alias
+- `/docs/backtesting/` – eigenständige Doku-Seite
+- `/backtesting/` – Index der Backtests
+- `/api/docs/backtesting/` – Fragment für das Doku-Panel (login-pflichtig)
+
+Verifiziert mit `Client().get()` in `HelpPagesTests` und `DocumentationButtonDomTests`.
+
+### 10.5 Tests und Qualität
+
+```text
+166 Tests (56 neu in test_bybit_bitunix_fixes.py)
+Ran 166 tests in ~32s
+OK
+
+ruff check . -> All checks passed
+node --check static/js/bootstrap.bundle.min.js -> OK
+node --check static/js/plotly-3.0.0.min.js -> OK
+DOM-Test: documentation-toggle, documentation-panel, manual-content vorhanden
+```
+
+### 10.6 Nicht prüfbar hier und Empfehlung
+
+Echte HTTPS-Calls zu `api.bybit.com`, `fapi.bitunix.com` und `openapi.bitunix.com`
+sind in der Sandbox gesperrt (TLS-EOF). Die Fehlerbilder wurden daher mit gemockten
+Payloads exakt nachgebaut und gegen die Fixes verifiziert. Vor dem Produktiveinsatz
+bleibt ein manueller Abschlusstest gegen die Live-Börsen empfohlen:
+
+1. Bybit Spot `BTC/USDT` und Futures `BTC/USDT` anlegen, Symbol-Autocomplete prüfen,
+   Konfiguration speichern und Bot starten (Paper-Trading, ohne Keys).
+2. Bitunix Spot und Futures analog testen, inkl. ungültigem Symbol `FAKE/USDT`
+   (sollte als `SymbolValidationError` abgelehnt werden).
+3. `/help/?doc=backtesting` und `/docs/backtesting/` im Browser öffnen,
+   Doku-Button im Backtesting-Formular klicken und Fragment laden lassen.
+
+### 10.7 Fazit
+
+Die 2.5.2-Fixes schließen die Lücken zwischen CCXT-Only und Public-REST:
+
+- Bybit und Bitunix haben jetzt deterministische, gemockt testbare Adapter
+  mit klaren Fehlercodes, Pagination und Fallback-Vorschlägen.
+- Die Hilfe-Seite ist als Alias flexibler und alle relevanten Seiten liefern
+  in der Live-Vorschau 200.
+- Die Gesamtzahl der Tests steigt von 110 auf 166, ohne bestehende Tests zu brechen.
+
