@@ -162,6 +162,8 @@
         <th>Symbol</th>
         <th>Action</th>
         <th>Price</th>
+        <th>Richtung</th>
+        <th>Hebel</th>
         <th>Fee</th>
         <th>Amount</th>
         <th>Order ID</th>
@@ -173,6 +175,8 @@
         <td>{{ log.time }}</td>
         <td>{{ log.symbol }}</td>
         <td>{{ log.action }}</td>
+        <td>{{ log.direction }}</td>
+        <td>{{ log.leverage|floatformat:0 }}x</td>
         <td>{{ log.price }}</td>
         <td>{{ log.fee_amount }}</td>
         <td>{{ log.amount }}</td>

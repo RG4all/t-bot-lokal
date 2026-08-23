@@ -1,10 +1,15 @@
 {% extends "trading/base.html" %}
 {% block title %}Backtesting · {{ config.name }}{% endblock %}
+{% block extra_head %}{% include "trading/_document_styles.html" %}{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h2">Backtesting · {{ config.name }}</h1>
+    <div>
+      <h1 class="h2 mb-0">Backtesting · {{ config.name }}</h1>
+      <small class="text-muted">{{ config.get_exchange_display }} · {{ config.get_market_display }}{% if config.market == "futures" %} · Hebel {{ config.effective_leverage|floatformat:0 }}x{% endif %} · Richtung {{ config.get_trade_direction_display }}</small>
+    </div>
     <a href="{% url 'dashboard' %}?config_id={{ config.id }}" class="btn btn-outline-secondary">Zum Dashboard</a>
 </div>
+<div class="mb-4">{% include "trading/_backtesting_documentation.html" %}</div>
 
 <div id="worker-status" class="alert {% if execution_available %}alert-success{% else %}alert-warning{% endif %}">
   <strong>Ausführung:</strong> <span id="worker-mode">{{ execution_mode }}</span> · Redis: <span id="redis-state">{% if runtime_status.redis %}online{% else %}offline{% endif %}</span> · Worker: <span id="worker-state">{% if runtime_status.worker %}online{% else %}offline{% endif %}</span>.
@@ -27,8 +32,9 @@
   <li><strong>DeltaDelta (geglättetes Momentum):</strong> <code>(NDA + vorherige NDA) / 2</code>. Geglätteter 2-Punkt-Mittelwert.</li>
   <li><strong>Trading- & Risikoparameter:</strong> überschreibt für diesen Testlauf Trade-Betrag, Take Profit, Stop Loss und Gebühr.</li>
   <li><strong>Preispunkte:</strong> weniger Datenpunkte sparen CPU/RAM; mehr Preispunkte erhöhen die statistische Tiefe.</li>
+  <li><strong>Handelsrichtung &amp; Hebel:</strong> Long nutzt die Indikatoren unverändert, Short spiegelt NDA und DeltaDelta am Nullpunkt. Der Hebel wirkt nur im Futures-Markt; der Trade-Betrag ist dann die eingesetzte Margin.</li>
 </ul>
-<p class="mb-0">Backtests sind keine Prognose. Bereiche zuerst grob und anschließend um das beste Ergebnis feiner testen. <a href="{% url 'help' %}#11-backtesting">Vollständige Dokumentation</a>.</p>
+<p class="mb-0">Backtests sind keine Prognose. Bereiche zuerst grob und anschließend um das beste Ergebnis feiner testen. Über die Schaltfläche <strong>Dokumentation</strong> oben wird <code>docs/backtesting.md</code> direkt hier gerendert; alternativ steht das <a href="{% url 'help' %}#11-backtesting">Handbuch</a> zur Verfügung.</p>
 </div></div></div></div>
 
 <div class="card mb-4">
@@ -60,7 +66,7 @@
       </div>
       <h3 class="h5">Trading-, Risiko- und Ressourcenparameter</h3>
       <div class="row g-3 mb-3">
-      {% for field in form %}{% if field.name == 'trade_amount' or field.name == 'take_profit' or field.name == 'stop_loss' or field.name == 'fee' or field.name == 'max_price_points' or field.name == 'max_grid_points' or field.name == 'max_combinations' %}
+      {% for field in form %}{% if field.name == 'direction' or field.name == 'leverage' or field.name == 'trade_amount' or field.name == 'take_profit' or field.name == 'stop_loss' or field.name == 'fee' or field.name == 'max_price_points' or field.name == 'max_grid_points' or field.name == 'max_combinations' %}
         <div class="col-md-4">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>

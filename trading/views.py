@@ -6,7 +6,7 @@ import re
 import threading
 from collections import Counter, defaultdict
 from decimal import Decimal
-from functools import lru_cache
+from functools import lru_cache, partial
 from html import escape
 from io import BytesIO
 
@@ -18,7 +18,7 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Sum
-from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
+from django.http import Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -49,6 +49,7 @@ from .resource_optimizer import (
     get_backtest_resource_profile,
     get_server_resources,
 )
+from .strategy import LONG, gross_pnl, liquidation_price, normalize_direction
 from .symbols import get_available_symbols
 from .tasks import dispatch_task, local_task_is_active, run_backtest
 from .trading_bot import bot_manager
@@ -56,8 +57,9 @@ from .worker_status import get_backtest_runtime_status
 
 logger = logging.getLogger(__name__)
 _PLOT_LOCK = threading.Lock()
-_MANUAL_RENDER_LOCK = threading.Lock()
-_MANUAL_HTML = None
+# Ein gemeinsamer Lock plus Dictionary-Cache für alle gerenderten Dokumente.
+_DOCUMENT_RENDER_LOCK = threading.Lock()
+_DOCUMENT_HTML = {}
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
 
@@ -92,9 +94,48 @@ def _realized_profit(config):
     )
 
 
+def _log_margin(log):
+    """Gebundene Margin einer Journalzeile.
+
+    Ältere Zeilen (vor der Hebel-Einführung) haben keine Margin gespeichert.
+    Für sie gilt der volle Nominalwert – exakt das bisherige Spot-Verhalten.
+    """
+    margin = log.margin or Decimal(0)
+    return margin if margin > 0 else log.amount * log.price
+
+
 def _cash_flow(log):
-    notional = log.amount * log.price
-    return -(notional + log.fee_amount) if log.action == "buy" else notional - log.fee_amount
+    """Cash-Wirkung einer einzelnen Zeile ohne Kenntnis der Gegenbuchung.
+
+    Wird nur als Rückfallebene genutzt; ``_cash_flows`` rechnet paarweise und
+    damit exakt.
+    """
+    margin = _log_margin(log)
+    if log.action == "buy":
+        return -(margin + log.fee_amount)
+    return margin + log.pl_nominal
+
+
+def _cash_flows(logs):
+    """Exakte Cash-Bewegungen je Zeile über gepaarte Ein-/Ausstiege.
+
+    Eröffnung bindet Margin plus Eröffnungsgebühr, Schließung gibt beides
+    zuzüglich des realisierten Ergebnisses frei. Für Positionen, deren
+    Eröffnung außerhalb des betrachteten Fensters liegt, wird auf die
+    Einzelzeilen-Näherung zurückgegriffen.
+    """
+    open_positions = {}
+    for log in logs:
+        if log.action == "buy":
+            margin = _log_margin(log)
+            open_positions[log.symbol] = (margin, log.fee_amount)
+            yield -(margin + log.fee_amount)
+        else:
+            margin, open_fee = open_positions.pop(
+                log.symbol,
+                (_log_margin(log), Decimal(0)),
+            )
+            yield margin + open_fee + log.pl_nominal
 
 
 def _portfolio_snapshot(config):
@@ -106,7 +147,11 @@ def _portfolio_snapshot(config):
         latest_trade = config.logs.filter(symbol=symbol).order_by("-timestamp", "-id").first()
         if not latest_trade or latest_trade.action != "buy":
             continue
-        entry_value = latest_trade.amount * latest_trade.price + latest_trade.fee_amount
+        margin = _log_margin(latest_trade)
+        # Gebundenes Eigenkapital: Margin plus bereits gezahlte Eröffnungsgebühr.
+        entry_value = margin + latest_trade.fee_amount
+        direction = normalize_direction(latest_trade.direction or LONG)
+        leverage = latest_trade.leverage or Decimal(1)
         latest_price = (
             config.data_logs.filter(symbol=symbol)
             .order_by("-timestamp", "-id")
@@ -115,15 +160,26 @@ def _portfolio_snapshot(config):
             or latest_trade.price
         )
         estimated_exit_fee = latest_trade.amount * latest_price * config.fee / Decimal(100)
-        net_market_value = latest_trade.amount * latest_price - estimated_exit_fee
+        # Marktwert der Position: Margin plus schwebendes Ergebnis (richtungs-
+        # und hebelrichtig) abzüglich der geschätzten Schließungsgebühr.
+        unrealized_gross = gross_pnl(
+            latest_trade.price,
+            latest_price,
+            latest_trade.amount,
+            direction,
+        )
+        net_market_value = margin + unrealized_gross - estimated_exit_fee
         invested += entry_value
         market_value += net_market_value
         positions.append(
             {
                 "symbol": symbol,
                 "amount": latest_trade.amount,
+                "direction": direction,
+                "leverage": leverage,
                 "entry_price": latest_trade.price,
                 "latest_price": latest_price,
+                "liquidation_price": liquidation_price(latest_trade.price, leverage, direction),
                 "invested": entry_value,
                 "market_value": net_market_value,
                 "unrealized_pl": net_market_value - entry_value,
@@ -144,8 +200,8 @@ def _portfolio_snapshot(config):
 def _cash_series(logs, opening_cash):
     cash = opening_cash
     series = []
-    for log in logs:
-        cash += _cash_flow(log)
+    for log, flow in zip(logs, _cash_flows(logs)):
+        cash += flow
         series.append({"t": log.timestamp.isoformat(), "v": float(cash)})
     return series
 
@@ -177,69 +233,139 @@ def health_view(request):
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
 
 
-@lru_cache(maxsize=1)
-def _render_manual():
-    """Kompiliert das vertrauenswürdige Handbuch einmal je Prozess.
+# Registrierte, vertrauenswürdige Markdown-Dokumente aus dem Repository.
+# Nur diese Slugs sind über die Oberfläche erreichbar; beliebige Pfade lassen
+# sich damit nicht rendern (kein Path-Traversal).
+DOCUMENTS = {
+    "manual": {
+        "title": "Hilfe & Plattform-Manual",
+        "subtitle": "Vollständiges Handbuch der Plattform",
+        "filenames": ("MANUAL.md",),
+    },
+    "backtesting": {
+        "title": "Backtesting-Dokumentation",
+        "subtitle": "Annahmen, Indikatoren, Hebel und Grenzen des Backtests",
+        "filenames": ("backtesting.md",),
+    },
+}
+_MARKDOWN_EXTENSIONS = [
+    "extra",
+    "fenced_code",
+    "tables",
+    "toc",
+    "sane_lists",
+    "codehilite",
+]
+_MARKDOWN_EXTENSION_CONFIGS = {
+    "codehilite": {
+        "css_class": "codehilite",
+        "guess_lang": False,
+        "noclasses": False,
+    }
+}
+
+
+def _document_candidates(slug):
+    for filename in DOCUMENTS[slug]["filenames"]:
+        yield settings.BASE_DIR / "docs" / filename
+        yield settings.BASE_DIR / filename
+
+
+@lru_cache(maxsize=len(DOCUMENTS))
+def _render_document(slug):
+    """Kompiliert ein registriertes Markdown-Dokument einmal je Prozess.
 
     Der Lock ergänzt den LRU-Cache für den seltenen Fall zweier gleichzeitiger
     erster Requests: Auch dann wird Markdown nur genau einmal kompiliert.
     """
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        if _MANUAL_HTML is not None:
-            return _MANUAL_HTML
-        candidates = (
-            settings.BASE_DIR / "docs" / "MANUAL.md",
-            settings.BASE_DIR / "MANUAL.md",
-        )
-        for candidate in candidates:
+    if slug not in DOCUMENTS:
+        raise KeyError(slug)
+    with _DOCUMENT_RENDER_LOCK:
+        cached = _DOCUMENT_HTML.get(slug)
+        if cached is not None:
+            return cached
+        for candidate in _document_candidates(slug):
             if candidate.exists():
-                source = candidate.read_text(encoding="utf-8")
-                _MANUAL_HTML = markdown.markdown(
-                    source,
-                    extensions=[
-                        "extra",
-                        "fenced_code",
-                        "tables",
-                        "toc",
-                        "sane_lists",
-                        "codehilite",
-                    ],
-                    extension_configs={
-                        "codehilite": {
-                            "css_class": "codehilite",
-                            "guess_lang": False,
-                            "noclasses": False,
-                        }
-                    },
+                html = markdown.markdown(
+                    candidate.read_text(encoding="utf-8"),
+                    extensions=_MARKDOWN_EXTENSIONS,
+                    extension_configs=_MARKDOWN_EXTENSION_CONFIGS,
                     output_format="html5",
                 )
-                return _MANUAL_HTML
-        _MANUAL_HTML = "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
-        return _MANUAL_HTML
+                _DOCUMENT_HTML[slug] = html
+                return html
+        missing = DOCUMENTS[slug]["filenames"][0]
+        html = f"<p>Dokument <code>{escape(missing)}</code> konnte nicht gefunden werden.</p>"
+        _DOCUMENT_HTML[slug] = html
+        return html
+
+
+def _render_manual():
+    """Rückwärtskompatibler Zugriff auf das gerenderte Handbuch."""
+    return _render_document("manual")
 
 
 # Beibehaltung der lru_cache-Kompatibilität für Tests/Management, einschließlich
 # eines echten Reset des zweiten, thread-sicheren Cache-Layers.
-_manual_lru_cache_clear = _render_manual.cache_clear
+_document_lru_cache_clear = _render_document.cache_clear
 
 
-def _clear_manual_cache():
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        _MANUAL_HTML = None
-        _manual_lru_cache_clear()
+def _clear_document_cache():
+    with _DOCUMENT_RENDER_LOCK:
+        _DOCUMENT_HTML.clear()
+        _document_lru_cache_clear()
 
 
-_render_manual.cache_clear = _clear_manual_cache
+_render_document.cache_clear = _clear_document_cache
+# Kompatibilitätsschicht: bestehende Aufrufer und Tests nutzen weiterhin die
+# lru_cache-Schnittstelle von `_render_manual`.
+_render_manual.cache_clear = _clear_document_cache
+_render_manual.cache_info = _render_document.cache_info
+_render_manual.__wrapped__ = partial(_render_document.__wrapped__, "manual")
+
+
+def _document_context(slug):
+    document = DOCUMENTS[slug]
+    return {
+        "document_slug": slug,
+        "document_title": document["title"],
+        "document_subtitle": document["subtitle"],
+        "manual_html": mark_safe(_render_document(slug)),
+        "version": settings.APP_VERSION,
+    }
 
 
 @require_GET
 def help_view(request):
-    return render(
-        request,
-        "trading/help.html",
-        {"manual_html": mark_safe(_render_manual()), "version": settings.APP_VERSION},
+    return render(request, "trading/help.html", _document_context("manual"))
+
+
+@require_GET
+def documentation_view(request, slug):
+    """Rendert ein registriertes Markdown-Dokument als vollständige Seite."""
+    if slug not in DOCUMENTS:
+        raise Http404(f"Unbekanntes Dokument: {slug}")
+    return render(request, "trading/help.html", _document_context(slug))
+
+
+@login_required
+@require_GET
+def documentation_fragment(request, slug):
+    """Liefert dasselbe gerenderte Dokument als HTML-Fragment für die UI.
+
+    Das Backtesting-Frontend blendet die Dokumentation damit direkt im
+    Arbeitsbereich ein, ohne die Seite zu verlassen.
+    """
+    if slug not in DOCUMENTS:
+        return JsonResponse({"error": f"Unbekanntes Dokument: {slug}"}, status=404)
+    document = DOCUMENTS[slug]
+    return JsonResponse(
+        {
+            "slug": slug,
+            "title": document["title"],
+            "subtitle": document["subtitle"],
+            "html": _render_document(slug),
+        }
     )
 
 
@@ -531,12 +657,8 @@ def market_opportunities_api(request):
     filters = {
         "volatility_threshold": request.GET.get("volatility_threshold", "10"),
         "volume_spike_multiple": request.GET.get("volume_spike_multiple", "1.5"),
-        "min_volume_market_cap_ratio": request.GET.get(
-            "min_volume_market_cap_ratio", "0.10"
-        ),
-        "min_orderbook_depth_ratio": request.GET.get(
-            "min_orderbook_depth_ratio", "0.001"
-        ),
+        "min_volume_market_cap_ratio": request.GET.get("min_volume_market_cap_ratio", "0.10"),
+        "min_orderbook_depth_ratio": request.GET.get("min_orderbook_depth_ratio", "0.001"),
     }
     if exchange == "all":
         try:
@@ -664,6 +786,7 @@ def trades_api(request):
             {
                 "timestamp": row.timestamp.isoformat(),
                 "action": row.action,
+                "direction": row.direction,
                 "price": float(row.price),
             }
             for row in rows
@@ -691,7 +814,7 @@ def info_api(request, config_id):
             realized_capital += log.pl_nominal
         equity.append({"t": log.timestamp.isoformat(), "v": float(realized_capital)})
 
-    window_cash_flow = sum((_cash_flow(log) for log in logs), Decimal(0))
+    window_cash_flow = sum(_cash_flows(logs), Decimal(0))
     cash_curve = _cash_series(logs, portfolio["cash"] - window_cash_flow)
 
     peak = float(config.start_capital)
@@ -810,6 +933,9 @@ def logs_api(request, config_id):
             "time": timezone.localtime(log.timestamp).strftime("%H:%M:%S"),
             "symbol": log.symbol,
             "action": log.action,
+            "direction": log.direction,
+            "leverage": float(log.leverage or 1),
+            "margin": float(log.margin or 0),
             "price": float(log.price),
             "fee_amount": float(log.fee_amount),
             "amount": float(log.amount),
@@ -1152,6 +1278,11 @@ def generate_report_csv(request, config_id):
                 "timestamp",
                 "symbol",
                 "action",
+                # Neue Spalten am Ende wären für Auswertungen unübersichtlich;
+                # die Richtung steht bewusst direkt neben der Aktion.
+                "direction",
+                "leverage",
+                "margin",
                 "price",
                 "amount",
                 "fee_amount",
@@ -1169,6 +1300,9 @@ def generate_report_csv(request, config_id):
                     timezone.localtime(log.timestamp).isoformat(),
                     log.symbol,
                     log.action,
+                    log.direction,
+                    log.leverage,
+                    log.margin,
                     log.price,
                     log.amount,
                     log.fee_amount,
@@ -1255,6 +1389,10 @@ def backtesting_form(request, config_id):
         "take_profit": float(config.take_profit),
         "stop_loss": float(config.stop_loss),
         "fee": float(config.fee),
+        # Hebel und Richtung starten immer mit den Live-Werten der
+        # Konfiguration und lassen sich für den Testlauf überschreiben.
+        "leverage": int(config.effective_leverage),
+        "direction": config.effective_direction,
         "max_price_points": min(
             settings.BACKTEST_DEFAULT_PRICE_POINTS,
             resource_profile.max_price_points,
@@ -1271,6 +1409,8 @@ def backtesting_form(request, config_id):
         start_capital=config.start_capital,
         resource_profile=resource_profile,
         symbol_count=len(symbols),
+        exchange=config.exchange,
+        market=config.market,
     )
     backtest_templates = build_backtest_templates(config, resource_profile)
     runtime_status = get_backtest_runtime_status(force=request.method == "POST")
@@ -1401,7 +1541,7 @@ def control_backtest(request, task_id):
 
 
 def _equity_svg(symbol, curve):
-    """Builds a dependency-free inline SVG for browsers and WeasyPrint."""
+    """Erzeugt ein abhängigkeitsfreies Inline-SVG für Browser und WeasyPrint."""
     points = []
     for point in curve or []:
         try:
@@ -1438,13 +1578,13 @@ def _equity_svg(symbol, curve):
         f'style="width:100%;height:auto;max-height:260px" '
         f'aria-label="Equity-Kurve {escape(str(symbol), quote=True)}">'
         f'<rect width="{width}" height="{height}" fill="#fff"/>'
-        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#6c757d"/>'
-        f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#6c757d"/>'
+        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#6c757d"/>'
+        f'<line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#6c757d"/>'
         f'<polyline points="{polyline}" fill="none" stroke="#0d6efd" stroke-width="3"/>'
-        f'<text x="8" y="{top+8}" font-size="14">{maximum:.2f}</text>'
-        f'<text x="8" y="{height-bottom}" font-size="14">{minimum:.2f}</text>'
-        f'<text x="{left}" y="{height-12}" font-size="12">{escape(str(start_label))}</text>'
-        f'<text x="{width-right}" y="{height-12}" text-anchor="end" font-size="12">{escape(str(end_label))}</text>'
+        f'<text x="8" y="{top + 8}" font-size="14">{maximum:.2f}</text>'
+        f'<text x="8" y="{height - bottom}" font-size="14">{minimum:.2f}</text>'
+        f'<text x="{left}" y="{height - 12}" font-size="12">{escape(str(start_label))}</text>'
+        f'<text x="{width - right}" y="{height - 12}" text-anchor="end" font-size="12">{escape(str(end_label))}</text>'
         "</svg>"
     )
     return mark_safe(svg)
@@ -1530,6 +1670,8 @@ def generate_backtest_csv(request, task_id):
             "Datensatz",
             "Markt",
             "Typ",
+            "Richtung",
+            "Hebel",
             "Index",
             "Zeitpunkt",
             "Einstiegszeitpunkt",
@@ -1555,6 +1697,8 @@ def generate_backtest_csv(request, task_id):
     writer.writerow(
         [
             "Gesamt",
+            "",
+            "",
             "",
             "",
             "",
@@ -1588,6 +1732,8 @@ def generate_backtest_csv(request, task_id):
                 "",
                 "",
                 "",
+                "",
+                "",
                 report.get("average_trade_duration_points"),
                 report.get("average_trade_duration_seconds"),
                 "",
@@ -1612,6 +1758,8 @@ def generate_backtest_csv(request, task_id):
                     "Trade",
                     item["symbol"],
                     trade.get("type"),
+                    trade.get("direction", "long"),
+                    trade.get("leverage", 1),
                     trade.get("index"),
                     trade.get("timestamp"),
                     trade.get("entry_timestamp"),
@@ -1642,6 +1790,7 @@ def generate_backtest_csv(request, task_id):
             row[11] = point.get("equity")
             writer.writerow(row)
     return response
+
 
 @login_required
 @require_GET

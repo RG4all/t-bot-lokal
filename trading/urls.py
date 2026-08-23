@@ -5,6 +5,13 @@ from . import views
 urlpatterns = [
     path("health/", views.health_view, name="health"),
     path("help/", views.help_view, name="help"),
+    # Gerenderte Repository-Dokumente (z. B. docs/backtesting.md)
+    path("docs/<slug:slug>/", views.documentation_view, name="documentation"),
+    path(
+        "api/docs/<slug:slug>/",
+        views.documentation_fragment,
+        name="documentation_fragment",
+    ),
     path("gate/", views.passphrase_gate_view, name="passphrase_gate"),
     path("", views.home, name="home"),
     path("register/", views.register_view, name="register"),

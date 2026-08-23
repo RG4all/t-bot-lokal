@@ -1,20 +1,19 @@
 {% extends "trading/base.html" %}
-{% block title %}Hilfe & Manual · Trading Bot{% endblock %}
+{% block title %}{{ document_title|default:"Hilfe & Manual" }} · Trading Bot{% endblock %}
 {% block extra_head %}
-<style>
-.manual-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}.manual-content{max-width:980px}
-.manual-content h1,.manual-content h2,.manual-content h3{scroll-margin-top:1rem;margin-top:1.6em}
-.manual-content h1{border-bottom:2px solid #0d6efd;padding-bottom:.4rem}.manual-content h2{border-bottom:1px solid #dee2e6;padding-bottom:.25rem}
-.manual-content table{display:block;overflow-x:auto;width:100%;margin:1rem 0}.manual-content th{background:#eef4ff}
-.manual-content code{background:#f1f3f5;padding:.1rem .3rem;border-radius:.2rem}.manual-content pre{background:#212529;color:#f8f9fa;padding:1rem;border-radius:.5rem;overflow:auto}
-.manual-content blockquote{border-left:4px solid #ffc107;padding:.5rem 1rem;background:#fff8e1}.manual-content img{max-width:100%}
-@media print{nav,footer,.manual-toolbar{display:none!important}.card{box-shadow:none;border:0}.manual-content{max-width:none}}
-</style>
+{% include "trading/_document_styles.html" %}
 {% endblock %}
 {% block content %}
 <div class="manual-toolbar d-flex justify-content-between align-items-center mb-3">
-  <div><h1 class="h3 mb-0">Hilfe & Plattform-Manual</h1><small class="text-muted">Version {{ version }}</small></div>
-  <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="#manual-top">Nach oben</a><button class="btn btn-outline-primary" type="button" onclick="window.print()">Drucken</button></div>
+  <div>
+    <h1 class="h3 mb-0">{{ document_title|default:"Hilfe & Plattform-Manual" }}</h1>
+    <small class="text-muted">{% if document_subtitle %}{{ document_subtitle }} · {% endif %}Version {{ version }}</small>
+  </div>
+  <div class="d-flex gap-2">
+    {% if document_slug and document_slug != "manual" %}<a class="btn btn-outline-secondary" href="{% url 'help' %}">Zum Handbuch</a>{% endif %}
+    <a class="btn btn-outline-secondary" href="#manual-top">Nach oben</a>
+    <button class="btn btn-outline-primary" type="button" onclick="window.print()">Drucken</button>
+  </div>
 </div>
 <article id="manual-top" class="card manual-content">{{ manual_html }}</article>
 {% endblock %}

@@ -145,11 +145,11 @@
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-striped mb-0">
-            <thead><tr><th>Zeit</th><th>Symbol</th><th>Aktion</th><th>Preis</th><th>Menge</th><th>Gebühr</th><th>P/L</th><th>Gesamt-P/L</th><th>Kapital</th><th></th></tr></thead>
+            <thead><tr><th>Zeit</th><th>Symbol</th><th>Aktion</th><th>Richtung</th><th>Preis</th><th>Menge</th><th>Gebühr</th><th>P/L</th><th>Gesamt-P/L</th><th>Kapital</th><th></th></tr></thead>
             <tbody id="trading-log-body">
                 {% for log in logs %}
                 <tr class="{% if log.action == 'buy' %}table-success{% elif log.action == 'sell' %}table-danger{% endif %}">
-                    <td>{{ log.timestamp|date:"d.m.Y H:i:s" }}</td><td>{{ log.symbol }}</td><td>{{ log.action }}</td><td>{{ log.price }}</td><td>{{ log.amount }}</td><td>{{ log.fee_amount }}</td><td>{{ log.pl_nominal }}</td><td>{{ log.total_pl }}</td><td>{{ log.current_capital }}</td><td></td>
+                    <td>{{ log.timestamp|date:"d.m.Y H:i:s" }}</td><td>{{ log.symbol }}</td><td>{{ log.action }}</td><td>{{ log.direction }}{% if log.leverage > 1 %} · {{ log.leverage|floatformat:0 }}x{% endif %}</td><td>{{ log.price }}</td><td>{{ log.amount }}</td><td>{{ log.fee_amount }}</td><td>{{ log.pl_nominal }}</td><td>{{ log.total_pl }}</td><td>{{ log.current_capital }}</td><td></td>
                 </tr>
                 {% empty %}<tr><td colspan="10" class="text-center text-muted">Noch keine Trades.</td></tr>{% endfor %}
             </tbody>
@@ -330,7 +330,7 @@
             logs.forEach(log => {
                 const row = document.createElement("tr");
                 row.className = log.action === "buy" ? "table-success" : "table-danger";
-                [new Date(log.timestamp).toLocaleString(), log.symbol, log.action, log.price, log.amount, log.fee_amount, log.pl_nominal, log.total_pl, log.current_capital].forEach(value => row.append(makeCell(value)));
+                [new Date(log.timestamp).toLocaleString(), log.symbol, log.action, log.leverage > 1 ? `${log.direction} · ${log.leverage}x` : log.direction, log.price, log.amount, log.fee_amount, log.pl_nominal, log.total_pl, log.current_capital].forEach(value => row.append(makeCell(value)));
                 const actionCell = document.createElement("td");
                 if (log.action === "buy" && openSymbols.has(log.symbol)) {
                     const button = document.createElement("button");

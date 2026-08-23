@@ -61,11 +61,11 @@ th { background: #e8eef5; }
 </table>
 {% if item.equity_svg %}<div class="chart-wrap"><h3>Equity-Kurve (mark-to-market)</h3>{{ item.equity_svg }}</div>{% endif %}
 <table class="trade-table">
-<thead><tr><th>Typ</th><th>Zeitpunkt</th><th>Index</th><th>Preis</th><th>Gebühr</th><th>Kapital vorher</th><th>Kapital danach</th><th>Haltedauer</th><th>Profit</th></tr></thead>
+<thead><tr><th>Typ</th><th>Richtung</th><th>Hebel</th><th>Zeitpunkt</th><th>Index</th><th>Preis</th><th>Gebühr</th><th>Kapital vorher</th><th>Kapital danach</th><th>Haltedauer</th><th>Profit</th></tr></thead>
 <tbody>
 {% for trade in item.report.trades %}
-<tr><td>{{ trade.type|upper }}</td><td>{{ trade.timestamp|default:"–" }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_before }}</td><td>{{ trade.capital_after }}</td><td>{% if trade.duration_points != None %}{{ trade.duration_points }} Punkte{% if trade.duration_seconds != None %} / {{ trade.duration_seconds|floatformat:1 }} s{% endif %}{% else %}–{% endif %}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>
-{% empty %}<tr><td colspan="9">Keine Trades.</td></tr>{% endfor %}
+<tr><td>{{ trade.type|upper }}</td><td>{{ trade.direction|default:"long" }}</td><td>{{ trade.leverage|default:1|floatformat:0 }}x</td><td>{{ trade.timestamp|default:"–" }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_before }}</td><td>{{ trade.capital_after }}</td><td>{% if trade.duration_points != None %}{{ trade.duration_points }} Punkte{% if trade.duration_seconds != None %} / {{ trade.duration_seconds|floatformat:1 }} s{% endif %}{% else %}–{% endif %}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>
+{% empty %}<tr><td colspan="11">Keine Trades.</td></tr>{% endfor %}
 </tbody>
 </table>
 </section>
