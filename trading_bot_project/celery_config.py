@@ -1,4 +1,4 @@
-"""Central resource and reliability policy for isolated Celery workers."""
+"""Zentrale Ressourcen- und Stabilitätsrichtlinie für isolierte Celery-Worker."""
 
 import os
 
@@ -15,12 +15,13 @@ BACKTEST_PRIORITY = 0
 BOT_PRIORITY = 9
 
 CELERY_RUNTIME_CONFIG = {
-    # One disposable child is the isolation boundary for one backtest.
+    # Ein wegwerfbarer Child-Prozess ist die Isolationsgrenze eines Backtests.
     "worker_concurrency": 1,
     "worker_prefetch_multiplier": 1,
     "worker_max_tasks_per_child": 1,
     "worker_max_memory_per_child": _env_int("CELERY_WORKER_MAX_MEMORY_PER_CHILD", 384_000),
-    # Cooperative task code receives the soft signal first; hard-kill is last resort.
+    # Kooperativer Task-Code erhält zuerst das Soft-Signal; der harte Abbruch
+    # ist nur die letzte Rückfallebene.
     "task_soft_time_limit": 3_600,
     "task_time_limit": 3_900,
     "task_acks_late": True,
@@ -40,7 +41,7 @@ CELERY_RUNTIME_CONFIG = {
             "priority": BACKTEST_PRIORITY,
         },
     },
-    # Redis emulates priorities with separate lists.
+    # Redis bildet Prioritäten über getrennte Listen ab.
     "broker_transport_options": {
         "priority_steps": list(range(10)),
         "queue_order_strategy": "priority",

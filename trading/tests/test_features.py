@@ -116,8 +116,8 @@ class HelpCacheTests(SimpleTestCase):
                 calls += 1
             return original()
 
-        # Replacing the cached function is intentionally avoided; this checks
-        # the public cache contract and the generated stable anchor instead.
+        # Die gecachte Funktion wird bewusst nicht ersetzt; geprüft werden
+        # stattdessen der öffentliche Cache-Vertrag und der stabile Anker.
         first = _render_manual()
         second = _render_manual()
         self.assertEqual(first, second)
@@ -175,8 +175,8 @@ class ScannerTests(SimpleTestCase):
                 pass
 
         with patch("trading.market_scanner.ccxt.binance", FakeExchange):
-            # The process cache is private by design; refresh guarantees that
-            # this test cannot observe another test's market snapshot.
+            # Der Prozess-Cache ist bewusst privat; „refresh“ stellt sicher, dass
+            # dieser Test keinen Marktschnappschuss eines anderen Tests sieht.
             result = scan_market_opportunities("binance", "spot", refresh=True)
         self.assertEqual(result["gainers"][0]["symbol"], "BTC/USDT")
         self.assertEqual(result["losers"][0]["symbol"], "ETH/USDT")

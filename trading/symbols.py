@@ -22,7 +22,8 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 15 * 60
 _FAILURE_TTL_SECONDS = 60
 _QUOTES = ("FDUSD", "USDT", "USDC", "EUR", "BTC", "ETH")
-# Advisory fallback only: save/activation validation never relies on this list.
+# Nur unverbindlicher Rückfall: Die Prüfung beim Speichern/Aktivieren stützt
+# sich niemals auf diese Liste.
 _BINANCE_SPOT_FALLBACK = {
     "ADA/USDT",
     "AVAX/USDT",
@@ -74,9 +75,7 @@ def _load_symbols(exchange_id, market):
         try:
             return _provider_symbols(BinancePublicSymbolCatalog(market))
         except MarketDataConnectionError:
-            return set(
-                _BINANCE_FUTURES_FALLBACK if market == "futures" else _BINANCE_SPOT_FALLBACK
-            )
+            return set(_BINANCE_FUTURES_FALLBACK if market == "futures" else _BINANCE_SPOT_FALLBACK)
     if exchange_id == "bitmart":
         if market != "spot":
             return set()

@@ -8,9 +8,10 @@ from .celery_config import CELERY_RUNTIME_CONFIG
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "trading_bot_project.settings")
 
 app = Celery("trading_bot_project")
-# Broker/backend URLs and environment-specific switches come from Django settings.
+# Broker-/Backend-URLs und umgebungsspezifische Schalter kommen aus den Django-Settings.
 app.config_from_object("django.conf:settings", namespace="CELERY")
-# A single canonical policy prevents CLI arguments and settings drift.
+# Eine einzige verbindliche Richtlinie verhindert Abweichungen zwischen
+# CLI-Argumenten und Settings.
 app.conf.update(CELERY_RUNTIME_CONFIG)
 app.autodiscover_tasks()
 

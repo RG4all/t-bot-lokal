@@ -210,9 +210,9 @@ class _BitunixScannerExchange:
                 or data.get("klines")
                 or data.get("data")
             )
-            # Some Spot responses wrap rows, while the documentation also
-            # permits one candle object. Handle both forms without inventing
-            # fields that the endpoint did not return.
+            # Manche Spot-Antworten verschachteln die Zeilen, die Dokumentation
+            # erlaubt zusätzlich ein einzelnes Kerzenobjekt. Beide Formen werden
+            # verarbeitet, ohne fehlende Felder zu erfinden.
             data = nested if nested is not None else [data]
         return data if isinstance(data, list) else []
 
@@ -312,8 +312,9 @@ class _BitunixScannerExchange:
             if item["quote_volume"] is not None:
                 quote_parts.append(item["quote_volume"])
             elif item["base_volume"] is not None:
-                # Converting an observed base volume at the observed close is
-                # normalization, not a favourable substitute for missing data.
+                # Ein beobachtetes Basisvolumen am beobachteten Schlusskurs
+                # umzurechnen ist Normalisierung – kein schöngerechneter Ersatz
+                # für fehlende Daten.
                 quote_parts.append(item["base_volume"] * item["close"])
         quote_volume = sum(quote_parts) if quote_parts else None
         return {
@@ -859,8 +860,8 @@ def scan_all_market_opportunities(*, market="spot", refresh=False, **filters):
                 exchange_id, market, refresh=refresh, **filters
             )
         except MarketScannerFilterError:
-            # The same invalid user input applies to every exchange and must
-            # be reported as HTTP 400 by the API rather than five outages.
+            # Dieselbe ungültige Nutzereingabe betrifft jede Börse und muss von
+            # der API als HTTP 400 gemeldet werden statt als fünf Ausfälle.
             raise
         except MarketScannerError as exc:
             errors[exchange_id] = str(exc)

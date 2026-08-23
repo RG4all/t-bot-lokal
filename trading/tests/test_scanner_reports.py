@@ -203,10 +203,7 @@ class BacktestReportExportTests(TestCase):
         self.assertTrue(any(row[0] == "Trade" and row[2] == "sell" for row in rows))
         self.assertTrue(
             any(
-                row[0] == "Equity"
-                and row[1] == "BTC/USDT"
-                and row[3] == "3"
-                and row[11] == "102.5"
+                row[0] == "Equity" and row[1] == "BTC/USDT" and row[3] == "3" and row[11] == "102.5"
                 for row in rows
             )
         )

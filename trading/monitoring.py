@@ -5,7 +5,7 @@ import time
 
 
 class RuntimeHeartbeat:
-    """Low-overhead scheduler-lag monitor for the web/bot process."""
+    """Ressourcenschonende Überwachung der Scheduler-Verzögerung im Web-/Bot-Prozess."""
 
     def __init__(self, interval=1.0):
         self.interval = interval
@@ -37,7 +37,7 @@ class RuntimeHeartbeat:
         with self._lock:
             age = time.monotonic() - self._last_tick
             max_lag = self._max_lag
-            # Reset the window after each observation, keeping current lag.
+            # Fenster nach jeder Messung zurücksetzen, aktuelle Verzögerung behalten.
             self._max_lag = age
         rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         return {
