@@ -79,6 +79,16 @@ urlpatterns = [
         views.generate_backtest_pdf,
         name="generate_backtest_pdf",
     ),
+    path(
+        "backtesting/<int:task_id>/html/",
+        views.generate_backtest_html,
+        name="generate_backtest_html",
+    ),
+    path(
+        "backtesting/<int:task_id>/csv/",
+        views.generate_backtest_csv,
+        name="generate_backtest_csv",
+    ),
     path("analyse/", views.analyse_view, name="analyse"),
     path("errors/", views.error_log_view, name="error_log"),
     path(
