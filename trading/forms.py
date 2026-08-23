@@ -2,15 +2,20 @@ import math
 import re
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
 from django.utils import timezone
 
+from .backtest_templates import template_choices
 from .market_data import MarketDataError, SymbolValidationError, validate_exchange_symbols
 from .models import Configuration
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9._-]+/[A-Z0-9._:-]+$")
-_MAX_BACKTEST_COMBINATIONS = 20_000
+# Sicherheitsabsolute; das wirksame Limit wird zusätzlich pro Hardwareprofil
+# und über die Environment-Konfiguration begrenzt.
+_MAX_BACKTEST_COMBINATIONS = min(100_000, getattr(settings, "BACKTEST_MAX_COMBINATIONS", 20_000))
+_MAX_BACKTEST_PRICE_POINTS = min(50_000, getattr(settings, "BACKTEST_MAX_PRICE_POINTS", 5_000))
 
 
 class RegistrationForm(forms.ModelForm):
@@ -54,7 +59,7 @@ class RegistrationForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["email"].required = True
-        for name, field in self.fields.items():
+        for field in self.fields.values():
             field.widget.attrs["class"] = "form-control"
             if field.help_text:
                 field.widget.attrs["title"] = field.help_text
@@ -176,7 +181,7 @@ class ConfigurationForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for name, field in self.fields.items():
+        for field in self.fields.values():
             if isinstance(field.widget, forms.CheckboxInput):
                 css_class = "form-check-input"
             elif isinstance(field.widget, forms.Select):
@@ -341,6 +346,12 @@ class DashboardConfigurationForm(forms.ModelForm):
 
 
 class BacktestForm(forms.Form):
+    template = forms.ChoiceField(
+        label="Backtesting-Template",
+        choices=template_choices(),
+        required=False,
+        help_text="Ein Template setzt nur sinnvolle Startwerte für das Suchraster; die Live-Konfiguration bleibt unverändert.",
+    )
     acc_from = forms.FloatField(
         label="Beschleunigung (DVA / prev NDA) – von",
         help_text="Startwert des Suchbereichs für die relative Momentum-Beschleunigung (DVA / vorherige NDA). Entspricht „div_DVA_prev_NDA_threshold_buy“ in der Konfiguration.",
@@ -406,9 +417,25 @@ class BacktestForm(forms.Form):
     max_price_points = forms.IntegerField(
         label="Maximale historische Preispunkte",
         min_value=100,
-        max_value=5_000,
-        initial=5_000,
-        help_text="Anzahl der jüngsten Datenpunkte je Symbol aus DataLog (100–5.000). Kleinere Werte sparen CPU/RAM.",
+        max_value=_MAX_BACKTEST_PRICE_POINTS,
+        initial=_MAX_BACKTEST_PRICE_POINTS,
+        help_text="Anzahl der jüngsten Datenpunkte je Symbol aus DataLog. Das Hardwareprofil begrenzt den Wert zusätzlich.",
+    )
+    max_grid_points = forms.IntegerField(
+        label="Maximale Rasterpunkte je Parameter",
+        required=False,
+        min_value=2,
+        max_value=100,
+        initial=25,
+        help_text="Begrenzt die Anzahl der Werte je Indikatorachse zusätzlich zum Gesamtkombinationslimit.",
+    )
+    max_combinations = forms.IntegerField(
+        label="Maximale Kombinationen (Hard-Limit)",
+        required=False,
+        min_value=100,
+        max_value=_MAX_BACKTEST_COMBINATIONS,
+        initial=_MAX_BACKTEST_COMBINATIONS,
+        help_text="Harte Obergrenze über alle Symbole. Sie kann per BACKTEST_MAX_COMBINATIONS und Hardwareprofil angepasst, aber nie überschritten werden.",
     )
     schedule_backtest = forms.BooleanField(
         label="Backtest für späteren Zeitpunkt planen?",
@@ -422,9 +449,38 @@ class BacktestForm(forms.Form):
         help_text="Datum und Uhrzeit in der Zukunft für die geplante Ausführung.",
     )
 
-    def __init__(self, *args, start_capital=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        start_capital=None,
+        resource_profile=None,
+        symbol_count=1,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.start_capital = start_capital
+        self.resource_profile = resource_profile
+        self.symbol_count = max(1, int(symbol_count or 1))
+        profile_max_points = getattr(
+            resource_profile, "max_price_points", _MAX_BACKTEST_PRICE_POINTS
+        )
+        profile_max_grid = getattr(resource_profile, "max_grid_points", 25)
+        profile_max_combinations = getattr(
+            resource_profile, "max_combinations", _MAX_BACKTEST_COMBINATIONS
+        )
+        self.max_price_points_limit = max(
+            100, min(_MAX_BACKTEST_PRICE_POINTS, int(profile_max_points))
+        )
+        self.max_combinations_limit = max(
+            100, min(_MAX_BACKTEST_COMBINATIONS, int(profile_max_combinations))
+        )
+        self.max_grid_points_limit = max(2, min(100, int(profile_max_grid)))
+        self.fields["max_price_points"].max_value = self.max_price_points_limit
+        self.fields["max_price_points"].initial = self.max_price_points_limit
+        self.fields["max_grid_points"].max_value = self.max_grid_points_limit
+        self.fields["max_grid_points"].initial = self.max_grid_points_limit
+        self.fields["max_combinations"].max_value = self.max_combinations_limit
+        self.fields["max_combinations"].initial = self.max_combinations_limit
         for field in self.fields.values():
             if isinstance(field.widget, forms.CheckboxInput):
                 field.widget.attrs["class"] = "form-check-input"
@@ -469,9 +525,37 @@ class BacktestForm(forms.Form):
                 continue
             dimensions.append(math.floor((end - start) / step + 1e-9) + 1)
 
-        if len(dimensions) == 3 and math.prod(dimensions) > _MAX_BACKTEST_COMBINATIONS:
-            raise forms.ValidationError(
-                f"Zu viele Kombinationen ({math.prod(dimensions):,}). "
-                f"Maximal {_MAX_BACKTEST_COMBINATIONS:,} pro Symbol sind erlaubt."
+        max_grid_points = cleaned_data.get("max_grid_points") or self.max_grid_points_limit
+        if max_grid_points > self.max_grid_points_limit:
+            self.add_error(
+                "max_grid_points",
+                f"Das aktuelle Hardwareprofil erlaubt höchstens {self.max_grid_points_limit} Rasterpunkte je Parameter.",
             )
+        cleaned_data["max_grid_points"] = max_grid_points
+        max_price_points = cleaned_data.get("max_price_points")
+        if max_price_points is not None and max_price_points > self.max_price_points_limit:
+            self.add_error(
+                "max_price_points",
+                f"Das aktuelle Hardwareprofil erlaubt höchstens {self.max_price_points_limit:,} Preispunkte.",
+            )
+        max_combinations = cleaned_data.get("max_combinations") or self.max_combinations_limit
+        if max_combinations > self.max_combinations_limit:
+            self.add_error(
+                "max_combinations",
+                f"Das aktuelle Hardwareprofil erlaubt höchstens {self.max_combinations_limit:,} Kombinationen.",
+            )
+        cleaned_data["max_combinations"] = max_combinations
+        if len(dimensions) == 3 and any(dimension > max_grid_points for dimension in dimensions):
+            self.add_error(
+                None,
+                f"Jede Rasterachse darf höchstens {max_grid_points} Werte enthalten.",
+            )
+        if len(dimensions) == 3:
+            combinations_per_symbol = math.prod(dimensions)
+            total_combinations = combinations_per_symbol * self.symbol_count
+            if total_combinations > max_combinations:
+                raise forms.ValidationError(
+                    f"Zu viele Kombinationen ({total_combinations:,} über {self.symbol_count} Symbol(e)). "
+                    f"Das aktuelle Hard-Limit beträgt {max_combinations:,}."
+                )
         return cleaned_data

@@ -2,6 +2,18 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.0] – 2026-08-23
+
+### Help-Seite, adaptive Backtests und geprüfte Marktvorlagen
+
+- Der Hilfe-Link im Menü zeigt zuverlässig das gecachte Handbuch. Die Markdown-Kompilierung wird mit einem thread-sicheren Einmal-Cache geschützt; alle Fragment-Ziele der integrierten Hilfe wurden geprüft.
+- Neues ausführliches Kapitel [`backtesting.md`](backtesting.md) mit Formeln, Templates, Ressourcenbudget, Laufzeitschätzung, Datenqualität und Risikohinweisen.
+- Docker startet lokal ohne Passphrase-Gate und verwendet den Standard-Port `8369`. Compose übernimmt nun auch die ermittelten Speichergrenzen.
+- `trading.resource_optimizer` liest CPU, RAM, cgroup-Limits und freien Speicher und leitet daraus sichere Preispunkt-, Raster- und Kombinationsgrenzen ab. Hard-Limits werden im Formular und im Worker erneut geprüft.
+- Backtesting bietet Schnellprüfung, Ausgewogen und Feinoptimierung, eine variable Preispunktzahl, ein variables Kombinations-Hard-Limit und eine sichtbare Laufzeitschätzung.
+- Der öffentliche Markt-Scanner erstellt pro Exchange bis zu fünf Gainer und Loser nach Volatilität, Volumen-Ausreißer, Orderbuch-Tiefe, Volumen/Marktkapitalisierung und konservativer Utility-Prüfung. Die UI zeigt die Risiko-Warnung und kann qualifizierte Symbole in die Konfiguration übernehmen.
+- Zusätzliche Python-, Django- und Shell-Tests decken Ressourcenheuristik, Cache, Marktfilter, Formulare und lokale Start-/Portkonfiguration ab.
+
 ## [2.3.1] – 2026-08-22
 
 ### Indikator-Konsistenz, Tooltip-System und Behebung des /help/ 500-Fehlers

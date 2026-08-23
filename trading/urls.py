@@ -31,6 +31,19 @@ urlpatterns = [
     path("api/manual_sell/<int:config_id>/", views.manual_sell_view, name="manual_sell"),
     path("api/kill_switch/<int:config_id>/", views.kill_switch_view, name="kill_switch"),
     path("api/symbols/", views.symbol_suggestions_api, name="symbol_suggestions_api"),
+    path(
+        "api/market-opportunities/",
+        views.market_opportunities_api,
+        name="market_opportunities_api",
+    ),
+    # Lesbarer Alias für bestehende Frontend-Integrationen.
+    path("api/top-movers/", views.market_opportunities_api, name="top_movers_api"),
+    path("api/resources/", views.server_resources_api, name="server_resources_api"),
+    path(
+        "api/backtesting/estimate/",
+        views.backtesting_estimate_api,
+        name="backtesting_estimate_api",
+    ),
     path("api/data_logs/", views.data_logs_api, name="data_logs_api"),
     path("api/trades/", views.trades_api, name="trades_api"),
     path("api/bot/status/", views.bot_status_api, name="bot_status_api"),

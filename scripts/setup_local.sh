@@ -22,6 +22,7 @@
 #   scripts/setup_local.sh --reset-db            # bestehendes Postgres-Volume
 #                                                # zuruecksetzen (Password-Mismatch)
 #   scripts/setup_local.sh --reset-db --yes      # ohne interaktive Nachfrage
+#   scripts/setup_local.sh --dry-run             # nur geplante Aktionen anzeigen
 # ============================================================================
 
 set -euo pipefail
@@ -37,6 +38,7 @@ DO_UP=1
 RENDER_FREE=0
 RESET_DB=0
 FORCE_RESET_DB=0
+DRY_RUN=0
 
 # ANSI-Farben
 if [[ -t 1 ]]; then
@@ -64,6 +66,7 @@ parse_args() {
       --render-free-simulation|--render-simulation) RENDER_FREE=1 ;;
       --reset-db)     RESET_DB=1 ;;
       --yes|-y)       FORCE_RESET_DB=1 ;;
+      --dry-run)      DRY_RUN=1 ;;
       -h|--help)      usage ;;
       *) die "Unbekannte Option: ${arg}" ;;
     esac
@@ -76,6 +79,10 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # 1. Docker/Compose pruefen (optional installieren)
 # ---------------------------------------------------------------------------
 check_docker() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf 'dry-run: Docker/Compose-Check übersprungen\n'
+    return 0
+  fi
   if have docker && docker compose version >/dev/null 2>&1; then
     info "Docker und Compose v2 verfuegbar."
     return 0
@@ -101,6 +108,10 @@ EOF
 # 2. Hardware-Analyse durchfuehren
 # ---------------------------------------------------------------------------
 run_hardware_test() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf 'dry-run: Hardware-Analyse -> %s\n' "${TUNING_ENV}"
+    return 0
+  fi
   info "Starte Hardware-Analyse -> ${TUNING_ENV}"
   mkdir -p "$(dirname "${TUNING_ENV}")"
   ./hardware-test.sh --env-out="${TUNING_ENV}" --format=text >&2
@@ -124,6 +135,10 @@ random_secret() {
 }
 
 write_env_local() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf 'dry-run: .env.local würde mit WEB_PORT=8369 und PASSPHRASE_GATE_ENABLED=False erzeugt\n'
+    return 0
+  fi
   local secret_key passphrase pg_password web_port
   secret_key="$(read_existing_secret SECRET_KEY)"
   passphrase="$(read_existing_secret PASSPHRASE)"
@@ -137,7 +152,7 @@ write_env_local() {
   # individuelles Passwort moechte, kann es vor dem ersten Lauf in .env.local
   # setzen oder dieses Skript mit --reset-db neu initialisieren.
   [[ -z "${pg_password}" ]]  && pg_password="tbot-local-password"
-  [[ -z "${web_port}" ]]     && web_port="8000"
+  [[ -z "${web_port}" ]]     && web_port="8369"
 
   info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."
   umask 077
@@ -150,7 +165,8 @@ write_env_local() {
     echo ""
     echo "SECRET_KEY=${secret_key}"
     echo "PASSPHRASE=${passphrase}"
-    echo "PASSPHRASE_GATE_ENABLED=True"
+    # Docker ist lokal standardmäßig ohne zusätzliche Passphrase-Ebene.
+    echo "PASSPHRASE_GATE_ENABLED=False"
     echo "AUTOSTART_BOTS=True"
     echo ""
     echo "POSTGRES_DB=tbot"
@@ -213,6 +229,11 @@ reset_db_if_needed() {
 # 5. Stack starten und auf Web-Health warten
 # ---------------------------------------------------------------------------
 start_stack() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf 'Render-Free simulation=%s\n' "${RENDER_FREE}"
+    printf 'docker compose --env-file %s up --build -d\n' "${ENV_LOCAL}"
+    return 0
+  fi
   [[ "${DO_UP}" -eq 1 ]] || { info "--no-up gesetzt - Stack wird nicht gestartet."; return 0; }
 
   # Compose liest .env automatisch; .env.local muss explizit eingebunden werden.
@@ -246,7 +267,7 @@ start_stack() {
   # Wenn der Container healthy ist, pruefen wir nochmal explizit vom Host aus.
   # Das unterscheidet "Container laeuft" von "Host kann erreichen".
   local host_http="000"
-  local port="${WEB_PORT:-8000}"
+  local port="${WEB_PORT:-8369}"
   if command -v curl >/dev/null 2>&1; then
     host_http="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/health/" 2>/dev/null || true)"
     host_http="${host_http:-000}"
@@ -258,7 +279,7 @@ start_stack() {
     200|3*)
       info "Web ist healthy und vom Host erreichbar (HTTP ${host_http})."
       info "App: http://localhost:${port}/"
-      info "Hinweis: Die Startseite liefert 302 auf /gate/ (Passphrase) oder /login/ - das ist normal."
+      info "Hinweis: Die Startseite liefert lokal standardmäßig 302 auf /login/; bei aktiviertem Gate zuerst auf /gate/."
       ;;
     *)
       error "Web-Container ist healthy, aber vom Host aus nicht erreichbar (HTTP ${host_http})."

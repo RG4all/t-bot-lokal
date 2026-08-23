@@ -15,10 +15,11 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 
 from .backtesting import Backtesting
 from .models import BacktestTask, Configuration, DataLog
+from .resource_optimizer import get_backtest_resource_profile
 
 logger = logging.getLogger(__name__)
-_MAX_TOTAL_COMBINATIONS = 20_000
-_MAX_BACKTEST_PRICE_POINTS = 5_000
+_MAX_TOTAL_COMBINATIONS = min(100_000, getattr(settings, "BACKTEST_MAX_COMBINATIONS", 20_000))
+_MAX_BACKTEST_PRICE_POINTS = min(50_000, getattr(settings, "BACKTEST_MAX_PRICE_POINTS", 5_000))
 _LOCAL_TASK_IDS = set()
 _LOCAL_TASK_IDS_LOCK = threading.Lock()
 _LOCAL_TASK_SEMAPHORE = threading.Semaphore(1)
@@ -114,7 +115,11 @@ def _parameter_values(start, end, step):
 
 
 def _historical_prices(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
-    limit = max(100, min(_MAX_BACKTEST_PRICE_POINTS, int(limit)))
+    profile = get_backtest_resource_profile()
+    limit = max(
+        100,
+        min(_MAX_BACKTEST_PRICE_POINTS, profile.max_price_points, int(limit)),
+    )
     prices = list(
         DataLog.objects.filter(configuration_id=config_id, symbol=symbol)
         .order_by("-timestamp")
@@ -292,14 +297,31 @@ def run_backtest(self, config_id, params, symbols, task_id):
                 params["deltadelta_steps"],
             ),
         )
+        resource_profile = get_backtest_resource_profile()
         symbols = [symbol.strip() for symbol in symbols if symbol.strip()]
+        configured_grid = params.get("max_grid_points", resource_profile.max_grid_points)
+        try:
+            configured_grid = int(configured_grid)
+        except (TypeError, ValueError):
+            configured_grid = resource_profile.max_grid_points
+        grid_limit = max(2, min(resource_profile.max_grid_points, configured_grid))
+        if any(len(values) > grid_limit for values in ranges):
+            raise ValueError(f"Jede Rasterachse darf höchstens {grid_limit} Werte enthalten.")
         total = len(symbols)
         for values in ranges:
             total *= len(values)
-        if total <= 0 or total > _MAX_TOTAL_COMBINATIONS:
-            raise ValueError(
-                f"Ungültige Anzahl Kombinationen ({total}); maximal {_MAX_TOTAL_COMBINATIONS}."
-            )
+        configured_limit = params.get("max_combinations", _MAX_TOTAL_COMBINATIONS)
+        try:
+            configured_limit = int(configured_limit)
+        except (TypeError, ValueError):
+            configured_limit = _MAX_TOTAL_COMBINATIONS
+        hard_limit = min(
+            max(100, configured_limit),
+            resource_profile.max_combinations,
+            _MAX_TOTAL_COMBINATIONS,
+        )
+        if total <= 0 or total > hard_limit:
+            raise ValueError(f"Ungültige Anzahl Kombinationen ({total}); maximal {hard_limit}.")
 
         logger.info(
             "event=backtest.started task_id=%s celery_id=%s config_id=%s symbols=%s combinations=%s",

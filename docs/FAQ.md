@@ -8,7 +8,7 @@ Betrieb, Diagnose und Troubleshooting des lokalen Docker-Stacks.
 > git pull
 > scripts/setup_local.sh --reset-db --yes
 > scripts/diagnose_local.sh
-> curl -i http://127.0.0.1:8000/health/
+> curl -i http://127.0.0.1:8369/health/
 > ```
 
 ---
@@ -27,7 +27,7 @@ cp .env.docker.example .env       # PASSPHRASE/SECRET_KEY/POSTGRES_PASSWORD anpa
 docker compose up --build -d
 ```
 
-Danach oeffnen: **<http://localhost:8000/>** (http, nicht https).
+Danach oeffnen: **<http://localhost:8369/>** (http, nicht https).
 
 ## 2. Welche Container laufen sollen?
 
@@ -42,7 +42,7 @@ Erwartet:
 | `tuner` | `Exited (0)` | (kurzlebig; schreibt tuning.env) |
 | `postgres` | `Up (healthy)` | 5432/tcp (nur intern) |
 | `redis` | `Up (healthy)` | 6379/tcp (nur intern) |
-| `web` | `Up (healthy)` | 0.0.0.0:8000->8000/tcp |
+| `web` | `Up (healthy)` | 0.0.0.0:8369->8369/tcp |
 | `backtest-worker` | `Up (healthy)` | (nur intern) |
 | `scheduler` | nur mit Profil `scheduler` | (nur intern) |
 
@@ -50,44 +50,46 @@ Dass `tuner` im Status `Exited` steht, ist **erwuenscht** (One-Shot-Container).
 
 ## 3. Warum sehe ich nur einen 302-Redirect auf `/gate/` oder `/login/`?
 
-Das ist **normal und kein Fehler**:
+Der lokale Docker-Stack ist standardmäßig ohne Passphrase-Gate aktiviert. Dann
+führt `/` direkt zu `/login/`; der normale Login bleibt davon unberührt. Ein
+302 auf `/gate/` erscheint nur, wenn `PASSPHRASE_GATE_ENABLED=True` gesetzt
+wurde. Das ist für eine öffentlich erreichbare Instanz empfehlenswert.
 
-- `PassphraseGateMiddleware` schuetzt alle Endpunkte ausser `/health/`,
-  `/gate/`, `/static/*`.
-- `GET /` liefert `302 Found` mit `Location: /gate/?next=/` (Passphrase-Abfrage).
-- Nach Eingabe der Passphrase (Default `local-t-bot`, bzw. Wert aus `.env`)
-  folgt ein weiterer Redirect auf `/login/`.
-- Nach Registrierung/Login das Dashboard unter `/dashboard/`.
-
-Test:
+Test im Standardsetup:
 
 ```bash
-curl -i http://localhost:8000/          # -> 302, Location: /gate/?next=/
-curl -i http://localhost:8000/health/   # -> 200 OK, JSON {"status":"ok"}
-curl -i http://localhost:8000/gate/     # -> 200 HTML-Formular
+curl -i http://localhost:8369/          # -> 302, Location: /login/
+curl -i http://localhost:8369/health/   # -> 200 OK, JSON {"status":"ok"}
 ```
 
-## 4. `http://localhost:8000` antwortet nicht - Container sind aber healthy
+Zum Aktivieren des zusätzlichen Gates in `.env` setzen:
+
+```dotenv
+PASSPHRASE_GATE_ENABLED=True
+PASSPHRASE=eigenes-geheimes-wort
+```
+
+## 4. `http://localhost:8369` antwortet nicht - Container sind aber healthy
 
 Sofort-Checks:
 
 ```bash
 scripts/diagnose_local.sh                       # automatische forensische Diagnose
-curl -i http://127.0.0.1:8000/health/            # bevorzugt IP statt Namen verwenden
+curl -i http://127.0.0.1:8369/health/            # bevorzugt IP statt Namen verwenden
 docker compose logs --tail 100 web
-docker compose exec web python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/health/', timeout=3).read())"
+docker compose exec web python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8369/health/', timeout=3).read())"
 ```
 
 Haeufige Ursachen und Abhilfen:
 
 | Symptom | Ursache | Abhilfe |
 |---|---|---|
-| `Connection refused` auf `localhost:8000`, Container aber `healthy` | Docker-Desktop/Engine fuerwartet den Port nicht auf den Host (WSL2, Remote-Docker, VPN, anderer Context) | `scripts/diagnose_local.sh` prueft das. Docker-Context mit `docker context use default` zuruecksetzen. |
-| Browser "connection reset" / "nicht sicher" | Statt `http://` wurde `https://` aufgerufen | Explizit `http://127.0.0.1:8000/` aufrufen; HSTS fuer localhost im Browser loeschen. |
+| `Connection refused` auf `localhost:8369`, Container aber `healthy` | Docker-Desktop/Engine fuerwartet den Port nicht auf den Host (WSL2, Remote-Docker, VPN, anderer Context) | `scripts/diagnose_local.sh` prueft das. Docker-Context mit `docker context use default` zuruecksetzen. |
+| Browser "connection reset" / "nicht sicher" | Statt `http://` wurde `https://` aufgerufen | Explizit `http://127.0.0.1:8369/` aufrufen; HSTS fuer localhost im Browser loeschen. |
 | curl geht, Browser nicht | HTTP-Proxy / `HTTP_PROXY`-Variable | `localhost,127.0.0.1` in `NO_PROXY` aufnehmen. |
-| Port 8000 bereits belegt | Zweiter Server/anderes Compose-Projekt | `WEB_PORT=8001 docker compose up -d` oder `ss -ltnp \| grep 8000`. |
-| Linux-Host mit `ufw`/`firewalld` aktiv | Firewall blockiert 8000/tcp auf dem Host | `sudo ufw allow 8000/tcp` bzw. `firewall-cmd --add-port=8000/tcp`. |
-| Remote-Server / VM | Dienst lauscht zwar im Container, aber nicht auf der oeffentlichen IP des Hosts | `http://<server-ip>:8000/`; zusaetzlich `WEB_CPUS`/`WEB_PORT` in `.env.local` anpassen. |
+| Port 8369 bereits belegt | Zweiter Server/anderes Compose-Projekt | `WEB_PORT=8001 docker compose up -d` oder `ss -ltnp \| grep 8369`. |
+| Linux-Host mit `ufw`/`firewalld` aktiv | Firewall blockiert 8369/tcp auf dem Host | `sudo ufw allow 8369/tcp` bzw. `firewall-cmd --add-port=8369/tcp`. |
+| Remote-Server / VM | Dienst lauscht zwar im Container, aber nicht auf der oeffentlichen IP des Hosts | `http://<server-ip>:8369/`; zusaetzlich `WEB_CPUS`/`WEB_PORT` in `.env.local` anpassen. |
 | Docker Desktop WSL2-Integration | Ports werden nicht zu Windows weitergereicht | Docker Desktop -> Settings -> Resources -> WSL Integration fuer die Distro aktivieren; ggf. WSL-Distro neu starten. |
 
 ## 5. Container starten, werden aber nicht healthy (Restart-Loop)
@@ -241,9 +243,9 @@ tests/distro_smoke_test.sh
 ## 14. Haeufige Irrtuemer
 
 1. **`tuner` ist `Exited (0)`** - das ist beabsichtigt.
-2. **Port-Spalte `8000/tcp` ohne `0.0.0.0:8000->`** = der Port ist nicht
+2. **Port-Spalte `8369/tcp` ohne `0.0.0.0:8369->`** = der Port ist nicht
    auf den Host veroeffentlicht. In `docker-compose.yml` muss unter `web`
-   `ports: ["${WEB_PORT:-8000}:8000"]` stehen.
+   `ports: ["${WEB_PORT:-8369}:8369"]` stehen.
 3. **`0.0.0.0` im Container** heisst "im Container-Netzwerk"; auf dem Host
    ist der Dienst ueber `localhost` erreichbar, solange Docker den Port
    forwardet.

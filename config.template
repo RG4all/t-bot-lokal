@@ -69,6 +69,13 @@ CPU_ARCH=amd64
 CPU_HASHRATE_MBPS=0
 
 # ----------------------------------------------------------------------------
+# Backtesting: absolute Sicherheitsgeländer (Hardwareprofil reduziert weiter)
+# ----------------------------------------------------------------------------
+BACKTEST_MAX_COMBINATIONS=20000
+BACKTEST_MAX_PRICE_POINTS=5000
+BACKTEST_DEFAULT_PRICE_POINTS=5000
+
+# ----------------------------------------------------------------------------
 # Celery / Worker
 # ----------------------------------------------------------------------------
 CELERY_LOG_LEVEL=INFO

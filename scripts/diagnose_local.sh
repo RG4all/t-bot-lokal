@@ -2,12 +2,12 @@
 # ============================================================================
 # scripts/diagnose_local.sh - Forensische Diagnose des lokalen Docker-Stacks
 #
-# Prueft systematisch alle Gruende, warum http://localhost:8000/ nicht
+# Prueft systematisch alle Gruende, warum http://localhost:8369/ nicht
 # erreichbar sein koennte, obwohl die Container "healthy" sind:
 #   1. Docker/Compose verfuegbar?
 #   2. Laufen die Container? Status?
-#   3. Ist Port 8000 auf dem Host veroeffentlicht?
-#   4. Lauscht Daphne innerhalb des Containers auf 0.0.0.0:8000?
+#   3. Ist Port 8369 auf dem Host veroeffentlicht?
+#   4. Lauscht Daphne innerhalb des Containers auf 0.0.0.0:8369?
 #   5. Antwortet der /health/-Endpoint innerhalb des Containers?
 #   6. Firewall/Proxy-Hinweise (HTTP_PROXY, NO_PROXY, ufw/firewalld)
 #   7. WSL2/VM-Hinweise (localhost-Forwarding)
@@ -51,7 +51,7 @@ detect_web_port() {
   if [ -z "${p}" ] && [ -f .env ]; then
     p="$(grep -E '^WEB_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
   fi
-  echo "${p:-8000}"
+  echo "${p:-8369}"
 }
 
 # ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ if [ -n "${WEB_CONTAINER}" ]; then
   PORT_LINE="$(docker port "${WEB_CONTAINER}" 2>/dev/null || true)"
   if [ -z "${PORT_LINE}" ]; then
     fail "Der web-Container veroeffentlicht KEINE Ports auf dem Host."
-    fail "  docker-compose.yml muss 'ports: [\"${WEB_PORT}:8000\"]' enthalten."
+    fail "  docker-compose.yml muss 'ports: [\"${WEB_PORT}:8369\"]' enthalten."
   else
     printf '  %s\n' "${PORT_LINE}"
     if echo "${PORT_LINE}" | grep -q "0.0.0.0:${WEB_PORT}\|:::${WEB_PORT}"; then
@@ -131,13 +131,13 @@ fi
 # ---------------------------------------------------------------------------
 section "4. Daphne innerhalb des Containers"
 if [ -n "${WEB_CONTAINER}" ]; then
-  # Lauscht Daphne innerhalb des Containers auf 0.0.0.0:8000?
+  # Lauscht Daphne innerhalb des Containers auf 0.0.0.0:8369?
   LISTEN_INSIDE="$(docker exec "${WEB_CONTAINER}" sh -c 'ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null || cat /proc/net/tcp 2>/dev/null' || true)"
-  if echo "${LISTEN_INSIDE}" | grep -qE ":1F40|0.0.0.0:8000|:::8000"; then
-    # :1F40 = 8000 hex
-    ok "Daphne lauscht INNERHALB des Containers auf 0.0.0.0:8000."
+  if echo "${LISTEN_INSIDE}" | grep -qE ":20B1|0.0.0.0:8369|:::8369"; then
+    # :20B1 = 8369 hex
+    ok "Daphne lauscht INNERHALB des Containers auf 0.0.0.0:8369."
   else
-    fail "Innerhalb des Containers lauscht nichts auf Port 8000."
+    fail "Innerhalb des Containers lauscht nichts auf Port 8369."
     fail "  Letzte Logs:"
     docker logs --tail 20 "${WEB_CONTAINER}" 2>&1 | sed 's/^/    /'
   fi
@@ -146,7 +146,7 @@ if [ -n "${WEB_CONTAINER}" ]; then
   HEALTH="$(docker exec "${WEB_CONTAINER}" python -c "
 import urllib.request, sys
 try:
-    with urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3) as r:
+    with urllib.request.urlopen('http://127.0.0.1:8369/health/', timeout=3) as r:
         print(r.status)
 except Exception as e:
     print('ERR:', e)
@@ -253,7 +253,7 @@ if [ -f .env ] && [ -f .env.local ]; then
     warn "  .env.local = ${PORT_LOCAL}"
     warn "  scripts/setup_local.sh nutzt --env-file .env.local (Port ${PORT_LOCAL})."
   else
-    ok ".env und .env.local verwenden denselben WEB_PORT (${PORT_ENV:-8000})."
+    ok ".env und .env.local verwenden denselben WEB_PORT (${PORT_ENV:-8369})."
   fi
 else
   ok "Nur eine Konfigurationsdatei vorhanden (.env oder .env.local)."

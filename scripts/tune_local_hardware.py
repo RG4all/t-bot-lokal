@@ -37,7 +37,7 @@ def build_environment(profile, existing):
         "POSTGRES_DB": existing.get("POSTGRES_DB", "tbot"),
         "POSTGRES_USER": existing.get("POSTGRES_USER", "tbot"),
         "POSTGRES_PASSWORD": existing.get("POSTGRES_PASSWORD") or secrets.token_urlsafe(24),
-        "WEB_PORT": existing.get("WEB_PORT", "8000"),
+        "WEB_PORT": existing.get("WEB_PORT", "8369"),
         "CELERY_LOG_LEVEL": existing.get("CELERY_LOG_LEVEL", "INFO"),
     }
     generated.update(profile.env())
