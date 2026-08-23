@@ -54,3 +54,107 @@
   });
 })();
 </script>
+<script>
+(() => {
+  "use strict";
+  const button = document.getElementById("scan-markets");
+  const allButton = document.getElementById("scan-all-markets");
+  const exchange = document.getElementById("id_exchange");
+  const market = document.getElementById("id_market");
+  const input = document.getElementById("id_symbols");
+  const message = document.getElementById("market-scan-message");
+  const warning = document.getElementById("market-risk-warning");
+  const table = document.getElementById("market-scan-table-wrap");
+  const rows = document.getElementById("market-scan-rows");
+  const use = document.getElementById("use-market-selection");
+  if (!button || !exchange || !market || !input || !message || !warning || !table || !rows || !use) return;
+  let abortController = null;
+
+  function percent(value) {
+    return value === null || value === undefined ? "–" : `${Number(value).toFixed(2)} %`;
+  }
+  function ratio(value) {
+    return value === null || value === undefined ? "nicht belegt" : `${(Number(value) * 100).toFixed(1)} %`;
+  }
+  function addCell(row, value) {
+    const cell = document.createElement("td");
+    cell.textContent = value;
+    row.append(cell);
+  }
+  function render(payload) {
+    rows.replaceChildren();
+    const snapshots = payload.exchanges
+      ? Object.entries(payload.exchanges).map(([name, snapshot]) => [name, snapshot])
+      : [[payload.exchange || exchange.value, payload]];
+    const candidates = snapshots.flatMap(([name, snapshot]) => [
+      ...(snapshot.gainers || []).map(item => ({...item, direction: `${name} · Gainer`})),
+      ...(snapshot.losers || []).map(item => ({...item, direction: `${name} · Loser`}))
+    ]);
+    candidates.forEach(item => {
+      const row = document.createElement("tr");
+      addCell(row, item.direction);
+      addCell(row, item.symbol);
+      addCell(row, percent(item.change_24h));
+      addCell(row, item.volume_spike ? `ja (${item.volume_ratio}×)` : "nein");
+      addCell(row, ratio(item.liquidity_ratio));
+      addCell(row, ratio(item.orderbook_depth_ratio));
+      addCell(row, item.fundamental_reason || "geprüft");
+      const cell = document.createElement("td");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "form-check-input market-choice";
+      checkbox.value = item.symbol;
+      checkbox.checked = true;
+      checkbox.addEventListener("change", () => {
+        use.disabled = !document.querySelector(".market-choice:checked");
+      });
+      cell.append(checkbox);
+      row.append(cell);
+      rows.append(row);
+    });
+    table.classList.toggle("d-none", candidates.length === 0);
+    use.disabled = candidates.length === 0;
+    warning.textContent = payload.risk_warning || "Volatile Märkte sind riskant. Stop-Loss verwenden.";
+    warning.classList.remove("d-none");
+    message.textContent = candidates.length
+      ? `${candidates.length} qualifizierte Märkte gefunden (${payload.generated_at || "aktuell"}).`
+      : "Keine Märkte erfüllen derzeit alle konservativen Filter. Es werden keine Symbole automatisch ergänzt.";
+    message.className = `small mt-3 ${candidates.length ? "text-success" : "text-warning"}`;
+  }
+  async function scan(allExchanges = false) {
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+    button.disabled = true;
+    if (allButton) allButton.disabled = true;
+    message.textContent = "Öffentliche 24h-Ticker und Orderbücher werden geprüft …";
+    message.className = "small mt-3 text-muted";
+    try {
+      const query = new URLSearchParams({exchange: allExchanges ? "all" : exchange.value, market: market.value});
+      const response = await fetch("{% url 'market_opportunities_api' %}?" + query, {signal: abortController.signal});
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      render(payload);
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        message.textContent = `Marktdaten konnten nicht geladen werden: ${error.message}`;
+        message.className = "small mt-3 text-danger";
+        table.classList.add("d-none");
+      }
+    } finally {
+      button.disabled = false;
+      if (allButton) allButton.disabled = false;
+    }
+  }
+  use.addEventListener("click", () => {
+    const selected = [...document.querySelectorAll(".market-choice:checked")].map(item => item.value);
+    if (!selected.length) return;
+    const current = input.value.split(",").map(item => item.trim()).filter(Boolean);
+    input.value = [...new Set([...current, ...selected])].join(", ");
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+  });
+  button.addEventListener("click", () => scan(false));
+  allButton?.addEventListener("click", () => scan(true));
+  exchange.addEventListener("change", () => { table.classList.add("d-none"); warning.classList.add("d-none"); });
+  market.addEventListener("change", () => { table.classList.add("d-none"); warning.classList.add("d-none"); });
+})();
+</script>

@@ -29,3 +29,28 @@
   </div>
 {% endfor %}
 </div>
+
+<div class="card border-0 bg-light mt-4" id="market-scanner">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <h2 class="h5 mb-1">Top-Gainer-/Loser-Vorlage</h2>
+        <p class="small text-muted mb-0">Aktuelle öffentliche Marktdaten für die gewählte Exchange. Es werden maximal fünf qualifizierte Märkte je Richtung angezeigt.</p>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-primary" id="scan-markets">Märkte prüfen</button>
+        <button type="button" class="btn btn-outline-secondary" id="scan-all-markets">Alle Exchanges</button>
+      </div>
+    </div>
+    <div id="market-scan-message" class="small mt-3" role="status"></div>
+    <div id="market-risk-warning" class="alert alert-warning small mt-3 mb-0 d-none" role="alert"></div>
+    <div class="table-responsive mt-3 d-none" id="market-scan-table-wrap">
+      <table class="table table-sm align-middle mb-2">
+        <thead><tr><th>Richtung</th><th>Symbol</th><th>24 h</th><th>Volumen-Spitze</th><th>Liquidität</th><th>Orderbuch</th><th>Fundamental</th><th>Auswahl</th></tr></thead>
+        <tbody id="market-scan-rows"></tbody>
+      </table>
+      <button type="button" class="btn btn-sm btn-primary" id="use-market-selection" disabled>Ausgewählte Märkte in Symbole übernehmen</button>
+    </div>
+    <p class="form-text mt-3 mb-0">Filter: Kursausschlag über 10 %, Volumen-Ausreißer, mindestens 10 % Tagesvolumen/Marktkapitalisierung und belastbare Orderbuch-Tiefe. Fehlende Fundamental- oder Liquiditätsdaten werden nicht schöngerechnet.</p>
+  </div>
+</div>

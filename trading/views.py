@@ -27,6 +27,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import mark_safe
 from django.views.decorators.http import require_GET, require_POST
 
+from .backtest_templates import build_backtest_templates
 from .forms import (
     BacktestForm,
     ConfigurationForm,
@@ -35,8 +36,14 @@ from .forms import (
     RegistrationForm,
 )
 from .market_data import MarketDataError, SymbolValidationError, validate_exchange_symbols
+from .market_scanner import MarketScannerError, scan_market_opportunities
 from .models import BacktestTask, Configuration, DataLog, ErrorLog
 from .monitoring import runtime_heartbeat
+from .resource_optimizer import (
+    estimate_backtest_runtime,
+    get_backtest_resource_profile,
+    get_server_resources,
+)
 from .symbols import get_available_symbols
 from .tasks import dispatch_task, local_task_is_active, run_backtest
 from .trading_bot import bot_manager
@@ -44,9 +51,10 @@ from .worker_status import get_backtest_runtime_status
 
 logger = logging.getLogger(__name__)
 _PLOT_LOCK = threading.Lock()
+_MANUAL_RENDER_LOCK = threading.Lock()
+_MANUAL_HTML = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
-_MAX_TOTAL_BACKTEST_COMBINATIONS = 20_000
 
 
 def _safe_next_url(request, candidate):
@@ -166,26 +174,59 @@ def health_view(request):
 
 @lru_cache(maxsize=1)
 def _render_manual():
-    candidates = (
-        settings.BASE_DIR / "docs" / "MANUAL.md",
-        settings.BASE_DIR / "MANUAL.md",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            source = candidate.read_text(encoding="utf-8")
-            return markdown.markdown(
-                source,
-                extensions=["extra", "fenced_code", "tables", "toc", "sane_lists", "codehilite"],
-                extension_configs={
-                    "codehilite": {
-                        "css_class": "codehilite",
-                        "guess_lang": False,
-                        "noclasses": False,
-                    }
-                },
-                output_format="html5",
-            )
-    return "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
+    """Kompiliert das vertrauenswürdige Handbuch einmal je Prozess.
+
+    Der Lock ergänzt den LRU-Cache für den seltenen Fall zweier gleichzeitiger
+    erster Requests: Auch dann wird Markdown nur genau einmal kompiliert.
+    """
+    global _MANUAL_HTML
+    with _MANUAL_RENDER_LOCK:
+        if _MANUAL_HTML is not None:
+            return _MANUAL_HTML
+        candidates = (
+            settings.BASE_DIR / "docs" / "MANUAL.md",
+            settings.BASE_DIR / "MANUAL.md",
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                source = candidate.read_text(encoding="utf-8")
+                _MANUAL_HTML = markdown.markdown(
+                    source,
+                    extensions=[
+                        "extra",
+                        "fenced_code",
+                        "tables",
+                        "toc",
+                        "sane_lists",
+                        "codehilite",
+                    ],
+                    extension_configs={
+                        "codehilite": {
+                            "css_class": "codehilite",
+                            "guess_lang": False,
+                            "noclasses": False,
+                        }
+                    },
+                    output_format="html5",
+                )
+                return _MANUAL_HTML
+        _MANUAL_HTML = "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
+        return _MANUAL_HTML
+
+
+# Beibehaltung der lru_cache-Kompatibilität für Tests/Management, einschließlich
+# eines echten Reset des zweiten, thread-sicheren Cache-Layers.
+_manual_lru_cache_clear = _render_manual.cache_clear
+
+
+def _clear_manual_cache():
+    global _MANUAL_HTML
+    with _MANUAL_RENDER_LOCK:
+        _MANUAL_HTML = None
+        _manual_lru_cache_clear()
+
+
+_render_manual.cache_clear = _clear_manual_cache
 
 
 @require_GET
@@ -466,6 +507,84 @@ def symbol_suggestions_api(request):
             "authoritative_on_submit": True,
         }
     )
+
+
+@login_required
+@require_GET
+def market_opportunities_api(request):
+    """Liefert geprüfte Top-Mover für die Konfigurationsvorlage.
+
+    Die Börsenabfrage bleibt auf diesen GET-Endpunkt begrenzt; keine API-Keys
+    werden verwendet und die Antwort ist pro Exchange/Markt kurz gecacht.
+    """
+    exchange = request.GET.get("exchange", "").strip().lower()
+    market = request.GET.get("market", "spot").strip().lower()
+    if market not in {"spot", "futures"}:
+        return JsonResponse({"error": "Ungültige Marktart"}, status=400)
+    if exchange not in {"all", *dict(Configuration.EXCHANGE_CHOICES)}:
+        return JsonResponse({"error": "Ungültige Exchange"}, status=400)
+    if exchange == "all":
+        try:
+            from .market_scanner import scan_all_market_opportunities
+
+            payload = scan_all_market_opportunities(
+                market=market,
+                refresh=request.GET.get("refresh") == "1",
+            )
+        except MarketScannerError as exc:
+            return JsonResponse({"error": str(exc)}, status=503)
+        return JsonResponse(payload)
+    if not exchange:
+        return JsonResponse({"error": "exchange fehlt"}, status=400)
+    try:
+        payload = scan_market_opportunities(
+            exchange,
+            market,
+            refresh=request.GET.get("refresh") == "1",
+        )
+    except MarketScannerError as exc:
+        logger.info("Marktscanner nicht verfügbar für %s/%s: %s", exchange, market, exc)
+        return JsonResponse({"error": str(exc), "gainers": [], "losers": []}, status=503)
+    return JsonResponse(payload)
+
+
+@login_required
+@require_GET
+def server_resources_api(request):
+    """Diagnose-Endpunkt für das erkannte CPU-/RAM-/Speicherprofil."""
+    profile = get_backtest_resource_profile(
+        get_server_resources(refresh=request.GET.get("refresh") == "1")
+    )
+    return JsonResponse(
+        {"resources": profile.resources.as_dict(), "backtesting": profile.as_dict()}
+    )
+
+
+@login_required
+@require_GET
+def backtesting_estimate_api(request):
+    """Berechnet eine Laufzeitschätzung ohne einen Backtest anzulegen."""
+    profile = get_backtest_resource_profile()
+    try:
+        combinations = int(request.GET.get("combinations", "0"))
+        price_points = int(request.GET.get("price_points", "0"))
+        symbols = int(request.GET.get("symbols", "1"))
+        if (
+            min(combinations, price_points, symbols) < 0
+            or symbols == 0
+            or combinations > 100_000_000
+            or price_points > 50_000
+            or symbols > 100
+        ):
+            raise ValueError
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"error": "combinations, price_points und symbols müssen Zahlen sein"}, status=400
+        )
+    estimate = estimate_backtest_runtime(combinations, price_points, symbols, profile.resources)
+    estimate["within_hard_limit"] = combinations * symbols <= profile.max_combinations
+    estimate["hard_limit"] = profile.max_combinations
+    return JsonResponse(estimate)
 
 
 @login_required
@@ -1055,9 +1174,14 @@ def _combination_count(params, symbol_count):
 @login_required
 @require_GET
 def backtesting_status_api(request):
+    profile = get_backtest_resource_profile(
+        get_server_resources(refresh=request.GET.get("refresh") == "1")
+    )
     return JsonResponse(
         {
             "backtesting": get_backtest_runtime_status(force=request.GET.get("refresh") == "1"),
+            "resources": profile.resources.as_dict(),
+            "resource_profile": profile.as_dict(),
             "web_runtime": runtime_heartbeat.snapshot(),
         }
     )
@@ -1088,27 +1212,42 @@ def backtesting_index(request):
 @login_required
 def backtesting_form(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
+    symbols = _symbols(config)
+    resource_profile = get_backtest_resource_profile()
     initial = {
-        "acc_from": float(config.div_DVA_prev_NDA_threshold_buy) - 1,
-        "acc_to": float(config.div_DVA_prev_NDA_threshold_buy) + 1,
-        "acc_steps": 0.1,
-        "nda_from": float(config.nda_threshold_buy) - 0.5,
-        "nda_to": float(config.nda_threshold_buy) + 0.5,
-        "nda_steps": 0.05,
-        "deltadelta_from": float(config.deltadelta_threshold_buy) - 0.5,
-        "deltadelta_to": float(config.deltadelta_threshold_buy) + 0.5,
-        "deltadelta_steps": 0.05,
+        # Konservativer Schnellstart: der Nutzer kann im Formular jederzeit
+        # größere Bereiche wählen, sofern das Hardware-Hard-Limit es erlaubt.
+        "acc_from": float(config.div_DVA_prev_NDA_threshold_buy) - 0.5,
+        "acc_to": float(config.div_DVA_prev_NDA_threshold_buy) + 0.5,
+        "acc_steps": 0.25,
+        "nda_from": float(config.nda_threshold_buy) - 0.25,
+        "nda_to": float(config.nda_threshold_buy) + 0.25,
+        "nda_steps": 0.125,
+        "deltadelta_from": float(config.deltadelta_threshold_buy) - 0.25,
+        "deltadelta_to": float(config.deltadelta_threshold_buy) + 0.25,
+        "deltadelta_steps": 0.125,
         "trade_amount": float(config.trade_amount),
         "take_profit": float(config.take_profit),
         "stop_loss": float(config.stop_loss),
         "fee": float(config.fee),
-        "max_price_points": settings.BACKTEST_DEFAULT_PRICE_POINTS,
+        "max_price_points": min(
+            settings.BACKTEST_DEFAULT_PRICE_POINTS,
+            resource_profile.max_price_points,
+        ),
+        "max_grid_points": max(
+            2,
+            int((resource_profile.max_combinations / max(1, len(symbols))) ** (1 / 3)),
+        ),
+        "max_combinations": resource_profile.max_combinations,
     }
     form = BacktestForm(
         request.POST or None,
         initial=initial,
         start_capital=config.start_capital,
+        resource_profile=resource_profile,
+        symbol_count=len(symbols),
     )
+    backtest_templates = build_backtest_templates(config, resource_profile)
     runtime_status = get_backtest_runtime_status(force=request.method == "POST")
     if request.method == "POST" and form.is_valid():
         if not runtime_status["available"]:
@@ -1121,13 +1260,16 @@ def backtesting_form(request, config_id):
             params = form.cleaned_data.copy()
             schedule_backtest = params.pop("schedule_backtest", False)
             scheduled_start_time = params.pop("scheduled_start_time", None)
-            symbols = _symbols(config)
             combinations = _combination_count(params, len(symbols))
-            if combinations > _MAX_TOTAL_BACKTEST_COMBINATIONS:
+            hard_limit = min(
+                int(params.get("max_combinations", resource_profile.max_combinations)),
+                resource_profile.max_combinations,
+            )
+            if combinations > hard_limit:
                 form.add_error(
                     None,
                     f"Mit allen Symbolen entstehen {combinations:,} Kombinationen; "
-                    f"maximal {_MAX_TOTAL_BACKTEST_COMBINATIONS:,} sind erlaubt.",
+                    f"das Hardwareprofil erlaubt höchstens {hard_limit:,}.",
                 )
             else:
                 status = "scheduled" if schedule_backtest else "pending"
@@ -1193,6 +1335,16 @@ def backtesting_form(request, config_id):
             "runtime_status": runtime_status,
             "symbol_count": len(_symbols(config)),
             "execution_mode": runtime_status["mode"],
+            "resource_profile": resource_profile.as_dict(),
+            "server_resources": resource_profile.resources.as_dict(),
+            "symbol_grid_limit": max(
+                2, int((resource_profile.max_combinations / max(1, len(symbols))) ** (1 / 3))
+            ),
+            "backtest_templates": backtest_templates,
+            "initial_runtime_estimate": estimate_backtest_runtime(
+                _combination_count(initial, len(symbols)),
+                initial["max_price_points"],
+            ),
         },
     )
 

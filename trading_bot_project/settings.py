@@ -128,8 +128,18 @@ BACKTEST_LOCAL_FALLBACK_ENABLED = env_bool(
     default=not env_bool("RENDER", False),
 )
 BACKTEST_EXECUTION_AVAILABLE = bool(REDIS_URL) or BACKTEST_LOCAL_FALLBACK_ENABLED
+# Absolute Limits gelten als Sicherheitsgeländer; das Hardwareprofil kann sie
+# im laufenden Prozess weiter verkleinern.
+BACKTEST_MAX_COMBINATIONS = min(
+    100_000,
+    env_int("BACKTEST_MAX_COMBINATIONS", 20_000, minimum=100),
+)
+BACKTEST_MAX_PRICE_POINTS = min(
+    50_000,
+    env_int("BACKTEST_MAX_PRICE_POINTS", 5_000, minimum=100),
+)
 BACKTEST_DEFAULT_PRICE_POINTS = min(
-    5_000,
+    BACKTEST_MAX_PRICE_POINTS,
     env_int("BACKTEST_DEFAULT_PRICE_POINTS", 5_000, minimum=100),
 )
 

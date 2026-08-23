@@ -36,15 +36,21 @@
   <div class="card-body">
     <form method="post" novalidate>{% csrf_token %}
       {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="border rounded bg-light p-3 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="form-label mb-0" for="{{ form.template.id_for_label }}">{{ form.template.label }}</label>
+          <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" title="{{ form.template.help_text }}" aria-label="Hilfe">ⓘ</span>
+        </div>
+        {{ form.template }}
+        <div class="form-text">Schnellprüfung, ausgewogen oder Feinoptimierung füllen das Raster relativ zu den aktuellen Live-Schwellenwerten aus. Danach sind alle Felder frei änderbar.</div>
+      </div>
       <h3 class="h5">Indikator-Suchräume</h3>
       <div class="row g-3 mb-4">
       {% for field in form %}{% if field.name == 'acc_from' or field.name == 'acc_to' or field.name == 'acc_steps' or field.name == 'nda_from' or field.name == 'nda_to' or field.name == 'nda_steps' or field.name == 'deltadelta_from' or field.name == 'deltadelta_to' or field.name == 'deltadelta_steps' %}
         <div class="col-md-4">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {% if field.help_text %}
-            <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>
-            {% endif %}
+            {% if field.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe">ⓘ</span>{% endif %}
           </div>
           {{ field }}
           {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
@@ -54,19 +60,20 @@
       </div>
       <h3 class="h5">Trading-, Risiko- und Ressourcenparameter</h3>
       <div class="row g-3 mb-3">
-      {% for field in form %}{% if field.name == 'trade_amount' or field.name == 'take_profit' or field.name == 'stop_loss' or field.name == 'fee' or field.name == 'max_price_points' %}
+      {% for field in form %}{% if field.name == 'trade_amount' or field.name == 'take_profit' or field.name == 'stop_loss' or field.name == 'fee' or field.name == 'max_price_points' or field.name == 'max_grid_points' or field.name == 'max_combinations' %}
         <div class="col-md-4">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <label class="form-label mb-0" for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {% if field.help_text %}
-            <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe zu {{ field.label }}">ⓘ</span>
-            {% endif %}
+            {% if field.help_text %}<span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.help_text }}" aria-label="Hilfe">ⓘ</span>{% endif %}
           </div>
           {{ field }}
           {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
           {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
         </div>
       {% endif %}{% endfor %}
+      </div>
+      <div class="small text-muted border-start border-3 border-info ps-3 mb-3">
+        Erkannt: <strong>{{ server_resources.cpu_count }} CPU</strong>, <strong>{{ server_resources.memory_mb }} MB RAM</strong>, <strong>{{ server_resources.storage_free_mb }} MB frei</strong> ({{ server_resources.source }}). Richtwert: {{ symbol_grid_limit }} Punkte je Parameter bei dieser Symbolanzahl; insgesamt {{ resource_profile.max_combinations }} Kombinationen aus dem Hardwarebudget.
       </div>
       <div class="border rounded p-3 mb-3">
         <div class="row g-3 align-items-end">
@@ -91,11 +98,12 @@
           </div>
         </div>
       </div>
-      <p id="combination-estimate" class="alert alert-secondary py-2">Kombinationen werden aus den Bereichen berechnet.</p>
+      <p id="combination-estimate" class="alert alert-secondary py-2" data-max-combinations="{{ resource_profile.max_combinations }}" data-symbol-count="{{ symbol_count }}">Kombinationen und Laufzeit werden aus den Bereichen berechnet.</p>
       <button class="btn btn-primary" type="submit" {% if not execution_available %}disabled{% endif %}>Backtest anlegen</button>
     </form>
   </div>
 </div>
+
 
 <div class="row g-3 mb-4">
     <div class="col-lg-6">
@@ -167,6 +175,8 @@
 </div>
 {% empty %}<p class="text-muted">Noch keine abgeschlossenen Backtests.</p>{% endfor %}
 </div>
+{{ backtest_templates|json_script:"backtest-templates" }}
+
 {% endblock %}
 
 {% block extra_js %}
@@ -174,6 +184,10 @@
 (() => {
     "use strict";
     const estimate = document.getElementById("combination-estimate");
+    const templateSelect = document.getElementById("id_template");
+    const templates = JSON.parse(document.getElementById("backtest-templates").textContent);
+    const symbolCount = Number(estimate.dataset.symbolCount || 1);
+    const profileLimit = Number(estimate.dataset.maxCombinations || 0);
     function rangeCount(prefix) {
         const start = Number(document.getElementById(`id_${prefix}_from`)?.value);
         const end = Number(document.getElementById(`id_${prefix}_to`)?.value);
@@ -181,11 +195,44 @@
         if (![start, end, step].every(Number.isFinite) || step <= 0 || end < start) return 0;
         return Math.floor((end - start) / step + 1e-9) + 1;
     }
-    function updateEstimate() {
-        const total = rangeCount("acc") * rangeCount("nda") * rangeCount("deltadelta") * {{ symbol_count }};
-        estimate.textContent = total ? `${total.toLocaleString("de-DE")} Simulationen (${ {{ symbol_count }} } Symbole). Maximal 20.000.` : "Bitte gültige Bereiche und positive Schritte eingeben.";
-        estimate.className = `alert py-2 ${total > 20000 ? "alert-danger" : "alert-secondary"}`;
+    function applyTemplate(name) {
+        const selected = templates.find(item => item.name === name);
+        if (!selected) return;
+        ["acc", "nda", "deltadelta"].forEach(prefix => {
+            ["from", "to", "steps"].forEach(key => {
+                const field = document.getElementById(`id_${prefix}_${key}`);
+                if (field) field.value = selected[prefix][key];
+            });
+        });
+        ["trade_amount", "take_profit", "stop_loss", "fee", "max_price_points", "max_grid_points", "max_combinations"].forEach(key => {
+            const field = document.getElementById(`id_${key}`);
+            if (field && selected[key] !== undefined) field.value = selected[key];
+        });
+        updateEstimate();
     }
+    function updateEstimate() {
+        const perSymbol = rangeCount("acc") * rangeCount("nda") * rangeCount("deltadelta");
+        const total = perSymbol * symbolCount;
+        const points = Number(document.getElementById("id_max_price_points")?.value) || 0;
+        const selectedLimit = Number(document.getElementById("id_max_combinations")?.value) || profileLimit;
+        const secondsPerThousand = {{ resource_profile.estimated_seconds_per_combination_at_1000_points|default:0 }};
+        const seconds = perSymbol * symbolCount * (points / 1000) * secondsPerThousand;
+        if (!total) {
+            estimate.textContent = "Bitte gültige Bereiche und positive Schrittweiten eingeben.";
+            estimate.className = "alert alert-secondary py-2";
+            return;
+        }
+        const limit = Math.min(selectedLimit || profileLimit, profileLimit || selectedLimit);
+        estimate.textContent = `${total.toLocaleString("de-DE")} Simulationen (${symbolCount} Symbol(e)) · grobe Laufzeit: ${formatDuration(seconds)} · Hard-Limit: ${limit.toLocaleString("de-DE")}`;
+        estimate.className = `alert py-2 ${total > limit ? "alert-danger" : "alert-secondary"}`;
+    }
+    function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 60) return `ca. ${Math.max(0, Math.round(seconds))} s`;
+        const minutes = Math.round(seconds / 60);
+        if (minutes < 60) return `ca. ${minutes} min`;
+        return `ca. ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+    }
+    templateSelect?.addEventListener("change", event => applyTemplate(event.target.value));
     document.querySelectorAll("input[type=number]").forEach(input => input.addEventListener("input", updateEstimate));
     updateEstimate();
     async function refreshWorkerStatus() {
@@ -199,7 +246,6 @@
             document.getElementById("worker-state").textContent = status.worker ? "online" : "offline";
             const box = document.getElementById("worker-status");
             box.className = `alert ${status.available ? "alert-success" : "alert-warning"}`;
-            box.title = `Web Peak-RSS ${payload.web_runtime.peak_rss_mb} MB; Scheduler-Lag ${payload.web_runtime.max_scheduler_lag_ms} ms`;
         } catch (_) { /* Statusanzeige ist nicht taskkritisch. */ }
     }
     setInterval(refreshWorkerStatus, 10000);
