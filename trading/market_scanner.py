@@ -1,8 +1,8 @@
 """Öffentlicher Markt-Scanner für die Konfigurationsvorlagen.
 
 Die Börse liefert die Marktdaten; t-bot trifft keine Kaufentscheidung. Die
-Filter sind absichtlich konservativ: Ein Markt muss eine Kursbewegung von
-mehr als zehn Prozent, einen Volumen-Ausreißer, ausreichende Orderbuch-Tiefe,
+Filter sind absichtlich konservativ: Ein Markt muss den einstellbaren
+Mindest-Kursausschlag, einen Volumen-Ausreißer, ausreichende Orderbuch-Tiefe,
 ein plausibles Volumen/Marktkapitalisierungs-Verhältnis und eine bekannte
 Utility-/Fundamental-Einstufung haben. Fehlende Daten führen zum Ausschluss
 statt zu einer optimistischen Annahme.
@@ -10,6 +10,7 @@ statt zu einer optimistischen Annahme.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import statistics
@@ -55,6 +56,10 @@ _CACHE_TTL_SECONDS = 60
 
 class MarketScannerError(MarketDataError):
     """Markt-Scanner konnte keinen belastbaren Snapshot erstellen."""
+
+
+class MarketScannerFilterError(MarketScannerError):
+    """Benutzereingabe für Markt oder Scanner-Schwellenwert ist ungültig."""
 
 
 def _number(value):
@@ -170,22 +175,45 @@ class _BitMartScannerExchange:
 
 
 class _BitunixScannerExchange:
-    """Read-only Adapter für die öffentlichen Bitunix-Ticker."""
+    """Read-only Adapter für die dokumentierten Bitunix-Public-Endpunkte.
+
+    Futures stellt einen 24h-Batch-Ticker bereit. Die Spot-API hat dagegen
+    ausdrücklich *keinen* ``/tickers``-Endpunkt. Für Spot werden deshalb die
+    letzten 24 Stunden aus stündlichen Klines der ohnehin fundamental
+    zulässigen Märkte berechnet. So wird weder der nicht existente Endpunkt
+    aufgerufen noch die gesamte Pair-Liste mit Einzelrequests überzogen.
+    """
 
     def __init__(self, market_type):
         self.market_type = market_type
         self.provider = PublicHTTPMarketData()
+        self._spot_precisions = {}
         self.base = (
             "https://fapi.bitunix.com/api/v1/futures/market"
             if market_type == "futures"
             else "https://openapi.bitunix.com/api/spot/v1"
         )
 
-    def _payload_rows(self, endpoint):
-        payload = self.provider._json(endpoint)
+    def _payload_rows(self, endpoint, **kwargs):
+        payload = self.provider._json(endpoint, **kwargs)
+        if str(payload.get("code", "0")) != "0":
+            raise MarketDataError(
+                f"Bitunix-API-Fehler {payload.get('code')}: "
+                f"{payload.get('msg', payload.get('message', 'unbekannter Fehler'))}"
+            )
         data = payload.get("data") or []
         if isinstance(data, dict):
-            data = data.get("list") or data.get("records") or data.get("data") or data
+            nested = (
+                data.get("list")
+                or data.get("records")
+                or data.get("items")
+                or data.get("klines")
+                or data.get("data")
+            )
+            # Some Spot responses wrap rows, while the documentation also
+            # permits one candle object. Handle both forms without inventing
+            # fields that the endpoint did not return.
+            data = nested if nested is not None else [data]
         return data if isinstance(data, list) else []
 
     def load_markets(self):
@@ -197,28 +225,140 @@ class _BitunixScannerExchange:
         result = {}
         for item in self._payload_rows(endpoint):
             if isinstance(item, str):
-                compact, active = item, True
-            else:
-                compact = item.get("symbol") or item.get("symbolName") or item.get("id")
+                compact, active, metadata = item, True, {}
+            elif isinstance(item, dict):
+                compact = item.get("symbol") or item.get("symbolName") or (
+                    f"{item.get('base', '')}{item.get('quote', '')}"
+                ) or item.get("id")
                 active = str(item.get("symbolStatus", item.get("isOpen", "1"))).upper() in {
                     "1",
                     "OPEN",
                     "TRUE",
                 }
+                metadata = item.copy()
+            else:
+                continue
             canonical = _canonical_compact(compact) if compact else None
             if canonical and active:
                 result[canonical] = {
+                    **metadata,
                     "active": True,
                     "swap": self.market_type == "futures",
                     "spot": self.market_type == "spot",
                 }
+                if self.market_type == "spot":
+                    precisions = metadata.get("precisions")
+                    if isinstance(precisions, (list, tuple)) and precisions:
+                        self._spot_precisions[canonical] = precisions[0]
+                    else:
+                        self._spot_precisions[canonical] = metadata.get("quotePrecision", 0)
         return result
 
-    def fetch_tickers(self, symbols):
-        # Die Futures-API bietet einen Batch-Ticker. Spot-Installationen
-        # verwenden denselben öffentlichen Pfad, sofern vom Account aktiviert.
-        endpoint = f"{self.base}/tickers"
-        rows = self._payload_rows(endpoint)
+    @staticmethod
+    def _kline_values(item):
+        if isinstance(item, dict):
+            return {
+                "timestamp": item.get(
+                    "timestamp", item.get("time", item.get("ts", item.get("id")))
+                ),
+                "open": _number(item.get("open", item.get("o"))),
+                "close": _number(item.get("close", item.get("c", item.get("last")))),
+                "base_volume": _number(
+                    item.get("baseVolume", item.get("baseVol", item.get("volume", item.get("vol"))))
+                ),
+                "quote_volume": _number(
+                    item.get(
+                        "quoteVolume",
+                        item.get("quoteVol", item.get("turnover", item.get("amount"))),
+                    )
+                ),
+            }
+        if isinstance(item, (list, tuple)) and len(item) >= 5:
+            return {
+                "timestamp": _number(item[0]),
+                "open": _number(item[1]),
+                "close": _number(item[4]),
+                # Der dokumentierte Spot-Kline-Array definiert keine
+                # Volumenspalte. Zusätzliche Positionen werden daher nicht
+                # erraten oder als Liquidität schöngerechnet.
+                "base_volume": None,
+                "quote_volume": None,
+            }
+        return None
+
+    def _spot_ticker(self, symbol):
+        compact = symbol.replace("/", "")
+        rows = self._payload_rows(
+            f"{self.base}/market/kline/history",
+            params={"symbol": compact, "interval": "60", "limit": 24},
+        )
+        candles = [values for item in rows if (values := self._kline_values(item))]
+        candles = [item for item in candles if item["open"] and item["close"]]
+        if not candles:
+            return None
+        if all(item["timestamp"] is not None for item in candles):
+            def sort_key(item):
+                numeric = _number(item["timestamp"])
+                return (0, numeric) if numeric is not None else (1, str(item["timestamp"]))
+
+            candles.sort(key=sort_key)
+        first, last = candles[0], candles[-1]
+        observed_base_volume = [
+            item["base_volume"] for item in candles if item["base_volume"] is not None
+        ]
+        base_volume = sum(observed_base_volume) if observed_base_volume else None
+        quote_parts = []
+        for item in candles:
+            if item["quote_volume"] is not None:
+                quote_parts.append(item["quote_volume"])
+            elif item["base_volume"] is not None:
+                # Converting an observed base volume at the observed close is
+                # normalization, not a favourable substitute for missing data.
+                quote_parts.append(item["base_volume"] * item["close"])
+        quote_volume = sum(quote_parts) if quote_parts else None
+        return {
+            "symbol": symbol,
+            "last": last["close"],
+            "open": first["open"],
+            "percentage": (last["close"] - first["open"]) / first["open"] * 100,
+            "baseVolume": base_volume,
+            "quoteVolume": quote_volume,
+            "info": {"source": "24 stündliche Bitunix-Spot-Klines"},
+        }
+
+    def fetch_tickers(self, symbols=None):
+        symbols = list(symbols or [])
+        if self.market_type == "spot":
+            # Unbekannte Assets würden später am Fundamentalfilter scheitern.
+            # Nur diese kleine, konservative Teilmenge benötigt Kline-Requests.
+            eligible_symbols = [
+                symbol
+                for symbol in symbols
+                if _base_asset(symbol) in _ESTABLISHED_UTILITY_ASSETS
+                and _quote_asset(symbol) in _STABLE_QUOTES
+            ]
+            result = {}
+            errors = []
+            for index, symbol in enumerate(eligible_symbols):
+                if index:
+                    time.sleep(0.11)  # dokumentiertes Limit: 10 Requests/Sekunde/IP
+                try:
+                    ticker = self._spot_ticker(symbol)
+                except MarketDataError as exc:
+                    errors.append(f"{symbol}: {exc}")
+                    continue
+                if ticker:
+                    result[symbol] = ticker
+            if not result and errors:
+                raise MarketDataError(
+                    "Bitunix-Spot-Klines konnten nicht geladen werden: " + "; ".join(errors[:3])
+                )
+            return result
+
+        rows = self._payload_rows(
+            f"{self.base}/tickers",
+            params={"symbols": ",".join(symbol.replace("/", "") for symbol in symbols)},
+        )
         result = {}
         for item in rows:
             if not isinstance(item, dict):
@@ -227,23 +367,42 @@ class _BitunixScannerExchange:
             if canonical not in symbols:
                 continue
             change = _number(item.get("percentage", item.get("price24hPcnt")))
-            if change is not None and abs(change) <= 1:
+            last = _number(item.get("lastPrice", item.get("last")))
+            open_price = _number(item.get("open"))
+            if change is None and last is not None and open_price:
+                change = (last - open_price) / open_price * 100
+            elif change is not None and abs(change) <= 1:
                 change *= 100
             result[canonical] = {
                 "symbol": canonical,
-                "last": item.get("lastPrice", item.get("last")),
+                "last": last,
+                "open": open_price,
                 "percentage": change,
-                "baseVolume": item.get("volume24h", item.get("volume")),
-                "quoteVolume": item.get("turnover24h", item.get("quoteVolume")),
+                "baseVolume": item.get("baseVol", item.get("volume24h", item.get("volume"))),
+                "quoteVolume": item.get(
+                    "quoteVol", item.get("turnover24h", item.get("quoteVolume"))
+                ),
                 "info": item,
             }
         return result
 
     def fetch_order_book(self, symbol, limit=20):
-        payload = self.provider._json(
-            f"{self.base}/depth",
-            params={"symbol": symbol.replace("/", ""), "limit": limit},
+        compact = symbol.replace("/", "")
+        params = (
+            {"symbol": compact, "limit": 15}
+            if self.market_type == "futures"
+            else {"symbol": compact, "precision": self._spot_precisions.get(symbol, 0)}
         )
+        depth_endpoint = (
+            f"{self.base}/depth"
+            if self.market_type == "futures"
+            else f"{self.base}/market/depth"
+        )
+        payload = self.provider._json(depth_endpoint, params=params)
+        if str(payload.get("code", "0")) != "0":
+            raise MarketDataError(
+                f"Bitunix-Orderbuch fehlgeschlagen ({payload.get('code')}): {payload.get('msg')}"
+            )
         data = payload.get("data") or {}
         return {"bids": data.get("bids", []), "asks": data.get("asks", [])}
 
@@ -360,12 +519,12 @@ def _orderbook_depth(exchange, symbol, ticker):
         # Ein defektes/inkomplettes Orderbuch darf den gesamten Scanner nicht
         # zu einem HTTP-500 machen; der Markt wird sauber ausgeschlossen.
         return None, f"Orderbuch nicht verfügbar: {exc}"
-    last = _nested_number(ticker, keys=("last", "close"))
     bids = orderbook.get("bids") or []
     asks = orderbook.get("asks") or []
-    depth = 0.0
-    for side in (bids, asks):
-        for level in side[:20]:
+
+    def valid_levels(rows):
+        levels = []
+        for level in rows[:20]:
             if isinstance(level, (list, tuple)) and len(level) >= 2:
                 price, amount = _number(level[0]), _number(level[1])
             elif isinstance(level, dict):
@@ -374,12 +533,31 @@ def _orderbook_depth(exchange, symbol, ticker):
             else:
                 continue
             if price is not None and amount is not None and price > 0 and amount > 0:
-                depth += price * amount
+                levels.append((price, amount))
+        return levels
+
+    bid_levels, ask_levels = valid_levels(bids), valid_levels(asks)
+    if not bid_levels or not ask_levels:
+        return None, "Orderbuch hat keine belastbaren Bid- und Ask-Seiten"
+    best_bid = max(price for price, _amount in bid_levels)
+    best_ask = min(price for price, _amount in ask_levels)
+    if best_bid > best_ask:
+        return None, "Orderbuch ist gekreuzt und damit nicht belastbar"
+    mid = (best_bid + best_ask) / 2
+    # Nur sofort marktnahe Liquidität ist eine belastbare Tiefe. Weit entfernte
+    # Scheinorders dürfen die relative Orderbuchschwelle nicht erfüllen.
+    lower, upper = mid * 0.98, mid * 1.02
+    near_levels = [
+        (price, amount)
+        for price, amount in (*bid_levels, *ask_levels)
+        if lower <= price <= upper
+    ]
+    depth = sum(price * amount for price, amount in near_levels)
     if depth <= 0:
-        return None, "Orderbuch ist leer"
-    # Der Wert dient zusätzlich der Diagnose; der eigentliche Mindesttest
-    # erfolgt relativ zum 24h-Quotevolumen.
-    return {"quote": depth, "mid": last}, None
+        return None, "Keine Orderbuch-Tiefe innerhalb von ±2 % des Mittelkurses"
+    # Der eigentliche Mindesttest erfolgt relativ zum beobachteten
+    # 24h-Quotevolumen.
+    return {"quote": depth, "mid": mid}, None
 
 
 def _normalise_ticker(symbol, ticker, market):
@@ -414,7 +592,15 @@ def _normalise_ticker(symbol, ticker, market):
     }
 
 
-def _scan_uncached(exchange_id, market_type, limit=5, volatility_threshold=10.0):
+def _scan_uncached(
+    exchange_id,
+    market_type,
+    limit=5,
+    volatility_threshold=10.0,
+    volume_spike_multiple=1.5,
+    min_volume_market_cap_ratio=0.10,
+    min_orderbook_depth_ratio=0.001,
+):
     exchange = _market_scanner_exchange(exchange_id, market_type)
     try:
         markets = exchange.load_markets()
@@ -427,23 +613,49 @@ def _scan_uncached(exchange_id, market_type, limit=5, volatility_threshold=10.0)
         }
         if not market_rows:
             raise MarketScannerError(f"Keine {market_type}-Stablecoin-Märkte bei {exchange_id}")
-        tickers = exchange.fetch_tickers(list(market_rows))
+
+        # Binance kann alle 24h-Ticker kompakt ohne ``symbols=[...]`` liefern.
+        # Genau dieser Request vermeidet die URL-Längenfehler bei großen
+        # Marktkatalogen. Nur Adapter, deren Signatur nachweislich ein Argument
+        # verlangt, erhalten die Liste; ein interner TypeError darf keinesfalls
+        # den problematischen großen Request nachträglich auslösen.
+        if exchange_id == "binance":
+            ticker_method = exchange.fetch_tickers
+            try:
+                signature = inspect.signature(ticker_method)
+            except (TypeError, ValueError):
+                signature = None
+            if signature is not None:
+                try:
+                    signature.bind()
+                except TypeError:
+                    tickers = ticker_method(list(market_rows))
+                else:
+                    tickers = ticker_method()
+            else:
+                tickers = ticker_method()
+        else:
+            tickers = exchange.fetch_tickers(list(market_rows))
         normalised = []
         for symbol, ticker in tickers.items():
             if symbol not in market_rows or not isinstance(ticker, dict):
                 continue
             row = _normalise_ticker(symbol, ticker, market_rows[symbol])
-            if row["change_24h"] is not None and row["quote_volume_24h"] is not None:
+            if row["change_24h"] is not None:
                 normalised.append(row)
         if not normalised:
-            raise MarketScannerError("Die Exchange lieferte keine vollständigen 24h-Ticker")
+            raise MarketScannerError("Die Exchange lieferte keine auswertbaren 24h-Kursdaten")
 
         market_caps = _coingecko_market_caps({row["base"] for row in normalised})
         for row in normalised:
             if row["market_cap"] is None:
                 row["market_cap"] = market_caps.get(row["base"])
 
-        volumes = [row["quote_volume_24h"] for row in normalised if row["quote_volume_24h"] > 0]
+        volumes = [
+            row["quote_volume_24h"]
+            for row in normalised
+            if row["quote_volume_24h"] is not None and row["quote_volume_24h"] > 0
+        ]
         volume_reference = statistics.median(volumes) if volumes else 0
         # Orderbücher nur für eine kleine Vorauswahl laden. Das hält die
         # öffentliche API-Last und die Laufzeit der Konfigurationsseite klein.
@@ -453,10 +665,21 @@ def _scan_uncached(exchange_id, market_type, limit=5, volatility_threshold=10.0)
         rows = []
         for row in candidates:
             reasons = []
-            volume_ratio = row["quote_volume_24h"] / volume_reference if volume_reference else None
-            volume_spike = bool(volume_ratio is not None and volume_ratio >= 1.5)
-            if not volume_spike:
-                reasons.append("kein signifikanter Volumen-Ausreißer")
+            daily_volume = row["quote_volume_24h"]
+            volume_ratio = (
+                daily_volume / volume_reference
+                if daily_volume is not None and daily_volume > 0 and volume_reference
+                else None
+            )
+            volume_spike = bool(
+                volume_ratio is not None and volume_ratio >= volume_spike_multiple
+            )
+            if daily_volume is None or daily_volume <= 0:
+                reasons.append("24h-Quotevolumen fehlt oder ist nicht positiv")
+            elif not volume_spike:
+                reasons.append(
+                    f"Volumen-Ausreißer unter {volume_spike_multiple:g}× Median"
+                )
             fundamental_ok, fundamental_reason = _utility_check(
                 row["symbol"], row["ticker"], row["market"]
             )
@@ -464,21 +687,37 @@ def _scan_uncached(exchange_id, market_type, limit=5, volatility_threshold=10.0)
                 reasons.append(fundamental_reason)
             market_cap = row["market_cap"]
             liquidity_ratio = (
-                row["quote_volume_24h"] / market_cap if market_cap and market_cap > 0 else None
-            )
-            if liquidity_ratio is None or liquidity_ratio < 0.10:
-                reasons.append("Volumen/Marktkapitalisierung unter 10 % oder unbekannt")
-            depth, depth_error = _orderbook_depth(exchange, row["symbol"], row["ticker"])
-            depth_quote = depth["quote"] if depth else None
-            depth_ratio = (
-                depth_quote / row["quote_volume_24h"]
-                if depth_quote and row["quote_volume_24h"] > 0
+                daily_volume / market_cap
+                if daily_volume is not None
+                and daily_volume > 0
+                and market_cap
+                and market_cap > 0
                 else None
             )
-            # 0,1 % des Tagesvolumens im sichtbaren Orderbuch ist eine
-            # Mindesttiefe. Dünne Bücher werden damit nicht als liquide verkauft.
-            if depth_ratio is None or depth_ratio < 0.001:
-                reasons.append(depth_error or "Orderbuch-Tiefe unter 0,1 % des Tagesvolumens")
+            if liquidity_ratio is None or liquidity_ratio < min_volume_market_cap_ratio:
+                reasons.append(
+                    "Volumen/Marktkapitalisierung unter "
+                    f"{min_volume_market_cap_ratio * 100:g} % oder unbekannt"
+                )
+            if daily_volume is not None and daily_volume > 0:
+                depth, depth_error = _orderbook_depth(exchange, row["symbol"], row["ticker"])
+            else:
+                depth, depth_error = (
+                    None,
+                    "Orderbuch-Tiefe kann ohne positives 24h-Volumen nicht bewertet werden",
+                )
+            depth_quote = depth["quote"] if depth else None
+            depth_ratio = (
+                depth_quote / daily_volume
+                if depth_quote and daily_volume is not None and daily_volume > 0
+                else None
+            )
+            if depth_ratio is None or depth_ratio < min_orderbook_depth_ratio:
+                reasons.append(
+                    depth_error
+                    or "Orderbuch-Tiefe unter "
+                    f"{min_orderbook_depth_ratio * 100:g} % des Tagesvolumens"
+                )
             eligible = not reasons
             rows.append(
                 {
@@ -516,9 +755,9 @@ def _scan_uncached(exchange_id, market_type, limit=5, volatility_threshold=10.0)
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "filters": {
                 "minimum_change_24h_percent": volatility_threshold,
-                "minimum_volume_to_market_cap": 0.10,
-                "minimum_orderbook_depth_ratio": 0.001,
-                "volume_spike_multiple": 1.5,
+                "minimum_volume_to_market_cap": min_volume_market_cap_ratio,
+                "minimum_orderbook_depth_ratio": min_orderbook_depth_ratio,
+                "volume_spike_multiple": volume_spike_multiple,
             },
             "gainers": gainers[:limit],
             "losers": losers[:limit],
@@ -550,28 +789,51 @@ def scan_market_opportunities(
     *,
     limit: int = 5,
     volatility_threshold: float = 10.0,
+    volume_spike_multiple: float = 1.5,
+    min_volume_market_cap_ratio: float = 0.10,
+    min_orderbook_depth_ratio: float = 0.001,
     refresh: bool = False,
 ):
-    """Ermittelt bis zu fünf qualifizierte Gainer und Loser mit TTL-Cache."""
+    """Ermittelt qualifizierte Gainer und Loser mit validierten Filtern."""
     exchange_id, market = exchange_id.strip().lower(), market.strip().lower()
     if exchange_id not in SUPPORTED_EXCHANGES:
-        raise MarketScannerError("Ungültige Exchange")
+        raise MarketScannerFilterError("Ungültige Exchange")
     if market not in {"spot", "futures"}:
-        raise MarketScannerError("Ungültige Marktart")
+        raise MarketScannerFilterError("Ungültige Marktart")
     try:
         limit = max(1, min(5, int(limit)))
-        volatility_threshold = float(volatility_threshold)
-        if not math.isfinite(volatility_threshold) or volatility_threshold < 10:
+        values = {
+            "volatility_threshold": float(volatility_threshold),
+            "volume_spike_multiple": float(volume_spike_multiple),
+            "min_volume_market_cap_ratio": float(min_volume_market_cap_ratio),
+            "min_orderbook_depth_ratio": float(min_orderbook_depth_ratio),
+        }
+        bounds = {
+            "volatility_threshold": (0.1, 100.0),
+            "volume_spike_multiple": (1.0, 10.0),
+            "min_volume_market_cap_ratio": (0.001, 2.0),
+            "min_orderbook_depth_ratio": (0.0001, 0.10),
+        }
+        if any(
+            not math.isfinite(values[name]) or not lower <= values[name] <= upper
+            for name, (lower, upper) in bounds.items()
+        ):
             raise ValueError
     except (TypeError, ValueError):
-        raise MarketScannerError("Ungültige Scanner-Parameter") from None
-    key = (exchange_id, market, limit, volatility_threshold)
+        raise MarketScannerFilterError("Ungültige Scanner-Parameter") from None
+    key = (
+        "v2",
+        exchange_id,
+        market,
+        limit,
+        *(values[name] for name in sorted(values)),
+    )
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
         if cached and not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
             return cached[1]
-    result = _scan_uncached(exchange_id, market, limit, float(volatility_threshold))
+    result = _scan_uncached(exchange_id, market, limit=limit, **values)
     with _CACHE_LOCK:
         _CACHE[key] = (now, result)
     return result
@@ -587,13 +849,27 @@ def get_top_losers(exchange_id: str, market: str = "spot", *, refresh: bool = Fa
     return scan_market_opportunities(exchange_id, market, refresh=refresh)["losers"]
 
 
-def scan_all_market_opportunities(*, market="spot", refresh=False):
-    """Scannt jede konfigurierte Exchange einzeln und isoliert Fehler."""
+def scan_all_market_opportunities(*, market="spot", refresh=False, **filters):
+    """Scannt jede konfigurierte Exchange einzeln mit identischen Filtern."""
     results = {}
     errors = {}
     for exchange_id in SUPPORTED_EXCHANGES:
         try:
-            results[exchange_id] = scan_market_opportunities(exchange_id, market, refresh=refresh)
+            results[exchange_id] = scan_market_opportunities(
+                exchange_id, market, refresh=refresh, **filters
+            )
+        except MarketScannerFilterError:
+            # The same invalid user input applies to every exchange and must
+            # be reported as HTTP 400 by the API rather than five outages.
+            raise
         except MarketScannerError as exc:
             errors[exchange_id] = str(exc)
-    return {"market": market, "exchanges": results, "errors": errors}
+    first = next(iter(results.values()), {})
+    return {
+        "market": market,
+        "exchanges": results,
+        "errors": errors,
+        "filters": first.get("filters", {}),
+        "generated_at": first.get("generated_at"),
+        "risk_warning": first.get("risk_warning"),
+    }

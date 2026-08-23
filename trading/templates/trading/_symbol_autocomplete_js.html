@@ -67,8 +67,21 @@
   const table = document.getElementById("market-scan-table-wrap");
   const rows = document.getElementById("market-scan-rows");
   const use = document.getElementById("use-market-selection");
-  if (!button || !exchange || !market || !input || !message || !warning || !table || !rows || !use) return;
+  const volatility = document.getElementById("scanner-volatility");
+  const volumeSpike = document.getElementById("scanner-volume-spike");
+  const marketCapRatio = document.getElementById("scanner-market-cap");
+  const orderbookRatio = document.getElementById("scanner-orderbook");
+  if (!button || !exchange || !market || !input || !message || !warning || !table || !rows || !use || !volatility || !volumeSpike || !marketCapRatio || !orderbookRatio) return;
   let abortController = null;
+
+  document.querySelectorAll(".scanner-filter").forEach(slider => {
+    const output = document.getElementById(slider.dataset.output);
+    const update = () => {
+      output.textContent = `${Number(slider.value).toLocaleString("de-DE")}${slider.dataset.suffix}`;
+    };
+    slider.addEventListener("input", update);
+    update();
+  });
 
   function percent(value) {
     return value === null || value === undefined ? "–" : `${Number(value).toFixed(2)} %`;
@@ -129,7 +142,14 @@
     message.textContent = "Öffentliche 24h-Ticker und Orderbücher werden geprüft …";
     message.className = "small mt-3 text-muted";
     try {
-      const query = new URLSearchParams({exchange: allExchanges ? "all" : exchange.value, market: market.value});
+      const query = new URLSearchParams({
+        exchange: allExchanges ? "all" : exchange.value,
+        market: market.value,
+        volatility_threshold: volatility.value,
+        volume_spike_multiple: volumeSpike.value,
+        min_volume_market_cap_ratio: String(Number(marketCapRatio.value) / 100),
+        min_orderbook_depth_ratio: String(Number(orderbookRatio.value) / 100)
+      });
       const response = await fetch("{% url 'market_opportunities_api' %}?" + query, {signal: abortController.signal});
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);

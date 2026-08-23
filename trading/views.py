@@ -7,6 +7,7 @@ import threading
 from collections import Counter, defaultdict
 from decimal import Decimal
 from functools import lru_cache
+from html import escape
 from io import BytesIO
 
 import markdown
@@ -36,7 +37,11 @@ from .forms import (
     RegistrationForm,
 )
 from .market_data import MarketDataError, SymbolValidationError, validate_exchange_symbols
-from .market_scanner import MarketScannerError, scan_market_opportunities
+from .market_scanner import (
+    MarketScannerError,
+    MarketScannerFilterError,
+    scan_market_opportunities,
+)
 from .models import BacktestTask, Configuration, DataLog, ErrorLog
 from .monitoring import runtime_heartbeat
 from .resource_optimizer import (
@@ -523,6 +528,16 @@ def market_opportunities_api(request):
         return JsonResponse({"error": "Ungültige Marktart"}, status=400)
     if exchange not in {"all", *dict(Configuration.EXCHANGE_CHOICES)}:
         return JsonResponse({"error": "Ungültige Exchange"}, status=400)
+    filters = {
+        "volatility_threshold": request.GET.get("volatility_threshold", "10"),
+        "volume_spike_multiple": request.GET.get("volume_spike_multiple", "1.5"),
+        "min_volume_market_cap_ratio": request.GET.get(
+            "min_volume_market_cap_ratio", "0.10"
+        ),
+        "min_orderbook_depth_ratio": request.GET.get(
+            "min_orderbook_depth_ratio", "0.001"
+        ),
+    }
     if exchange == "all":
         try:
             from .market_scanner import scan_all_market_opportunities
@@ -530,9 +545,16 @@ def market_opportunities_api(request):
             payload = scan_all_market_opportunities(
                 market=market,
                 refresh=request.GET.get("refresh") == "1",
+                **filters,
             )
+        except MarketScannerFilterError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
         except MarketScannerError as exc:
+            logger.info("Marktscanner nicht verfügbar: %s", exc)
             return JsonResponse({"error": str(exc)}, status=503)
+        if not payload.get("exchanges"):
+            payload["error"] = "Keine Exchange lieferte einen belastbaren Scanner-Snapshot."
+            return JsonResponse(payload, status=503)
         return JsonResponse(payload)
     if not exchange:
         return JsonResponse({"error": "exchange fehlt"}, status=400)
@@ -541,7 +563,10 @@ def market_opportunities_api(request):
             exchange,
             market,
             refresh=request.GET.get("refresh") == "1",
+            **filters,
         )
+    except MarketScannerFilterError as exc:
+        return JsonResponse({"error": str(exc), "gainers": [], "losers": []}, status=400)
     except MarketScannerError as exc:
         logger.info("Marktscanner nicht verfügbar für %s/%s: %s", exchange, market, exc)
         return JsonResponse({"error": str(exc), "gainers": [], "losers": []}, status=503)
@@ -1318,10 +1343,14 @@ def backtesting_form(request, config_id):
         configuration=config,
         status="scheduled",
     ).order_by("scheduled_start_time")
-    tasks_completed = BacktestTask.objects.filter(
-        configuration=config,
-        status__in=["completed", "failed", "cancelled"],
-    ).order_by("-completed_at")[:10]
+    tasks_completed = list(
+        BacktestTask.objects.filter(
+            configuration=config,
+            status__in=["completed", "failed", "cancelled"],
+        ).order_by("-completed_at")[:10]
+    )
+    for completed_task in tasks_completed:
+        completed_task.report_results = _backtest_result_rows(completed_task)
     return render(
         request,
         "trading/backtesting_form.html",
@@ -1371,24 +1400,248 @@ def control_backtest(request, task_id):
     return redirect("backtesting_form", config_id=task.configuration_id)
 
 
-@login_required
-@require_GET
-def generate_backtest_pdf(request, task_id):
-    task = get_object_or_404(
+def _equity_svg(symbol, curve):
+    """Builds a dependency-free inline SVG for browsers and WeasyPrint."""
+    points = []
+    for point in curve or []:
+        try:
+            value = float(point.get("equity"))
+            index = int(point.get("index", len(points)))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if math.isfinite(value):
+            points.append((index, value, point.get("timestamp")))
+    if not points:
+        return ""
+    width, height = 1000, 260
+    left, right, top, bottom = 72, 20, 20, 42
+    minimum = min(value for _index, value, _timestamp in points)
+    maximum = max(value for _index, value, _timestamp in points)
+    spread = maximum - minimum or max(abs(maximum) * 0.01, 1.0)
+    minimum -= spread * 0.05
+    maximum += spread * 0.05
+    first_index, last_index = points[0][0], points[-1][0]
+    index_spread = max(1, last_index - first_index)
+
+    def coordinate(index, value):
+        x = left + (index - first_index) / index_spread * (width - left - right)
+        y = top + (maximum - value) / (maximum - minimum) * (height - top - bottom)
+        return x, y
+
+    polyline = " ".join(
+        f"{x:.2f},{y:.2f}" for x, y in (coordinate(index, value) for index, value, _ in points)
+    )
+    start_label = points[0][2] or f"Index {first_index}"
+    end_label = points[-1][2] or f"Index {last_index}"
+    svg = (
+        f'<svg class="equity-chart" viewBox="0 0 {width} {height}" role="img" '
+        f'style="width:100%;height:auto;max-height:260px" '
+        f'aria-label="Equity-Kurve {escape(str(symbol), quote=True)}">'
+        f'<rect width="{width}" height="{height}" fill="#fff"/>'
+        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#6c757d"/>'
+        f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#6c757d"/>'
+        f'<polyline points="{polyline}" fill="none" stroke="#0d6efd" stroke-width="3"/>'
+        f'<text x="8" y="{top+8}" font-size="14">{maximum:.2f}</text>'
+        f'<text x="8" y="{height-bottom}" font-size="14">{minimum:.2f}</text>'
+        f'<text x="{left}" y="{height-12}" font-size="12">{escape(str(start_label))}</text>'
+        f'<text x="{width-right}" y="{height-12}" text-anchor="end" font-size="12">{escape(str(end_label))}</text>'
+        "</svg>"
+    )
+    return mark_safe(svg)
+
+
+def _backtest_result_rows(task):
+    rows = []
+    symbol_results = (task.result or {}).get("symbol_results") or {}
+    for symbol, result in symbol_results.items():
+        report = result.get("report") or {}
+        rows.append(
+            {
+                "symbol": symbol,
+                "result": result,
+                "report": report,
+                "equity_svg": _equity_svg(symbol, report.get("equity_curve")),
+            }
+        )
+    return rows
+
+
+def _backtest_report_context(task):
+    return {
+        "task": task,
+        "config": task.configuration,
+        "results": _backtest_result_rows(task),
+        "global": (task.result or {}).get("global_results") or {},
+        "generated_at": timezone.localtime(),
+    }
+
+
+def _owned_backtest(request, task_id):
+    return get_object_or_404(
         BacktestTask.objects.select_related("configuration"),
         id=task_id,
         configuration__user=request.user,
     )
+
+
+@login_required
+@require_GET
+def generate_backtest_pdf(request, task_id):
+    task = _owned_backtest(request, task_id)
     if task.status != "completed":
         return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
     return _pdf_response(
         request,
         "trading/backtest_report.html",
-        {"task": task, "config": task.configuration},
+        _backtest_report_context(task),
         f"backtest-{task.id}.pdf",
         disposition="inline",
     )
 
+
+@login_required
+@require_GET
+def generate_backtest_html(request, task_id):
+    task = _owned_backtest(request, task_id)
+    if task.status != "completed":
+        return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
+    html = render_to_string(
+        "trading/backtest_report.html",
+        _backtest_report_context(task),
+        request=request,
+    )
+    response = HttpResponse(html, content_type="text/html; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="backtest-{task.id}.html"'
+    return response
+
+
+@login_required
+@require_GET
+def generate_backtest_csv(request, task_id):
+    task = _owned_backtest(request, task_id)
+    if task.status != "completed":
+        return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="backtest-{task.id}.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "Datensatz",
+            "Markt",
+            "Typ",
+            "Index",
+            "Zeitpunkt",
+            "Einstiegszeitpunkt",
+            "Dauer (Punkte)",
+            "Dauer (Sekunden)",
+            "Preis",
+            "Gebühr",
+            "Kapital vorher",
+            "Kapital danach",
+            "Profit nominal",
+            "Profit %",
+            "Bruttogewinn",
+            "Bruttoverlust",
+            "Profit-Faktor",
+            "Max. Drawdown %",
+            "Käufe",
+            "Verkäufe",
+            "Win Rate %",
+            "Equity-Punkte",
+        ]
+    )
+    global_result = (task.result or {}).get("global_results") or {}
+    writer.writerow(
+        [
+            "Gesamt",
+            "",
+            "",
+            "",
+            (task.result or {}).get("end_time"),
+            "",
+            global_result.get("average_trade_duration_points"),
+            global_result.get("average_trade_duration_seconds"),
+            "",
+            global_result.get("total_fees"),
+            "",
+            "",
+            global_result.get("total_profit"),
+            global_result.get("return_percentage"),
+            global_result.get("gross_profit"),
+            global_result.get("gross_loss"),
+            global_result.get("profit_factor"),
+            global_result.get("max_drawdown_percentage"),
+            "",
+            global_result.get("total_trades"),
+            "",
+            "",
+        ]
+    )
+    for item in _backtest_result_rows(task):
+        report = item["report"]
+        writer.writerow(
+            [
+                "Zusammenfassung",
+                item["symbol"],
+                "",
+                "",
+                "",
+                "",
+                report.get("average_trade_duration_points"),
+                report.get("average_trade_duration_seconds"),
+                "",
+                report.get("total_fees"),
+                task.configuration.start_capital,
+                item["result"].get("best_capital"),
+                report.get("net_profit"),
+                report.get("return_percentage"),
+                report.get("gross_profit"),
+                report.get("gross_loss"),
+                report.get("profit_factor"),
+                report.get("max_drawdown_percentage"),
+                report.get("num_buys"),
+                report.get("num_sells"),
+                report.get("win_rate"),
+                len(report.get("equity_curve") or []),
+            ]
+        )
+        for trade in report.get("trades") or []:
+            writer.writerow(
+                [
+                    "Trade",
+                    item["symbol"],
+                    trade.get("type"),
+                    trade.get("index"),
+                    trade.get("timestamp"),
+                    trade.get("entry_timestamp"),
+                    trade.get("duration_points"),
+                    trade.get("duration_seconds"),
+                    trade.get("price"),
+                    trade.get("fee"),
+                    trade.get("capital_before"),
+                    trade.get("capital_after"),
+                    trade.get("profit_nominal"),
+                    trade.get("profit_percentage"),
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+            )
+        for point in report.get("equity_curve") or []:
+            row = [""] * 22
+            row[0] = "Equity"
+            row[1] = item["symbol"]
+            row[3] = point.get("index")
+            row[4] = point.get("timestamp")
+            row[11] = point.get("equity")
+            writer.writerow(row)
+    return response
 
 @login_required
 @require_GET

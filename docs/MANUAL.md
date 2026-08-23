@@ -237,7 +237,14 @@ Das Backtesting-Modul optimiert die drei Kaufschwellen über konfigurierbare Suc
 - **DeltaDelta – von / bis / Schrittweite** (`deltadelta_from`, `deltadelta_to`, `deltadelta_steps`)
 - **Trading-Parameter:** Trade-Betrag, Take Profit, Stop Loss, Gebühr und maximale historische Preispunkte.
 
-Für jedes Symbol wird das threshold-Set ermittelt, welches das höchste Endkapital erzielt, und im Report übersichtlich dargestellt.
+Für jedes Symbol wird das Threshold-Set ermittelt, welches das höchste
+Endkapital erzielt. Die Ergebnisansicht zeigt zusätzlich Profit pro Markt,
+Brutto-Gewinn und -Verlust, Gebühren, Profit-Faktor, maximalen Drawdown,
+Win-Rate, durchschnittliche Trade-Dauer, jeden zeitgestempelten Trade und eine
+Mark-to-Market-Equity-Kurve. PDF-Seiten werden im A4-Querformat erzeugt, damit
+die Tradespalten lesbar bleiben. Derselbe nutzergebundene Backtest kann als
+PDF, eigenständiges HTML oder UTF-8-CSV einschließlich der Equity-Punkte
+exportiert werden.
 
 ### Templates, Hardwarebudget und Laufzeit
 
@@ -265,11 +272,16 @@ Auf Render Free ist die Backtest-Ausführung zum Schutz des Trading-Bots deaktiv
 ### Top-Gainer-/Loser-Konfiguration
 
 Das Konfigurationsformular kann pro Exchange bis zu fünf qualifizierte Gainer und
-Loser vorschlagen. Der öffentliche Scanner filtert 24-Stunden-Ausschläge über
-10 %, Volumenspitzen, mindestens 10 % Tagesvolumen/Marktkapitalisierung,
-Orderbuch-Tiefe und eine konservative Utility-Allowlist. Fehlende Daten führen
-zum Ausschluss. Das Ergebnis ist keine Anlageempfehlung; volatile Märkte
-benötigen ein begrenztes Risiko und eine passende Stop-Loss-Order.
+Loser vorschlagen. Vier Schieberegler steuern den Mindest-24h-Ausschlag
+(Standard 10 %), den Volumen-Ausreißer (1,5× Median), das Verhältnis von
+Tagesvolumen zu Marktkapitalisierung (10 %) und die marktnahe Orderbuch-Tiefe
+zum Tagesvolumen (0,1 %). Für die Tiefe zählen nur valide Bid- und Ask-Orders
+innerhalb von ±2 % des Mittelkurses. Der Scanner verwendet bei Binance einen
+kompakten Abruf aller 24h-Ticker und die aktuell dokumentierten Bitunix-Endpunkte.
+Fehlende Marktkapitalisierung, 24h-Volumendaten oder ein nicht belastbares
+Orderbuch führen immer zum Ausschluss und werden nicht günstig geschätzt. Das
+Ergebnis ist keine Anlageempfehlung; volatile Märkte benötigen ein begrenztes
+Risiko und eine passende Stop-Loss-Order.
 
 ## 12. Fehler-Log und Betrieb
 

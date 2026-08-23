@@ -17,6 +17,7 @@ from trading.backtesting import Backtesting
 from trading.forms import BacktestForm, ConfigurationForm
 from trading.market_data import (
     BinancePublicMarketData,
+    BinancePublicSymbolCatalog,
     BitMartPublicMarketData,
     BitunixPublicMarketData,
     MarketDataConnectionError,
@@ -26,7 +27,7 @@ from trading.market_data import (
 from trading.middleware import DatabaseAvailabilityMiddleware
 from trading.models import BacktestTask, Configuration, DataLog, ErrorLog, TradingLog
 from trading.symbols import get_available_symbols
-from trading.tasks import dispatch_task, run_backtest
+from trading.tasks import _collect_results, dispatch_task, run_backtest
 from trading.trading_bot import TradingBot, _close_db_circuit, db_safe
 
 
@@ -50,6 +51,86 @@ class BacktestingTests(TestCase):
         self.assertGreater(capital, Decimal(100))
         sell = next(trade for trade in report["trades"] if trade["type"] == "sell")
         self.assertGreater(sell["profit_nominal"], 0)
+
+    def test_detailed_simulation_has_timed_trades_and_mark_to_market_equity(self):
+        start = timezone.now()
+        timestamps = [start + timedelta(minutes=index) for index in range(5)]
+        _capital, report = Backtesting.simulate_trading_detailed(
+            [Decimal(100), Decimal(101), Decimal(103), Decimal(104), Decimal(105)],
+            -100,
+            -100,
+            -100,
+            {
+                "start_capital": 100,
+                "trade_amount": 10,
+                "take_profit": 50,
+                "stop_loss": 50,
+                "fee_percentage": "0.1",
+            },
+            timestamps=timestamps,
+        )
+        sell = next(trade for trade in report["trades"] if trade["type"] == "sell")
+        self.assertEqual(sell["duration_points"], 2)
+        self.assertEqual(sell["duration_seconds"], 120)
+        self.assertEqual(report["average_trade_duration_seconds"], 120)
+        self.assertEqual(len(report["equity_curve"]), 5)
+        self.assertEqual(report["equity_curve"][0]["timestamp"], timestamps[0].isoformat())
+        self.assertNotEqual(
+            report["equity_curve"][2]["equity"],
+            report["equity_curve"][3]["equity"],
+        )
+        self.assertIn("max_drawdown_percentage", report)
+        self.assertIn("total_fees", report)
+
+    def test_invalid_intermediate_price_carries_forward_open_position_equity(self):
+        _capital, report = Backtesting.simulate_trading_detailed(
+            [100, 101, 103, 0, 106],
+            -100,
+            -100,
+            -100,
+            {
+                "start_capital": 100,
+                "trade_amount": 10,
+                "take_profit": 50,
+                "stop_loss": 50,
+                "fee_percentage": "0.1",
+            },
+        )
+        curve = report["equity_curve"]
+        self.assertEqual(curve[3]["equity"], curve[2]["equity"])
+        self.assertGreater(curve[3]["equity"], 90)
+
+    def test_trailing_invalid_prices_close_at_last_positive_tick(self):
+        _capital, report = Backtesting.simulate_trading_detailed(
+            [100, 101, 103, 0, -1],
+            -100,
+            -100,
+            -100,
+            {
+                "start_capital": 100,
+                "trade_amount": 10,
+                "take_profit": 50,
+                "stop_loss": 50,
+                "fee_percentage": "0.1",
+            },
+        )
+        sell = next(trade for trade in report["trades"] if trade["type"] == "sell")
+        self.assertEqual(sell["index"], 2)
+        self.assertEqual(sell["price"], Decimal(103))
+        trailing_equity = [point["equity"] for point in report["equity_curve"][2:]]
+        self.assertEqual(trailing_equity, [report["final_capital"]] * 3)
+        self.assertGreater(report["final_capital"], 90)
+
+    def test_lightweight_simulation_does_not_allocate_report_details(self):
+        _capital, report = Backtesting.simulate_trading_detailed(
+            [100, 101, 103, 104],
+            -100,
+            -100,
+            -100,
+            {"start_capital": 100, "trade_amount": 10, "take_profit": 1},
+            include_details=False,
+        )
+        self.assertEqual(set(report), {"final_capital"})
 
 
 class FormTests(TestCase):
@@ -228,10 +309,68 @@ class MarketDataAdapterTests(TestCase):
         self.assertEqual(result["BTC/USDT"]["last"], "321.00")
 
     def test_binance_autocomplete_differs_between_spot_and_futures(self):
-        spot = get_available_symbols("binance", "spot")
-        futures = get_available_symbols("binance", "futures")
+        import trading.symbols as symbol_catalog
+
+        class FakeCatalog:
+            def __init__(self, market):
+                self.market = market
+
+            def available_symbols(self):
+                common = {"BTC/USDT", "ETH/USDT"}
+                return common | ({"1000PEPE/USDT"} if self.market == "futures" else set())
+
+            def close(self):
+                pass
+
+        symbol_catalog._CACHE.clear()
+        with patch("trading.symbols.BinancePublicSymbolCatalog", FakeCatalog):
+            spot = get_available_symbols("binance", "spot")
+            futures = get_available_symbols("binance", "futures")
         self.assertNotIn("1000PEPE/USDT", spot)
         self.assertIn("1000PEPE/USDT", futures)
+
+    def test_binance_exchange_info_filters_market_type_and_validates_futures(self):
+        provider = BinancePublicSymbolCatalog("futures")
+        provider._json = lambda _url: {
+            "symbols": [
+                {
+                    "status": "TRADING",
+                    "contractType": "PERPETUAL",
+                    "baseAsset": "BTC",
+                    "quoteAsset": "USDT",
+                },
+                {
+                    "status": "TRADING",
+                    "contractType": "CURRENT_QUARTER",
+                    "baseAsset": "ETH",
+                    "quoteAsset": "USDT",
+                },
+                {
+                    "status": "BREAK",
+                    "contractType": "PERPETUAL",
+                    "baseAsset": "SOL",
+                    "quoteAsset": "USDT",
+                },
+            ]
+        }
+        self.assertEqual(provider.available_symbols(), {"BTC/USDT"})
+        provider.validate_symbols(["BTC/USDT:USDT"])
+        with self.assertRaises(SymbolValidationError):
+            provider.validate_symbols(["ETH/USDT"])
+        provider.close()
+
+    def test_binance_autocomplete_has_advisory_outage_fallback(self):
+        import trading.symbols as symbol_catalog
+
+        symbol_catalog._CACHE.clear()
+        symbol_catalog._FAILURE_CACHE.clear()
+        with patch(
+            "trading.symbols.BinancePublicSymbolCatalog.available_symbols",
+            side_effect=MarketDataConnectionError("offline"),
+        ):
+            suggestions = get_available_symbols("binance", "futures")
+        self.assertIn("BTC/USDT", suggestions)
+        self.assertIn("1000PEPE/USDT", suggestions)
 
     def test_bitunix_futures_uses_validated_batch_ticker(self):
         provider = BitunixPublicMarketData("futures")
@@ -682,5 +821,59 @@ class BacktestTaskTests(TestCase):
         self.assertEqual(task.status, "completed")
         self.assertEqual(task.progress, 100)
         self.assertIn("BTC/USDT", task.result["symbol_results"])
+        market_result = task.result["symbol_results"]["BTC/USDT"]
+        self.assertTrue(market_result["report"]["trades"])
+        self.assertTrue(market_result["report"]["equity_curve"])
+        self.assertIn("average_trade_duration_seconds", market_result["report"])
+        self.assertIn("BTC/USDT", task.result["global_results"]["profit_per_market"])
+        self.assertIn("total_fees", task.result["global_results"])
         self.assertEqual(task.result["metrics"]["combinations"], 1)
         self.assertGreater(task.result["metrics"]["peak_rss_mb"], 0)
+
+    def test_global_duration_uses_individual_timed_sell_trades(self):
+        task = BacktestTask.objects.create(
+            configuration=self.config,
+            symbol="BTC/USDT,ETH/USDT",
+            parameters={},
+        )
+
+        def candidate(symbol, durations):
+            trades = [
+                {
+                    "type": "sell",
+                    "duration_points": points,
+                    "duration_seconds": seconds,
+                }
+                for points, seconds in durations
+            ]
+            return {
+                "symbol": symbol,
+                "final_capital": Decimal(101),
+                "thresholds": {
+                    "acc_threshold": 0,
+                    "nda_threshold": 0,
+                    "deltadelta_threshold": 0,
+                },
+                "report": {
+                    "num_sells": len(trades),
+                    "trades": trades,
+                    "gross_profit": 1,
+                    "gross_loss": 0,
+                    "total_fees": 0,
+                    "max_drawdown_percentage": 0,
+                    # Deliberately wrong summaries: detailed trades are authoritative.
+                    "average_trade_duration_points": 999,
+                    "average_trade_duration_seconds": 999,
+                },
+            }
+
+        result = _collect_results(
+            [
+                candidate("BTC/USDT", [(2, 60), (4, 180)]),
+                candidate("ETH/USDT", [(8, 600)]),
+            ],
+            task,
+        )
+        global_results = result["global_results"]
+        self.assertAlmostEqual(global_results["average_trade_duration_points"], 14 / 3)
+        self.assertEqual(global_results["average_trade_duration_seconds"], 280)

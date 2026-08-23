@@ -114,19 +114,28 @@ def _parameter_values(start, end, step):
     return values
 
 
-def _historical_prices(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
+def _historical_data(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
+    """Loads aligned prices and timestamps in chronological order."""
     profile = get_backtest_resource_profile()
     limit = max(
         100,
         min(_MAX_BACKTEST_PRICE_POINTS, profile.max_price_points, int(limit)),
     )
-    prices = list(
+    rows = list(
         DataLog.objects.filter(configuration_id=config_id, symbol=symbol)
-        .order_by("-timestamp")
-        .values_list("price", flat=True)[:limit]
+        .order_by("-timestamp", "-id")
+        .values_list("price", "timestamp")[:limit]
     )
-    prices.reverse()
-    return prices
+    rows.reverse()
+    return {
+        "prices": [price for price, _timestamp in rows],
+        "timestamps": [timestamp for _price, timestamp in rows],
+    }
+
+
+def _historical_prices(config_id, symbol, limit=_MAX_BACKTEST_PRICE_POINTS):
+    """Backward-compatible price-only helper for external integrations."""
+    return _historical_data(config_id, symbol, limit)["prices"]
 
 
 def _simulate_candidate(
@@ -138,6 +147,8 @@ def _simulate_candidate(
     nda_threshold,
     deltadelta_threshold,
     indicator_rows=None,
+    timestamps=None,
+    include_details=True,
 ):
     final_capital, report = Backtesting.simulate_trading_detailed(
         historical_prices,
@@ -152,6 +163,8 @@ def _simulate_candidate(
             "fee_percentage": params.get("fee", config.fee),
         },
         indicator_rows=indicator_rows,
+        timestamps=timestamps,
+        include_details=include_details,
     )
     return {
         "symbol": symbol,
@@ -181,21 +194,22 @@ def simulate_candidate(
     del self, task_id
     try:
         config = Configuration.objects.get(id=config_id)
-        prices = _historical_prices(
+        historical = _historical_data(
             config.id,
             symbol,
             params.get("max_price_points", _MAX_BACKTEST_PRICE_POINTS),
         )
-        if len(prices) < 3:
+        if len(historical["prices"]) < 3:
             return {"symbol": symbol, "error": "Mindestens drei Preispunkte benötigt."}
         return _simulate_candidate(
             config,
-            prices,
+            historical["prices"],
             params,
             symbol,
             acc_threshold,
             nda_threshold,
             deltadelta_threshold,
+            timestamps=historical["timestamps"],
         )
     except Exception as exc:
         logger.exception("Simulation für %s fehlgeschlagen", symbol)
@@ -247,11 +261,78 @@ def _collect_results(results, task):
         symbol: str(Decimal(result["best_capital"]) - task.configuration.start_capital)
         for symbol, result in processed.items()
     }
+    total_trades = sum(trades_per_symbol.values())
+    gross_profit = sum(
+        Decimal(str(result["report"].get("gross_profit", 0))) for result in processed.values()
+    )
+    gross_loss = sum(
+        Decimal(str(result["report"].get("gross_loss", 0))) for result in processed.values()
+    )
+    total_fees = sum(
+        Decimal(str(result["report"].get("total_fees", 0))) for result in processed.values()
+    )
+    duration_points = []
+    duration_seconds = []
+    for result in processed.values():
+        report = result["report"]
+        sell_trades = [
+            trade
+            for trade in report.get("trades", [])
+            if isinstance(trade, dict) and trade.get("type") == "sell"
+        ]
+        if sell_trades:
+            duration_points.extend(
+                float(trade["duration_points"])
+                for trade in sell_trades
+                if trade.get("duration_points") is not None
+            )
+            duration_seconds.extend(
+                float(trade["duration_seconds"])
+                for trade in sell_trades
+                if trade.get("duration_seconds") is not None
+            )
+            continue
+
+        # Backward compatibility for compact reports from external Celery
+        # callers which predate detailed trade rows. New backtests always use
+        # the individual sell durations above as their authoritative source.
+        sell_count = int(report.get("num_sells", 0))
+        average_points = report.get("average_trade_duration_points")
+        if sell_count and average_points is not None:
+            duration_points.extend([float(average_points)] * sell_count)
+        average_seconds = report.get("average_trade_duration_seconds")
+        if sell_count and average_seconds is not None:
+            duration_seconds.extend([float(average_seconds)] * sell_count)
+    invested_capital = task.configuration.start_capital * len(processed)
     global_results = {
         "total_profit": str(total_profit),
-        "total_trades": sum(trades_per_symbol.values()),
+        "return_percentage": str(
+            total_profit / invested_capital * Decimal(100) if invested_capital else Decimal(0)
+        ),
+        "gross_profit": str(gross_profit),
+        "gross_loss": str(gross_loss),
+        "total_fees": str(total_fees),
+        "average_profit": str(total_profit / total_trades if total_trades else Decimal(0)),
+        "profit_factor": str(gross_profit / gross_loss) if gross_loss else None,
+        "max_drawdown_percentage": str(
+            max(
+                (
+                    Decimal(str(result["report"].get("max_drawdown_percentage", 0)))
+                    for result in processed.values()
+                ),
+                default=Decimal(0),
+            )
+        ),
+        "average_trade_duration_points": (
+            sum(duration_points) / len(duration_points) if duration_points else 0
+        ),
+        "average_trade_duration_seconds": (
+            sum(duration_seconds) / len(duration_seconds) if duration_seconds else None
+        ),
+        "total_trades": total_trades,
         "trades_per_symbol": trades_per_symbol,
         "profit_per_symbol": profit_per_symbol,
+        "profit_per_market": profit_per_symbol,
     }
     return {
         "symbol_results": processed,
@@ -331,8 +412,8 @@ def run_backtest(self, config_id, params, symbols, task_id):
             len(symbols),
             total,
         )
-        prices_by_symbol = {
-            symbol: _historical_prices(
+        historical_by_symbol = {
+            symbol: _historical_data(
                 config_id,
                 symbol,
                 params.get("max_price_points", _MAX_BACKTEST_PRICE_POINTS),
@@ -346,7 +427,8 @@ def run_backtest(self, config_id, params, symbols, task_id):
         combinations_per_symbol = len(ranges[0]) * len(ranges[1]) * len(ranges[2])
         control_check_interval = max(10, total // 100)
         for symbol in symbols:
-            prices = prices_by_symbol[symbol]
+            historical = historical_by_symbol[symbol]
+            prices = historical["prices"]
             if len(prices) < 3:
                 errors.append({"symbol": symbol, "error": "Mindestens drei Preispunkte benötigt."})
                 completed += combinations_per_symbol
@@ -375,6 +457,8 @@ def run_backtest(self, config_id, params, symbols, task_id):
                             nda_threshold,
                             deltadelta_threshold,
                             indicator_rows,
+                            timestamps=historical["timestamps"],
+                            include_details=False,
                         )
                         previous_best = best_results.get(symbol)
                         if (
@@ -392,6 +476,29 @@ def run_backtest(self, config_id, params, symbols, task_id):
         if task.status == "cancelled":
             logger.info("event=backtest.cancelled task_id=%s completed=%s", task_id, completed)
             return {"status": "cancelled"}
+
+        # Das Raster hält bewusst nur Minimalreports. Pro Markt wird exakt der
+        # Gewinner erneut ausgeführt, diesmal mit Trades, Zeitstempeln und
+        # mark-to-market Equity-Kurve.
+        for symbol, best in list(best_results.items()):
+            historical = historical_by_symbol[symbol]
+            prices = historical["prices"]
+            indicator_rows = [None, None] + [
+                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
+            ]
+            thresholds = best["thresholds"]
+            best_results[symbol] = _simulate_candidate(
+                config,
+                prices,
+                params,
+                symbol,
+                thresholds["acc_threshold"],
+                thresholds["nda_threshold"],
+                thresholds["deltadelta_threshold"],
+                indicator_rows,
+                timestamps=historical["timestamps"],
+                include_details=True,
+            )
         result = _collect_results([*best_results.values(), *errors], task)
         ended_at = timezone.now()
         duration_seconds = time.perf_counter() - started_perf
@@ -406,9 +513,12 @@ def run_backtest(self, config_id, params, symbols, task_id):
                     "peak_rss_mb": round(peak_rss_mb, 2),
                     "combinations": total,
                     "symbols": len(symbols),
-                    "price_points_total": sum(len(values) for values in prices_by_symbol.values()),
+                    "price_points_total": sum(
+                        len(values["prices"]) for values in historical_by_symbol.values()
+                    ),
                     "price_points_max": max(
-                        (len(values) for values in prices_by_symbol.values()), default=0
+                        (len(values["prices"]) for values in historical_by_symbol.values()),
+                        default=0,
                     ),
                 },
             }

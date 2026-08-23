@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import aiohttp
 import ccxt
 import requests
-from asgiref.sync import async_to_sync
 
 
 class MarketDataError(RuntimeError):
@@ -103,6 +102,56 @@ class PublicHTTPMarketData:
 
     def close(self):
         self.session.close()
+
+
+class BinancePublicSymbolCatalog(PublicHTTPMarketData):
+    """Authoritative Binance Spot/Futures catalog used for discovery and validation."""
+
+    endpoints = {
+        "spot": "https://api.binance.com/api/v3/exchangeInfo",
+        "futures": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+    }
+
+    def __init__(self, market):
+        if market not in self.endpoints:
+            raise ValueError(f"Nicht unterstützter Binance-Markt: {market}")
+        super().__init__()
+        self.market = market
+        self._available_symbols = None
+
+    def available_symbols(self):
+        if self._available_symbols is not None:
+            return self._available_symbols
+        payload = self._json(self.endpoints[self.market])
+        rows = payload.get("symbols") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise MarketDataConnectionError(
+                "Binance lieferte keinen gültigen ExchangeInfo-Symbolkatalog"
+            )
+        available = set()
+        for item in rows:
+            if not isinstance(item, dict) or item.get("status") != "TRADING":
+                continue
+            if self.market == "futures" and item.get("contractType") != "PERPETUAL":
+                continue
+            if self.market == "spot" and item.get("isSpotTradingAllowed") is False:
+                continue
+            base, quote = item.get("baseAsset"), item.get("quoteAsset")
+            if base and quote:
+                available.add(f"{str(base).upper()}/{str(quote).upper()}")
+        if not available:
+            raise MarketDataConnectionError(
+                f"Binance lieferte keine aktiven {self.market}-Symbole"
+            )
+        self._available_symbols = available
+        return available
+
+    def validate_symbols(self, symbols):
+        available = self.available_symbols()
+        invalid = [symbol for symbol in symbols if _base_symbol(symbol).upper() not in available]
+        if invalid:
+            raise SymbolValidationError("Binance", invalid)
+        return []
 
 
 class BinancePublicMarketData:
@@ -300,7 +349,9 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 compact = item
                 active = True
             else:
-                compact = item.get("symbol") or item.get("symbolName") or item.get("id")
+                compact = item.get("symbol") or item.get("symbolName") or (
+                    f"{item.get('base', '')}{item.get('quote', '')}"
+                ) or item.get("id")
                 status = str(item.get("symbolStatus", item.get("isOpen", "OPEN"))).upper()
                 active = status in {"OPEN", "1", "TRUE"}
             if compact and active:
@@ -428,8 +479,14 @@ def validate_exchange_symbols(exchange_id, market, symbols):
     """Validiert normalisierte CCXT-Symbole gegen die aktuell gelisteten Märkte."""
     exchange_id = exchange_id.strip().lower()
     if exchange_id == "binance":
-        provider = BinancePublicMarketData(market)
-        async_to_sync(provider.validate_symbols_async)(symbols)
+        # ExchangeInfo ist für Spot und insbesondere USDⓈ-M-Futures die
+        # authoritative Liste. Ein fehlendes miniTicker-Event ist dagegen kein
+        # belastbarer Beweis für ein ungültiges Symbol.
+        provider = BinancePublicSymbolCatalog(market)
+        try:
+            provider.validate_symbols(symbols)
+        finally:
+            provider.close()
         return
     if exchange_id in {"bitmart", "bitunix"}:
         provider_class = (

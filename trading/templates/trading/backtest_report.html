@@ -1,44 +1,71 @@
+{% load my_filters %}
 <!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <title>Backtest #{{ task.id }}</title>
 <style>
-body { font-family: sans-serif; font-size: 10pt; color: #222; }
-h1, h2 { color: #163a63; }
-table { width: 100%; border-collapse: collapse; margin: 10px 0 20px; }
-th, td { border: 1px solid #aaa; padding: 5px; text-align: left; }
+@page { size: A4 landscape; margin: 12mm; }
+body { font-family: sans-serif; font-size: 9pt; color: #222; }
+h1, h2, h3 { color: #163a63; margin-bottom: 6px; }
+p { margin: 5px 0; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
+th, td { border: 1px solid #aaa; padding: 4px; text-align: left; vertical-align: top; }
 th { background: #e8eef5; }
-.symbol { page-break-before: always; }
-.symbol:first-of-type { page-break-before: auto; }
+.summary td, .summary th { white-space: nowrap; }
+.symbol { break-before: page; page-break-before: always; }
+.symbol:first-of-type { break-before: auto; page-break-before: auto; }
+.chart-wrap { break-inside: avoid; page-break-inside: avoid; margin: 8px 0 14px; }
+.equity-chart { display: block; width: 100%; height: auto; max-height: 245px; }
+.trade-table { font-size: 8pt; }
+.muted { color: #666; }
+@media screen {
+  body { max-width: 1400px; margin: 24px auto; padding: 0 20px; }
+  .symbol { border-top: 2px solid #163a63; padding-top: 12px; margin-top: 24px; }
+}
 </style>
 </head>
 <body>
 <h1>Backtest-Report #{{ task.id }}</h1>
+<p class="muted">Erstellt: {{ generated_at }}</p>
 <table>
-<tr><th>Konfiguration</th><td>{{ config.name }} (#{{ config.id }})</td></tr>
-<tr><th>Symbole</th><td>{{ task.symbol }}</td></tr>
-<tr><th>Erstellt</th><td>{{ task.created_at }}</td></tr>
-<tr><th>Abgeschlossen</th><td>{{ task.completed_at }}</td></tr>
-<tr><th>Dauer</th><td>{{ task.result.duration|default:"–" }}</td></tr>
-<tr><th>Kombinationen</th><td>Beschleunigung (DVA/prev NDA) {{ task.parameters.acc_from }}–{{ task.parameters.acc_to }} (Schritt {{ task.parameters.acc_steps }}); NDA {{ task.parameters.nda_from }}–{{ task.parameters.nda_to }} (Schritt {{ task.parameters.nda_steps }}); DeltaDelta {{ task.parameters.deltadelta_from }}–{{ task.parameters.deltadelta_to }} (Schritt {{ task.parameters.deltadelta_steps }})</td></tr>
+<tr><th>Konfiguration</th><td>{{ config.name }} (#{{ config.id }})</td><th>Symbole</th><td>{{ task.symbol }}</td></tr>
+<tr><th>Gestartet</th><td>{{ task.result.start_time|default:task.created_at }}</td><th>Abgeschlossen</th><td>{{ task.result.end_time|default:task.completed_at }}</td></tr>
+<tr><th>Dauer</th><td>{{ task.result.duration|default:"–" }}</td><th>Kombinationen</th><td>{{ task.result.metrics.combinations|default:"–" }}</td></tr>
+<tr><th>Raster</th><td colspan="3">Beschleunigung {{ task.parameters.acc_from }}–{{ task.parameters.acc_to }} ({{ task.parameters.acc_steps }}); NDA {{ task.parameters.nda_from }}–{{ task.parameters.nda_to }} ({{ task.parameters.nda_steps }}); DeltaDelta {{ task.parameters.deltadelta_from }}–{{ task.parameters.deltadelta_to }} ({{ task.parameters.deltadelta_steps }})</td></tr>
 </table>
 
-{% for symbol, result in task.result.symbol_results.items %}
-<section class="symbol">
-<h2>{{ symbol }}</h2>
-<p><strong>Optimierte Schwellenwerte:</strong> {{ result.optimized_thresholds_str }}</p>
-<table>
-<tr><th>Startkapital</th><td>{{ config.start_capital }}</td><th>Endkapital</th><td>{{ result.best_capital }}</td></tr>
-<tr><th>Verkäufe</th><td>{{ result.report.num_sells }}</td><th>Win Rate</th><td>{{ result.report.win_rate|floatformat:2 }} %</td></tr>
-<tr><th>Profitable Trades</th><td>{{ result.report.profitable_trades }}</td><th>Unprofitable Trades</th><td>{{ result.report.unprofitable_trades }}</td></tr>
+<h2>Gesamtergebnis</h2>
+<table class="summary">
+<tr><th>Profit</th><td>{{ global.total_profit|default:"0" }}</td><th>Rendite</th><td>{{ global.return_percentage|floatformat:2 }} %</td><th>Verkäufe</th><td>{{ global.total_trades|default:"0" }}</td></tr>
+<tr><th>Bruttogewinn</th><td>{{ global.gross_profit|default:"0" }}</td><th>Bruttoverlust</th><td>{{ global.gross_loss|default:"0" }}</td><th>Gebühren</th><td>{{ global.total_fees|default:"0" }}</td></tr>
+<tr><th>Ø Profit/Trade</th><td>{{ global.average_profit|default:"0" }}</td><th>Profit-Faktor</th><td>{{ global.profit_factor|default:"–" }}</td><th>Max. Drawdown</th><td>{{ global.max_drawdown_percentage|floatformat:2 }} %</td></tr>
+<tr><th>Ø Haltedauer</th><td>{{ global.average_trade_duration_points|floatformat:1 }} Punkte</td><th>Ø Haltedauer Zeit</th><td>{% if global.average_trade_duration_seconds != None %}{{ global.average_trade_duration_seconds|floatformat:1 }} s{% else %}–{% endif %}</td><th></th><td></td></tr>
 </table>
+<h3>Profit pro Markt</h3>
 <table>
-<thead><tr><th>Typ</th><th>Index</th><th>Preis</th><th>Menge/Gebühr</th><th>Kapital vorher</th><th>Kapital danach</th><th>Profit</th></tr></thead>
+<thead><tr><th>Markt</th><th>Profit</th><th>Verkäufe</th></tr></thead>
+<tbody>{% for symbol, profit in global.profit_per_market.items %}<tr><td>{{ symbol }}</td><td>{{ profit }}</td><td>{{ global.trades_per_symbol|get_item:symbol }}</td></tr>{% empty %}<tr><td colspan="3">Keine Marktergebnisse.</td></tr>{% endfor %}</tbody>
+</table>
+
+{% for item in results %}
+<section class="symbol">
+<h2>{{ item.symbol }}</h2>
+<p><strong>Optimierte Schwellenwerte:</strong> {{ item.result.optimized_thresholds_str }}</p>
+<table class="summary">
+<tr><th>Startkapital</th><td>{{ config.start_capital }}</td><th>Endkapital</th><td>{{ item.result.best_capital }}</td><th>Netto-Profit</th><td>{{ item.report.net_profit }}</td></tr>
+<tr><th>Rendite</th><td>{{ item.report.return_percentage|floatformat:2 }} %</td><th>Verkäufe</th><td>{{ item.report.num_sells }}</td><th>Win Rate</th><td>{{ item.report.win_rate|floatformat:2 }} %</td></tr>
+<tr><th>Bruttogewinn</th><td>{{ item.report.gross_profit }}</td><th>Bruttoverlust</th><td>{{ item.report.gross_loss }}</td><th>Gebühren</th><td>{{ item.report.total_fees }}</td></tr>
+<tr><th>Ø Profit</th><td>{{ item.report.average_profit }}</td><th>Profit-Faktor</th><td>{{ item.report.profit_factor|default:"–" }}</td><th>Max. Drawdown</th><td>{{ item.report.max_drawdown_percentage|floatformat:2 }} %</td></tr>
+<tr><th>Ø Haltedauer</th><td>{{ item.report.average_trade_duration_points|floatformat:1 }} Punkte</td><th>Ø Haltedauer Zeit</th><td>{% if item.report.average_trade_duration_seconds != None %}{{ item.report.average_trade_duration_seconds|floatformat:1 }} s{% else %}–{% endif %}</td><th></th><td></td></tr>
+</table>
+{% if item.equity_svg %}<div class="chart-wrap"><h3>Equity-Kurve (mark-to-market)</h3>{{ item.equity_svg }}</div>{% endif %}
+<table class="trade-table">
+<thead><tr><th>Typ</th><th>Zeitpunkt</th><th>Index</th><th>Preis</th><th>Gebühr</th><th>Kapital vorher</th><th>Kapital danach</th><th>Haltedauer</th><th>Profit</th></tr></thead>
 <tbody>
-{% for trade in result.report.trades %}
-<tr><td>{{ trade.type|upper }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_before }}</td><td>{{ trade.capital_after }}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>
-{% empty %}<tr><td colspan="7">Keine Trades.</td></tr>{% endfor %}
+{% for trade in item.report.trades %}
+<tr><td>{{ trade.type|upper }}</td><td>{{ trade.timestamp|default:"–" }}</td><td>{{ trade.index }}</td><td>{{ trade.price }}</td><td>{{ trade.fee }}</td><td>{{ trade.capital_before }}</td><td>{{ trade.capital_after }}</td><td>{% if trade.duration_points != None %}{{ trade.duration_points }} Punkte{% if trade.duration_seconds != None %} / {{ trade.duration_seconds|floatformat:1 }} s{% endif %}{% else %}–{% endif %}</td><td>{{ trade.profit_nominal|default:"–" }}</td></tr>
+{% empty %}<tr><td colspan="9">Keine Trades.</td></tr>{% endfor %}
 </tbody>
 </table>
 </section>

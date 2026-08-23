@@ -271,8 +271,13 @@ eine weitere Prüfung nötig.
 
 ## 10. Interpretation der Ergebnisse
 
-Das Modul zeigt pro Symbol unter anderem Endkapital, Verkäufe und Win-Rate.
-Diese Kennzahlen müssen gemeinsam gelesen werden:
+Das Modul zeigt pro Symbol Endkapital, Profit, Käufe/Verkäufe, Win-Rate,
+Brutto-Gewinn und -Verlust, Gebühren, Profit-Faktor, maximalen Drawdown und die
+durchschnittliche Trade-Dauer. Die globale Zusammenfassung weist Profit und
+Trade-Anzahl pro Markt aus. Zeitgestempelte Trades und eine Mark-to-Market-
+Equity-Kurve machen auch offene Kursschwankungen sichtbar. Die Ergebnisse sind
+nutzergebunden als A4-Querformat-PDF, eigenständiges HTML und UTF-8-CSV mit
+Trade- und Equity-Zeilen exportierbar. Diese Kennzahlen müssen gemeinsam gelesen werden:
 
 - Eine hohe Win-Rate kann mit wenigen großen Verlusten einhergehen.
 - Ein höheres Endkapital kann aus einem einzelnen Ausreißer stammen.
@@ -294,19 +299,29 @@ Im Konfigurationsformular kann der öffentliche Markt-Scanner für die gewählte
 Exchange und Marktart aufgerufen werden. Er zeigt bis zu fünf Gainer und fünf
 Loser, aber nur nach diesen Prüfungen:
 
-1. **Volatilität:** Der absolute 24-Stunden-Ausschlag muss größer als 10 % sein.
-2. **Volumenspitze:** Das Quotevolumen muss mindestens das 1,5-Fache des
-   Medianvolumens der geprüften Märkte betragen.
-3. **Liquidität:** Das Tagesvolumen muss mindestens 10 % der bekannten
-   Marktkapitalisierung erreichen. Zusätzlich muss die sichtbare
-   Orderbuchtiefe mindestens 0,1 % des Tagesvolumens betragen.
+1. **Volatilität:** Der absolute 24-Stunden-Ausschlag muss standardmäßig
+   größer als 10 % sein.
+2. **Volumenspitze:** Das Quotevolumen muss standardmäßig mindestens das
+   1,5-Fache des Medianvolumens der geprüften Märkte betragen.
+3. **Liquidität:** Das Tagesvolumen muss standardmäßig mindestens 10 % der
+   bekannten Marktkapitalisierung erreichen. Zusätzlich muss die sichtbare,
+   marktnahe Orderbuchtiefe mindestens 0,1 % des Tagesvolumens betragen; nur
+   valide Bid- und Ask-Orders innerhalb von ±2 % des Mittelkurses zählen.
 4. **Fundamentalqualität:** Bekannte etablierte Utility-Assets oder explizite
    Utility-Metadaten werden akzeptiert. Fehlen diese Daten, wird der Markt
    nicht als sicher eingestuft.
 5. **Frische Daten:** Ticker und Orderbuch stammen aus der aktuellen
    öffentlichen Abfrage; ein kurzer Cache verhindert unnötige API-Last.
 
-Eine fehlende Marktkapitalisierung oder Orderbuch-Tiefe wird nicht als null
+Alle vier numerischen Schwellen sind im Formular per Schieberegler einstellbar.
+Die API prüft zusätzlich sichere Wertebereiche. Binance wird ohne lange
+`symbols=[...]`-Ticker-URL abgefragt; Bitunix verwendet die aktuell
+dokumentierten Spot- beziehungsweise Futures-Pfade. Liefert der dokumentierte
+Bitunix-Spot-Kline-Pfad kein Volumen, wird der Markt ausdrücklich als nicht
+qualifiziert ausgeschlossen.
+
+Eine fehlende Marktkapitalisierung, ein unbekanntes 24h-Volumen oder eine
+fehlende Orderbuch-Tiefe wird nicht als null
 Risiko interpretiert, sondern als Ausschlussgrund. Deshalb können weniger als
 fünf Ergebnisse oder gar keine Ergebnisse erscheinen. Das ist beabsichtigt.
 

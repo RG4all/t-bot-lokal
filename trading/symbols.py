@@ -10,6 +10,7 @@ import time
 import ccxt
 
 from .market_data import (
+    BinancePublicSymbolCatalog,
     BitMartPublicMarketData,
     BitunixPublicMarketData,
     MarketDataConnectionError,
@@ -21,7 +22,8 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 15 * 60
 _FAILURE_TTL_SECONDS = 60
 _QUOTES = ("FDUSD", "USDT", "USDC", "EUR", "BTC", "ETH")
-_BINANCE_SPOT = {
+# Advisory fallback only: save/activation validation never relies on this list.
+_BINANCE_SPOT_FALLBACK = {
     "ADA/USDT",
     "AVAX/USDT",
     "BCH/USDT",
@@ -41,7 +43,10 @@ _BINANCE_SPOT = {
     "TRX/USDT",
     "XRP/USDT",
 }
-_BINANCE_FUTURES = _BINANCE_SPOT | {"1000PEPE/USDT", "1000SHIB/USDT"}
+_BINANCE_FUTURES_FALLBACK = _BINANCE_SPOT_FALLBACK | {
+    "1000PEPE/USDT",
+    "1000SHIB/USDT",
+}
 
 
 def _canonical(compact):
@@ -62,10 +67,16 @@ def _provider_symbols(provider):
 
 def _load_symbols(exchange_id, market):
     if exchange_id == "binance":
-        # Binance market-data WebSockets expose no complete symbol directory.
-        # Curated liquid pairs avoid REST request weight; live validation on
-        # submit remains authoritative for every manually entered symbol.
-        return set(_BINANCE_FUTURES if market == "futures" else _BINANCE_SPOT)
+        # Primär wird derselbe ExchangeInfo-Katalog wie bei der verbindlichen
+        # Validierung genutzt. Ist Binance gerade nicht erreichbar, bleibt nur
+        # die UI mit konservativen Vorschlägen bedienbar; beim Speichern gibt es
+        # weiterhin ausdrücklich keinen Fallback und damit kein Schönrechnen.
+        try:
+            return _provider_symbols(BinancePublicSymbolCatalog(market))
+        except MarketDataConnectionError:
+            return set(
+                _BINANCE_FUTURES_FALLBACK if market == "futures" else _BINANCE_SPOT_FALLBACK
+            )
     if exchange_id == "bitmart":
         if market != "spot":
             return set()
