@@ -26,5 +26,5 @@ USE_DIRECT_DATABASE_URL=True python manage.py wait_for_database || {
 log "Fuehre Migrationen aus..."
 USE_DIRECT_DATABASE_URL=True python manage.py migrate --noinput
 
-log "Starte Daphne auf Port ${PORT:-8000}..."
-exec daphne -b 0.0.0.0 -p "${PORT:-8000}" trading_bot_project.asgi:application
+log "Starte Daphne auf Port ${PORT:-8369}..."
+exec daphne -b 0.0.0.0 -p "${PORT:-8369}" trading_bot_project.asgi:application

@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.3.1 · Stand 22. August 2026**
+**Version 2.4.0 · Stand 23. August 2026**
 
 [TOC]
 
@@ -239,9 +239,37 @@ Das Backtesting-Modul optimiert die drei Kaufschwellen über konfigurierbare Suc
 
 Für jedes Symbol wird das threshold-Set ermittelt, welches das höchste Endkapital erzielt, und im Report übersichtlich dargestellt.
 
+### Templates, Hardwarebudget und Laufzeit
+
+Das Formular bietet die Templates **Schnellprüfung**, **Ausgewogen** und
+**Feinoptimierung**. Sie füllen nur den neuen Auftrag relativ zu den aktuellen
+Schwellen; die Live-Konfiguration wird nicht geändert. Die Felder
+`Maximale historische Preispunkte`, `Maximale Rasterpunkte je Parameter` und
+`Maximale Kombinationen (Hard-Limit)` sind frei kontrollierbar, werden aber
+durch die erkannten CPU-, RAM- und
+Speicherressourcen begrenzt. Der Worker prüft dieses Hard-Limit ein zweites
+Mal. `BACKTEST_MAX_COMBINATIONS` und `BACKTEST_MAX_PRICE_POINTS` erlauben dem
+Administrator, die absoluten Obergrenzen weiter zu reduzieren.
+
+Die Seite zeigt eine grobe Laufzeit aus Symbolanzahl, Raster, Preispunkten und
+CPU-Profil. Sie ist ausdrücklich nur eine Schätzung. `/api/resources/` liefert
+den zugrunde liegenden Snapshot; Docker berücksichtigt cgroup-Limits statt
+blind die Hostressourcen zu verwenden. Eine ausführliche Erklärung steht in
+der Repository-Datei `docs/backtesting.md`; die App-Hilfe enthält die
+wesentlichen Erläuterungen ebenfalls in diesem Abschnitt.
+
 ### Isolation und Ressourcenschonung
 
-Auf Render Free ist die Backtest-Ausführung zum Schutz des Trading-Bots deaktiviert. Produktiv wird `REDIS_URL` mit einem separaten Celery-Worker genutzt. Lokal kann der serielle Fallback verwendet werden. Preispunkte und Rastergrößen werden überwacht (maximal 20.000 Kombinationen), um Überlastung zu verhindern.
+Auf Render Free ist die Backtest-Ausführung zum Schutz des Trading-Bots deaktiviert. Produktiv wird `REDIS_URL` mit einem separaten Celery-Worker genutzt. Lokal kann der serielle Fallback verwendet werden. Preispunkte und Rastergrößen werden überwacht, um Überlastung zu verhindern. Die effektive Obergrenze ist hardwareabhängig und standardmäßig höchstens 20.000 Kombinationen.
+
+### Top-Gainer-/Loser-Konfiguration
+
+Das Konfigurationsformular kann pro Exchange bis zu fünf qualifizierte Gainer und
+Loser vorschlagen. Der öffentliche Scanner filtert 24-Stunden-Ausschläge über
+10 %, Volumenspitzen, mindestens 10 % Tagesvolumen/Marktkapitalisierung,
+Orderbuch-Tiefe und eine konservative Utility-Allowlist. Fehlende Daten führen
+zum Ausschluss. Das Ergebnis ist keine Anlageempfehlung; volatile Märkte
+benötigen ein begrenztes Risiko und eine passende Stop-Loss-Order.
 
 ## 12. Fehler-Log und Betrieb
 

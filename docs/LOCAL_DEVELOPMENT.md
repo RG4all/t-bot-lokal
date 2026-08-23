@@ -3,7 +3,7 @@
 ## 1. Voraussetzungen und automatische Installation
 
 - mindestens 2 GB RAM
-- freie TCP-Ports 8000 (Web) und interne Docker-Netze
+- freier TCP-Port 8369 (Web) und interne Docker-Netze
 - Linux mit apt, pacman, dnf/yum, zypper oder apk; macOS/Windows verwenden Docker Desktop
 
 Linux-Komplettsetup:
@@ -56,19 +56,15 @@ und der App fuehrt der One-Shot-`tuner`-Service `hardware-test.sh` aus und
 schreibt eine automatisch an die Host-Ressourcen angepasste `tuning.env` in
 ein gemeinsam genutztes Volume. Redis startet daraufhin mit berechneten
 Werten fuer `maxmemory`, `maxmemory-policy` und `io-threads`; Web, Worker
-und Beat uebernehmen die empfohlenen Werte fuer Worker-Threads,
+und Beat übernehmen die empfohlenen Werte fuer Worker-Threads,
 Connection-Pools und Speicher-Limits.
-Mindestens `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` ändern. `.env.local` ist durch `.gitignore` ausgeschlossen.
+`SECRET_KEY` und `POSTGRES_PASSWORD` sollten vor einer lokalen Teamnutzung geändert werden. `PASSPHRASE` wird nur benötigt, wenn das optionale Gate aktiviert wird. `.env.local` ist durch `.gitignore` ausgeschlossen.
 
 Services:
 
 | Service | Aufgabe | Grenze |
 |---|---|---|
 | `tuner` | One-Shot: Hardware-Analyse und Tuning-Datei generieren | kurzlebig |
-| `web` | Django, Daphne, WebSockets, TradingBot | 512 MB, standardmaeßig 0,5 CPU |
-| `backtest-worker` | ausschließlich Queue `backtest` | 512-MB-Container, 384-MB-Celery-Child, Concurrency 1 |
-| `redis` | Broker/Result Backend | 64 MB, keine Persistenz fuer lokale Entwicklung |
-| `postgres` | lokale persistente DB | 256 MB |
 | `web` | Django, Daphne, WebSockets, TradingBot | hardwareabhängige CPU/RAM-Cgroup |
 | `backtest-worker` | ausschließlich Queue `backtest` | eigene Cgroup, 384-MB-Celery-Child, Concurrency 1 |
 | `redis` | Broker/Result Backend | hardwareabhängiges Maxmemory, keine lokale Persistenz |
@@ -87,7 +83,7 @@ Status prüfen:
 ```bash
 docker compose ps
 docker compose logs -f web backtest-worker
-curl http://localhost:8000/health/
+curl http://localhost:8369/health/
 docker compose exec backtest-worker celery -A trading_bot_project inspect ping --timeout 3
 ```
 
@@ -97,7 +93,7 @@ Admin anlegen:
 docker compose exec web python manage.py createsuperuser
 ```
 
-Anwendung: <http://localhost:8000/>
+Anwendung: <http://localhost:8369/>
 
 ## 4. Render-Free-CPU lokal simulieren
 

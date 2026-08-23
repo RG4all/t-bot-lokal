@@ -31,15 +31,15 @@ fi
 # Globals / Defaults
 # ---------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_NAME SCRIPT_DIR
+INSTALL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_NAME INSTALL_SCRIPT_DIR
 
 MODE="auto"
 ASSUME_YES=0
 INSTALL_REDIS=1
 RENDER_SIMULATION=0
 PROFILE="full"          # full | runtime
-CONFIG_DIR="${SCRIPT_DIR}/config"
+CONFIG_DIR="${INSTALL_SCRIPT_DIR}/config"
 CONFIG_FILE=""
 
 # Erkannte Werte (werden von detect_distro gesetzt)
@@ -169,6 +169,10 @@ detect_distro() {
   local id="" id_like="" name="" version=""
 
   if [[ -r "${os_release}" ]]; then
+    # os-release ist eine Shell-Datei. Vor dem Einlesen alte globale Werte
+    # löschen, sonst vererbt ein vorheriger Fixture-/Distro-Aufruf ID und
+    # VERSION_ID an den nächsten Aufruf.
+    unset ID ID_LIKE PRETTY_NAME NAME VERSION_ID || true
     # shellcheck disable=SC1090
     . "${os_release}" 2>/dev/null || true
     id="${ID:-}"
@@ -481,17 +485,17 @@ install_dependencies() {
 # ---------------------------------------------------------------------------
 install_python_requirements() {
   [[ "${MODE}" == "container" ]] && return 0
-  [[ -f "${SCRIPT_DIR}/requirements.txt" ]] || { log_warn "keine requirements.txt gefunden"; return 0; }
+  [[ -f "${INSTALL_SCRIPT_DIR}/requirements.txt" ]] || { log_warn "keine requirements.txt gefunden"; return 0; }
 
   log_step "Python-Abhaengigkeiten"
-  if [[ ! -d "${SCRIPT_DIR}/.venv" ]]; then
+  if [[ ! -d "${INSTALL_SCRIPT_DIR}/.venv" ]]; then
     log_info "Erstelle virtuelle Umgebung in .venv/"
-    run_logged python3 -m venv "${SCRIPT_DIR}/.venv"
+    run_logged python3 -m venv "${INSTALL_SCRIPT_DIR}/.venv"
   fi
   # shellcheck disable=SC1091
-  source "${SCRIPT_DIR}/.venv/bin/activate"
+  source "${INSTALL_SCRIPT_DIR}/.venv/bin/activate"
   run_logged python -m pip install --upgrade pip
-  run_logged pip install -r "${SCRIPT_DIR}/requirements.txt"
+  run_logged pip install -r "${INSTALL_SCRIPT_DIR}/requirements.txt"
   deactivate
   log_info "Python-Abhaengigkeiten in .venv installiert."
 }

@@ -5,13 +5,18 @@ x-app-environment: &app-environment
   RENDER: "False"
   SECRET_KEY: ${SECRET_KEY:-django-insecure-local-compose-only}
   PASSPHRASE: ${PASSPHRASE:-local-t-bot}
-  PASSPHRASE_GATE_ENABLED: ${PASSPHRASE_GATE_ENABLED:-True}
+  # Der lokale Compose-Stack benötigt standardmäßig weder Gate noch Passwort.
+  # In einer geschützten Umgebung explizit PASSPHRASE_GATE_ENABLED=True setzen.
+  PASSPHRASE_GATE_ENABLED: ${PASSPHRASE_GATE_ENABLED:-False}
   DATABASE_URL: postgresql://${POSTGRES_USER:-tbot}:${POSTGRES_PASSWORD:-tbot-local-password}@postgres:5432/${POSTGRES_DB:-tbot}
   DATABASE_SSL_REQUIRE: "False"
   REDIS_URL: redis://redis:6379/0
   BACKTEST_LOCAL_FALLBACK_ENABLED: "True"
   AUTOSTART_BOTS: ${AUTOSTART_BOTS:-True}
   CELERY_WORKER_MAX_MEMORY_PER_CHILD: "384000"
+  BACKTEST_MAX_COMBINATIONS: ${BACKTEST_MAX_COMBINATIONS:-20000}
+  BACKTEST_MAX_PRICE_POINTS: ${BACKTEST_MAX_PRICE_POINTS:-5000}
+  BACKTEST_DEFAULT_PRICE_POINTS: ${BACKTEST_DEFAULT_PRICE_POINTS:-5000}
 
 # Gemeinsam genutzter Ordner fuer die vom `tuner`-Container generierte
 # Hardware-Optimierungsdatei. Wird von allen App-Containern gemountet.
@@ -96,9 +101,9 @@ services:
     init: true
     environment:
       <<: *app-environment
-      PORT: "8000"
+      PORT: "8369"
     ports:
-      - "${WEB_PORT:-8000}:8000"
+      - "${WEB_PORT:-8369}:8369"
     volumes: *tuning-volume
     depends_on:
       tuner:
@@ -108,13 +113,13 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/', timeout=2)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8369/health/', timeout=2)"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 30s
       start_interval: 2s
-    mem_limit: 512m
+    mem_limit: ${WEB_MEMORY:-512m}
     cpus: "${WEB_CPUS:-0.50}"
     restart: unless-stopped
 
@@ -146,7 +151,7 @@ services:
       retries: 12
       start_period: 45s
       start_interval: 5s
-    mem_limit: 512m
+    mem_limit: ${WORKER_MEMORY:-512m}
     cpus: "${WORKER_CPUS:-0.50}"
     pids_limit: 64
     restart: unless-stopped
@@ -169,7 +174,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    mem_limit: 192m
+    mem_limit: ${SCHEDULER_MEMORY:-192m}
     cpus: "${SCHEDULER_CPUS:-0.20}"
     restart: unless-stopped
 

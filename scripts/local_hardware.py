@@ -57,6 +57,14 @@ class LocalProfile:
             "REDIS_MAXMEMORY": values["redis_maxmemory"],
             "POSTGRES_SHARED_BUFFERS": values["postgres_shared_buffers"],
             "POSTGRES_EFFECTIVE_CACHE_SIZE": values["postgres_effective_cache_size"],
+            "BACKTEST_MAX_COMBINATIONS": str(
+                20_000
+                if values["worker_memory"].rstrip("m") not in {"512", "768"}
+                else 12_000
+                if values["worker_memory"].rstrip("m") == "768"
+                else 5_000
+            ),
+            "BACKTEST_MAX_PRICE_POINTS": str(values["backtest_default_price_points"]),
             "BACKTEST_DEFAULT_PRICE_POINTS": str(values["backtest_default_price_points"]),
             "DATA_LOG_WRITE_INTERVAL_SECONDS": str(values["data_log_write_interval_seconds"]),
             "CELERY_WORKER_MAX_MEMORY_PER_CHILD": "384000",
