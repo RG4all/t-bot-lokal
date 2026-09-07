@@ -3,8 +3,8 @@ Tests für die CSRF-Cookie-Härtung (CSRF_COOKIE_HTTPONLY).
 
 Stellt sicher, dass das CSRF-Token-Cookie mit dem HttpOnly-Flag gekennzeichnet
 ist und damit nicht über JavaScript (``document.cookie``) ausgelesen werden
-kann. Bei einem XSS-Angriff könnte ein Angreifer andernfalls das Token stehlen
-und den CSRF-Schutz umgehen.
+kann. Dies ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz:
+Skripte derselben Origin können das Token weiterhin aus dem DOM lesen.
 
 Django liest das Cookie serverseitig aus; die Templates liefern das Token
 unabhängig davon über ``{% csrf_token %}`` (verstecktes Formularfeld bzw.
@@ -18,6 +18,7 @@ Basierend auf ARENA_AI_PROMPTS.md Prompt 5 und SECURITY_AUDIT.md Abschnitt 2.5.
 """
 
 import os
+import re
 import runpy
 from pathlib import Path
 from unittest.mock import patch
@@ -67,9 +68,12 @@ class CsrfCookieSettingsTest(TestCase):
         Block vergraben sein.
         """
         for debug in ("True", "False"):
-            with self.subTest(debug=debug):
-                module = load_settings_module(DEBUG=debug, PASSPHRASE="csrf-test-passphrase")
-                self.assertIs(module["CSRF_COOKIE_HTTPONLY"], True)
+            for render in ("True", "False"):
+                with self.subTest(debug=debug, render=render):
+                    module = load_settings_module(
+                        DEBUG=debug, RENDER=render, PASSPHRASE="csrf-test-passphrase"
+                    )
+                    self.assertIs(module["CSRF_COOKIE_HTTPONLY"], True)
 
 
 @override_settings(
@@ -103,7 +107,7 @@ class CsrfCookieIntegrationTest(TestCase):
             "/gate/",
             {
                 "passphrase": "csrf-cookie-test-only",
-                "csrfmiddlewaretoken": gate_page.cookies["csrftoken"].value,
+                "csrfmiddlewaretoken": self._csrf_form_token(gate_page),
             },
         )
         self.assertEqual(gate_response.status_code, 302)
@@ -111,6 +115,15 @@ class CsrfCookieIntegrationTest(TestCase):
         response = self.client.get("/login/")
         self.assertEqual(response.status_code, 200)
         return response
+
+    def _csrf_form_token(self, response):
+        """Den maskierten DOM-Token lesen, genau wie die eigenen App-Skripte."""
+        match = re.search(
+            r'name="csrfmiddlewaretoken" value="([a-zA-Z0-9]+)"',
+            response.content.decode(),
+        )
+        self.assertIsNotNone(match, "CSRF-Formularfeld fehlt.")
+        return match.group(1)
 
     def _csrf_cookie_line(self, response):
         """Liefert die exakte Set-Cookie-Zeile für csrftoken, wie sie Django
@@ -127,7 +140,8 @@ class CsrfCookieIntegrationTest(TestCase):
 
         Angriffsszenario: Ein XSS-Skript ruft document.cookie auf. Mit dem
         HttpOnly-Flag ist das csrftoken dort nicht enthalten und kann nicht
-        an einen Angreifer exfiltriert werden.
+        über diesen Cookie-Zugriff ausgelesen werden. Das DOM-Token bleibt
+        für JavaScript sichtbar; HttpOnly verhindert keine XSS-Angriffe.
         """
         response = self._open_login_page()
         self.assertIn("csrftoken", response.cookies)
@@ -164,7 +178,8 @@ class CsrfCookieIntegrationTest(TestCase):
         document.cookie) wird akzeptiert und die Anmeldung gelingt."""
         User.objects.create_user(username="csrf-user", password="S3cure-Passwort!x")
         response = self._open_login_page()
-        token = response.cookies["csrftoken"].value
+        token = self._csrf_form_token(response)
+        self.assertNotEqual(token, self.client.cookies["csrftoken"].value)
         response = self.client.post(
             "/login/",
             {"username": "csrf-user", "password": "S3cure-Passwort!x", "csrfmiddlewaretoken": token},
@@ -172,3 +187,52 @@ class CsrfCookieIntegrationTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("dashboard", response["Location"])
         self.assertTrue(response.wsgi_request.user.is_authenticated)
+
+    def test_cookie_flags_with_loaded_local_and_production_settings(self):
+        for debug, render in (("True", "False"), ("False", "False"), ("False", "True")):
+            module = load_settings_module(
+                DEBUG=debug, RENDER=render, PASSPHRASE="csrf-test-passphrase"
+            )
+            cookie_settings = {
+                name: module[name]
+                for name in (
+                    "DEBUG", "CSRF_COOKIE_HTTPONLY", "CSRF_COOKIE_SECURE", "SECURE_SSL_REDIRECT"
+                )
+            }
+            with self.subTest(debug=debug, render=render), override_settings(**cookie_settings):
+                response = Client(enforce_csrf_checks=True).get("/gate/", secure=True)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.cookies["csrftoken"]["httponly"])
+                self.assertEqual(bool(response.cookies["csrftoken"]["secure"]), debug == "False")
+                self.assertIn("HttpOnly", self._csrf_cookie_line(response))
+
+    def test_valid_form_token_does_not_allow_untrusted_origin(self):
+        response = self._open_login_page()
+        response = self.client.post(
+            "/login/",
+            {"csrfmiddlewaretoken": self._csrf_form_token(response)},
+            HTTP_ORIGIN="https://untrusted.invalid",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_token_from_another_client_is_rejected(self):
+        self._open_login_page()
+        other_page = Client(enforce_csrf_checks=True).get("/gate/")
+        self.assertNotEqual(
+            self.client.cookies["csrftoken"].value, other_page.cookies["csrftoken"].value
+        )
+        response = self.client.post(
+            "/login/", {"csrfmiddlewaretoken": self._csrf_form_token(other_page)}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_form_token_without_corresponding_cookie_is_rejected(self):
+        page = self.client.get("/gate/")
+        response = Client(enforce_csrf_checks=True).post(
+            "/gate/",
+            {
+                "passphrase": "csrf-cookie-test-only",
+                "csrfmiddlewaretoken": self._csrf_form_token(page),
+            },
+        )
+        self.assertEqual(response.status_code, 403)

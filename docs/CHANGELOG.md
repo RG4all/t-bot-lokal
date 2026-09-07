@@ -2,11 +2,32 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.6] – 2026-09-07
+
+### Sicherheit
+
+- **SEC-06 – nosniff explizit aktiviert:** `SECURE_CONTENT_TYPE_NOSNIFF = True` in `trading_bot_project/settings.py` gilt unabhängig von DEBUG/Render. Die bereits an erster Stelle registrierte `SecurityMiddleware` setzt `X-Content-Type-Options: nosniff` auch auf Fehlerantworten, Redirects, Downloads und WhiteNoise-Antworten. Der Header schützt vor unerwünschter MIME-Typ-Interpretation, insbesondere bei Skript-/Stylesheet-Ressourcen.
+- **Präzisierung des Vorzustands:** Django 5.2.17 aktivierte nosniff bereits per Default. Behoben ist die fehlende explizite Projektkonfiguration, nicht ein nachgewiesener fehlender Header im bisherigen Standard-Stack. Keine neue Runtime-Abhängigkeit und keine API-/Datenbankänderung.
+- **SEC-05 nachgeprüft:** `CSRF_COOKIE_HTTPONLY = True` bleibt seit 2.4.5 aktiv. Login-Tests lesen jetzt tatsächlich den maskierten Token aus dem Formularfeld statt aus dem Cookie. Kommentare und Dokumentation grenzen den Schutz korrekt ab: HttpOnly verhindert das Lesen des Cookies, nicht das Lesen des DOM-Tokens bei XSS.
+
+### Tests
+
+- 10 neue nosniff-Tests: explizite Settings in der DEBUG-/Render-Matrix, Middleware-Reihenfolge, synchrone/asynchrone Responses, HTML/JSON, 301/302/304 sowie 400/403/404/405/429/500/503, nicht ausführbare MIME-Typen trotz aktiver Inhaltssyntax und manipulierter Request-Header, Streaming und WhiteNoise GET/HEAD/Cache-Antworten.
+- SEC-05 auf 11 Tests erweitert: Cookie-Flags aus real geladenen lokalen/Produktions-Settings, echter Formular-Token-Login, Ablehnung fremder Origins, fremder Tokens und fehlender Cookies.
+- Rot → grün: Ohne explizite nosniff-Einstellung scheitert die neue Settings-Matrix in allen vier Kombinationen; Response-Tests waren dank Django-Default schon grün. Zusätzliche Testprozess-Mutationen mit deaktiviertem nosniff bzw. HttpOnly werden erkannt.
+- Lokale Validierung: 154 Django-/Python-Tests und 7/7 Shell-Testgruppen bestanden; Ruff, ShellCheck, Produktions-Deploy-Checks, Migrationsprüfung, `collectstatic` und `pip check` erfolgreich. Kein neuer GitHub-Actions-Testworkflow eingeführt; Docker-/PDF-Laufzeitprüfungen bleiben außerhalb des lokalen Nachweises.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.6** erhöht; aktuelle Versionsangaben und Sicherheitsabschnitte in beiden READMEs, Handbuch und lokaler Anleitung aktualisiert. `pyproject.toml` enthält nur Ruff-Konfiguration, keine separate Paketversion.
+- Audit §2.6 und Prompt 6 als **Fixed** dokumentiert; [Finding-Nachweis mit Fix-Commit und SEC-05-Nachprüfung](SEC-06-rule-lifecycle-authz.md) ergänzt. Der vorgegebene Finding-Dateiname wird dort ausdrücklich dem nosniff-Finding zugeordnet, nicht einem anderen Autorisierungsbefund.
+- Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Nach dem Deploy den Header auch über den tatsächlichen Reverse-Proxy/CDN prüfen; außerhalb von Django erzeugte Antworten benötigen dort eine entsprechende Header-Konfiguration.
+
 ## [2.4.5] – 2026-09-07
 
 ### Sicherheit
 
-- **CSRF-Cookie mit HttpOnly:** `CSRF_COOKIE_HTTPONLY = True` in `trading_bot_project/settings.py` (nach der Session-Cookie-Konfiguration). Das `csrftoken`-Cookie wird seither mit dem `HttpOnly`-Flag gesetzt und ist damit nicht mehr über JavaScript (`document.cookie`) lesbar; bei einem XSS-Angriff lässt sich das CSRF-Token nicht mehr exfiltrieren. Die Einstellung ist bewusst unabhängig vom `DEBUG`-Modus aktiv, da `HttpOnly` auch über plain HTTP unproblematisch ist und in Produktion `CSRF_COOKIE_SECURE` ergänzend gilt.
+- **CSRF-Cookie mit HttpOnly:** `CSRF_COOKIE_HTTPONLY = True` in `trading_bot_project/settings.py` (nach der Session-Cookie-Konfiguration). Das `csrftoken`-Cookie wird seither mit dem `HttpOnly`-Flag gesetzt und ist damit nicht mehr über JavaScript (`document.cookie`) lesbar. Präzisierung aus der Nachprüfung 2.4.6: Das verhindert nur den Cookie-Zugriff; bei XSS bleibt das DOM-Token zugänglich. Die Einstellung ist bewusst unabhängig vom `DEBUG`-Modus aktiv, da `HttpOnly` auch über plain HTTP unproblematisch ist und in Produktion `CSRF_COOKIE_SECURE` ergänzend gilt.
 - **Kein Funktionsverlust:** Django liest das Cookie serverseitig aus; die Templates liefern das Token über `{% csrf_token %}` als verstecktes Formularfeld an. Die eigenen App-Skripte (z. B. Dashboard-Actions) lesen das Token aus dem Formularfeld und sind nicht betroffen. CSRF-Prüfung und Login-Fluss bleiben unverändert wirksam.
 
 ### Tests

@@ -161,6 +161,10 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
+# MIME-Sniffing auch bei lokalem HTTP verhindern. Bewusst explizit und
+# DEBUG-unabhängig; SecurityMiddleware erfasst auch Fehler und WhiteNoise-Antworten.
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
 # ---------------------------------------------------------------------------
 # Content-Security-Policy (CSP) – schützt vor XSS-Angriffen
 # ---------------------------------------------------------------------------
@@ -194,10 +198,10 @@ SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
 SESSION_COOKIE_AGE = 60 * 60 * 12
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-# CSRF-Token nicht über JavaScript (document.cookie) lesbar machen: Bei XSS
-# darf ein Angreifer das Token nicht exfiltrieren können. Django liest das
-# Cookie serverseitig aus; die Templates liefern es per {% csrf_token %} als
-# verstecktes Formularfeld, die eigenen Skripte brauchen keinen Cookie-Zugriff.
+# CSRF-Cookie nicht über JavaScript (document.cookie) lesbar machen. Django
+# liest es serverseitig; Templates und eigene Skripte nutzen {% csrf_token %}
+# im Formularfeld statt Cookie-Zugriff. Zusätzliche Härtung, kein XSS-Schutz:
+# Im DOM bleibt das Token für Skripte derselben Origin zugänglich.
 # Bewusst nicht in den nicht-DEBUG-Block: HttpOnly funktioniert auch über
 # plain HTTP und gehört in allen Umgebungen aktiviert.
 CSRF_COOKIE_HTTPONLY = True

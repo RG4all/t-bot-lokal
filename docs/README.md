@@ -4,7 +4,7 @@ Django-/Channels-Anwendung für **Paper Trading**, Marktvisualisierung und param
 
 Binance-Kurse laufen über einen persistenten kombinierten WebSocket-Stream (kein REST-Polling/Request-Weight). BitMart Spot nutzt die aktuelle V3-Public-API; Bitunix Spot/Futures ist über öffentliche, defensiv gedrosselte Adapter integriert. Beim Speichern und Aktivieren werden alle Symbole live geprüft. Das Dashboard bietet paginierte Logs, PDF/HTML/CSV-Reports und einen doppelt bestätigten Kill-Switch.
 
-Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: **2.4.5** ([`VERSION`](../VERSION)). Security-Review mit Befunden und Prüfgrenzen: [`SECURITY_REVIEW_2.4.4.md`](SECURITY_REVIEW_2.4.4.md).
+Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: **2.4.6** ([`VERSION`](../VERSION)). Security-Review mit Befunden und Prüfgrenzen: [`SECURITY_REVIEW_2.4.4.md`](SECURITY_REVIEW_2.4.4.md).
 
 ## Docker Compose (empfohlen)
 
@@ -111,6 +111,8 @@ Das Setup speichert neue App-Secrets in `.env.local` statt sie zu loggen; besteh
 
 ## Qualitätssicherung
 
+Für Release 2.4.6 wurden die folgenden QA-Kommandos lokal ausgeführt. Im Repository ist derzeit kein GitHub-Actions-Testworkflow versioniert; automatische Dependency-Graph-Läufe sind kein Nachweis für Anwendungstests. Die Grenzen der lokalen Prüfung stehen im [Security-Nachweis](SEC-06-rule-lifecycle-authz.md).
+
 ```bash
 # Shell-Skripte linten und Test-Suite ausfuehren
 shellcheck install.sh hardware-test.sh docker-entrypoint.sh docker/*.sh scripts/*.sh tests/*.sh
@@ -125,6 +127,8 @@ ruff check .
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test --noinput
+# Gezielte Security-Regressionen (nosniff und CSRF-Cookie):
+python manage.py test trading.tests.test_content_type_nosniff trading.tests.test_csrf_cookie --noinput
 python manage.py collectstatic --noinput
 python -m pip check
 pip-audit -r requirements.txt   # wenn pip-audit installiert ist
@@ -162,8 +166,9 @@ pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 - In Produktion (`DEBUG=False` oder Render) sind `SECRET_KEY`, `PASSPHRASE` und ein aktiver Gate Pflicht. `DEBUG=True` ohne Render ist ausdrücklich ein lokaler Entwicklungsmodus, keine automatische Erkennung einer sicheren Deployment-Umgebung.
 - Zustandsändernde Endpunkte akzeptieren nur POST und sind CSRF-geschützt.
 - **Auth-Endpunkte** (Login, Passphrase-Gate, Registrierung, Admin-Login) teilen ein IP-basiertes **Rate-Limit** von 5 POSTs / 15 min / Prozess, einschließlich erfolgreicher POSTs. Reservierung und Prüfung sind atomar; der Speicher ist begrenzt. Proxy-Header werden nur über eine explizite Allowlist vertraut.
-- Die Anwendung setzt eine **Content-Security-Policy (CSP)** für lokale Ressourcen; nur mit einer frischen Request-Nonce markierte Template-Skripte dürfen inline laufen. Kein `unsafe-inline` für Skripte. `X-Content-Type-Options: nosniff` bleibt aktiv.
-- **Session- und CSRF-Cookie sind `HttpOnly`** (CSRF-Cookie seit 2.4.5): Das CSRF-Token ist über JavaScript (`document.cookie`) nicht lesbar und kann bei XSS nicht exfiltriert werden. Django liest das Cookie serverseitig; Templates liefern das Token über `{% csrf_token %}` als verstecktes Formularfeld. In Produktion gilt zusätzlich `CSRF_COOKIE_SECURE`.
+- Die Anwendung setzt eine **Content-Security-Policy (CSP)** für lokale Ressourcen; nur mit einer frischen Request-Nonce markierte Template-Skripte dürfen inline laufen. Kein `unsafe-inline` für Skripte.
+- **`X-Content-Type-Options: nosniff`** ist ab 2.4.6 mit `SECURE_CONTENT_TYPE_NOSNIFF = True` explizit und DEBUG-/Render-unabhängig konfiguriert. `SecurityMiddleware` bleibt an erster Stelle und erfasst auch Fehler, Redirects, Downloads und WhiteNoise-Antworten. Django 5.2 setzte den Header schon zuvor per Default; der Patch macht die Härtung explizit und regressionsgesichert. Details: [SEC-06 und SEC-05-Nachprüfung](SEC-06-rule-lifecycle-authz.md).
+- **Session- und CSRF-Cookie sind `HttpOnly`** (CSRF-Cookie seit 2.4.5, nachgeprüft in 2.4.6): Die Cookies sind nicht über `document.cookie` lesbar. Django liest das CSRF-Cookie serverseitig; Templates liefern das Token über `{% csrf_token %}` als verstecktes Formularfeld. Dieses DOM-Token bleibt für Skripte derselben Origin zugänglich: `HttpOnly` ist kein allgemeiner XSS-Schutz und ersetzt weder CSP noch CSRF-/Origin-Prüfungen. In Produktion gilt zusätzlich `CSRF_COOKIE_SECURE`.
 - `ALLOWED_HOSTS` enthält keinen Wildcard-Eintrag – auch im DEBUG-Modus werden nur explizite lokale Hosts akzeptiert (Schutz gegen Host-Header-Injection).
 - Konfigurationen, Logs, Backtests, PDFs und WebSockets sind benutzerbezogen autorisiert. Gate-Freigaben sind HMAC-gebunden an die aktuelle Passphrase und den privaten Signierschlüssel; alte boolesche Gate-Cookies werden beim Upgrade abgelehnt. WebSockets prüfen bei Verbindungsaufbau sowohl Gate als auch Eigentümerschaft.
 - API-Schlüssel werden **niemals** in der Datenbank gespeichert. Sie werden beim Container-Start als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) injiziert und existieren nur im Arbeitsspeicher des laufenden Prozesses. Für Live-Handel Umgebungsvariablen in `docker-compose.yml` oder über Render Secrets setzen.

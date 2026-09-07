@@ -6,7 +6,7 @@
 
 ---
 
-> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.5 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
+> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.6 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
 
 ## 1. Executive Summary
 
@@ -156,52 +156,35 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – behoben in 2.4.5
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, nachgeprüft in 2.4.6
 
-**Datei:** `trading_bot_project/settings.py` (Zeilen 162–163)
+**Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
-```python
-SESSION_COOKIE_HTTPONLY = True  # ← Gut!
-SESSION_COOKIE_SAMESITE = "Lax"  # ← Gut, aber kein CSRF_COOKIE_HTTPONLY
-```
+**Vorzustand:** Das Projekt hatte nur `SESSION_COOKIE_HTTPONLY = True` gesetzt; das CSRF-Cookie war wegen Djangos `CSRF_COOKIE_HTTPONLY = False` über `document.cookie` lesbar.
 
-**Fehlend:**
-```python
-CSRF_COOKIE_HTTPONLY = True  # ← FEHLT
-```
+**Umgesetzt:** `CSRF_COOKIE_HTTPONLY = True` steht unabhängig vom DEBUG-Modus nach der Session-Cookie-Konfiguration. In Produktion ergänzt `CSRF_COOKIE_SECURE` das Flag. Die App-Skripte lesen das Token aus dem `{% csrf_token %}`-Formularfeld und benötigen keinen Cookie-Zugriff.
 
-**Auswirkung:** Das CSRF-Token ist über JavaScript lesbar (`document.cookie`), was bei XSS-Anfällen die CSRF-Schutzmaßnahme umgehen kann.
+**Korrektur der Risikobeschreibung:** HttpOnly verhindert nur den direkten Zugriff auf das Cookie. Skripte derselben Origin können weiterhin das DOM-Token lesen und authentifizierte Requests ausführen; der Fix ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz oder Ersatz für CSP/CSRF-Prüfungen.
 
-**Lösungsvorschlag:**
-
-```python
-CSRF_COOKIE_HTTPONLY = True
-```
-
-**Umgesetzt in 2.4.5:** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` direkt nach der Session-Cookie-Konfiguration und ist bewusst unabhängig vom `DEBUG`-Modus aktiv (HttpOnly ist auch über plain HTTP unproblematisch; in Produktion ergänzt `CSRF_COOKIE_SECURE` das Flag). Das `csrftoken`-Cookie wird seither mit `HttpOnly` gesetzt und ist nicht mehr über `document.cookie` lesbar. Die eigenen App-Skripte sind nicht betroffen, da sie das Token aus dem `{% csrf_token %}`-Formularfeld beziehen. Regressionsschutz: `trading/tests/test_csrf_cookie.py` (7 Tests, inkl. Draht-Prüfung und echtem CSRF-Fluss mit `enforce_csrf_checks=True`).
+**Nachprüfung 2.4.6:** `trading/tests/test_csrf_cookie.py` enthält jetzt 11 Tests. Der erfolgreiche Login verwendet tatsächlich den maskierten Formular-Token. Produktions-/Render-Cookie-Flags, fehlende Tokens/Cookies, Tokens anderer Clients und fremde Origins sind geprüft. Eine Testprozess-Mutation mit `CSRF_COOKIE_HTTPONLY=False` wird erkannt. Siehe [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
 
 ---
 
-### 2.6 MITTEL – Kein `X-Content-Type-Options: nosniff`-Header
+### 2.6 X-Content-Type-Options: nosniff – Fixed in 2.4.6
 
-**Datei:** `trading_bot_project/settings.py`
+**Datei:** `trading_bot_project/settings.py` · **Status:** Fixed (explizite Härtung)
 
-Es fehlt explizite Konfiguration für Security-Header, die von Django nicht standardmäßig gesetzt werden:
+**Korrigierte Bewertung:** Die ursprüngliche Aussage, `SECURE_CONTENT_TYPE_NOSNIFF` müsse in Django 5.2 erst aktiviert werden, war falsch: Das gepinnte Django 5.2.17 verwendet bereits `True` als Default, und die vorhandene `SecurityMiddleware` lieferte den Header im Standard-Stack schon aus. Bestätigt war die fehlende **explizite** Projektkonfiguration. Ein vorher fehlender Response-Header bzw. ein konkreter MIME-Sniffing-Exploit ist dadurch nicht belegt.
 
-```python
-# Fehlende Security-Header:
-SECURE_CONTENT_TYPE_NOSNIFF = True
-X_FRAME_OPTIONS = "DENY"
-```
-
-Hinweis: Django setzt `X-Frame-Options: DENY` standardmäßig über `XFrameOptionsMiddleware`, aber `SECURE_CONTENT_TYPE_NOSNIFF` muss explizit aktiviert werden.
-
-**Lösungsvorschlag:**
+**Umgesetzt:** Nach dem umgebungsabhängigen Security-Block steht jetzt ausdrücklich:
 
 ```python
-# settings.py (nach Security-Header-Block)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 ```
+
+Die Einstellung ist DEBUG-/Render-unabhängig. `SecurityMiddleware` bleibt an erster Stelle, sodass auch Fehler, Redirects, Downloads und WhiteNoise-Antworten erfasst werden. `X_FRAME_OPTIONS` bleibt unverändert beim vorhandenen Django-Default `DENY`; zusätzliche Middleware ist nicht erforderlich.
+
+**Nachweis:** 10 Regressionstests in `trading/tests/test_content_type_nosniff.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. Eine bewusste Deaktivierung im Testprozess lässt die Header-Prüfungen scheitern. [Finding mit Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](SEC-06-rule-lifecycle-authz.md).
 
 ---
 
@@ -679,7 +662,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [ ] Docker-Passwörter ohne Defaults
 - [ ] Session-Invalidate bei Passwort-Änderung
 - [ ] HSTS-Header für Produktion korrekt
-- [ ] X-Content-Type-Options: nosniff
+- [x] X-Content-Type-Options: nosniff – explizit ab 2.4.6, siehe §2.6
 
 ### Code-Qualität
 
