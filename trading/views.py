@@ -308,6 +308,13 @@ def login_view(request):
 @require_POST
 def logout_view(request):
     logout(request)
+    # Explizite Session-Invalidierung: leert alle Session-Daten und rotiert
+    # den Session-Key. Bei signed_cookie-Sessions ist dies entscheidend, da
+    # ein gestohlenes Cookie sonst bis zum Ablauf weiterverwendet werden könnte.
+    # flush() löscht serverseitig (was bei signed_cookies das Setzen eines
+    # leeren/neuen Cookies und Entfernen der auth-bezogenen Session-Daten
+    # bewirkt) und invalidiert den bisherigen Cookie-Inhalt durch Key-Rotation.
+    request.session.flush()
     return redirect("login")
 
 

@@ -380,6 +380,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 157–163)
 
+**Status: Fixed in 2.4.7.** `SESSION_COOKIE_AGE = 60 * 60 * 8` und `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` sind DEBUG-/Render-unabhängig in `settings.py` gesetzt. `logout_view` in `trading/views.py` ruft nach `logout(request)` explizit `request.session.flush()` auf, sodass Session-Daten geleert und der Key rotiert werden. Die Passphrase-Freigabe wird dabei ebenfalls ungültig, sodass nach Logout eine erneute Gate-/Login-Authentifizierung erforderlich ist. **11 Regressionstests** in `trading/tests/test_session_invalidate.py` prüfen Settings, DEBUG-/Render-Matrix, Quellcode, POST-Logout-Anonymisierung, CSRF und POST-Only; bestehende 154 Tests bleiben grün. [Finding und Fix-Dokumentation](SEC-07-session-lifetime-invalidation.md), [Audit §2.7](SECURITY_AUDIT.md).
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

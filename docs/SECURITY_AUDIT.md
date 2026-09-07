@@ -188,31 +188,15 @@ Die Einstellung ist DEBUG-/Render-unabhängig. `SecurityMiddleware` bleibt an er
 
 ---
 
-### 2.7 MITTEL – Signed-Cookie-Sessions mit begrenztem Schutz
+### 2.7 MITTEL – Signed-Cookie-Sessions mit begrenztem Schutz – Fixed in 2.4.7
 
-**Datei:** `trading_bot_project/settings.py` (Zeilen 157–163)
+**Datei:** `trading_bot_project/settings.py` · **Status:** Fixed (Session-Lifetime und Logout-Invalidierung)
 
-```python
-SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
-```
+**Umgesetzt:** `SESSION_COOKIE_AGE = 60 * 60 * 8` (8 statt 12 Stunden) und `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` sind explizit und DEBUG-/Render-unabhängig gesetzt. Die `logout_view` ruft nach `logout(request)` nun `request.session.flush()` auf, wodurch Session-Daten geleert und der Session-Key rotiert werden. Dies verkleinert das Replay-Fenster für gestohlene signierte Cookies und invalidiert die Sitzung unmittelbar bei Abmeldung.
 
-**Auswirkung:** Signed Cookies sind gegen Manipulation geschützt, aber:
-- Sie enthalten den Benutzernamen im Klartext (Base64-kodiert)
-- Bei SECRET_KEY-Leak können Sessions gefälscht werden
-- Kein Ablauf-Mechanismus bei Passwort-Änderung (Session-Invalidate fehlt)
+**Verbleibende Abgrenzung:** Signierte Cookies enthalten weiterhin die Benutzer-ID in Base64; das ist bei diesem Backend keine Schwachstelle (der Inhalt ist signiert, nicht verschlüsselt, aber nicht manipulierbar). Eine Session-Rotation bei Passwort-Änderung (`update_session_auth_hash`) ist als zusätzliche Härtung sinnvoll, erfordert aber eine Passwort-Änderungs-View, die im Projekt derzeit nicht vorhanden ist und ist nicht Teil dieses Fixes.
 
-**Lösungsvorschlag:**
-
-```python
-# Nach Passwort-Änderung/Abmeldung Session-Invalidate erzwingen:
-SESSION_COOKIE_AGE = 60 * 60 * 8  # 8 Stunden (statt 12)
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-
-# Bei Passwort-Änderung:
-from django.contrib.auth import update_session_auth_hash
-# In Passwort-Reset-View:
-update_session_auth_hash(request, user)
-```
+**Nachweis:** 11 Regressionstests in `trading/tests/test_session_invalidate.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Commit, Prüfgrenzen](SEC-07-session-lifetime-invalidation.md).
 
 ---
 
@@ -660,7 +644,8 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [ ] Cache-Control für API-Endpunkte
 - [ ] Error-Messages ohne technische Details
 - [ ] Docker-Passwörter ohne Defaults
-- [ ] Session-Invalidate bei Passwort-Änderung
+- [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))
+- [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)
 - [ ] HSTS-Header für Produktion korrekt
 - [x] X-Content-Type-Options: nosniff – explizit ab 2.4.6, siehe §2.6
 

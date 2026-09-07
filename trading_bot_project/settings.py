@@ -195,7 +195,12 @@ LOGIN_URL = "/login/"
 # nicht erreichbaren Free-Postgres. Inhalte sind signiert (nicht manipulierbar)
 # und enthalten keine Exchange-Secrets.
 SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
-SESSION_COOKIE_AGE = 60 * 60 * 12
+# Session-Lebensdauer auf 8 Stunden beschränkt, um das Fenster bei gestohlenen
+# signierten Cookies zu verkleinern. Davor waren es 12 Stunden.
+SESSION_COOKIE_AGE = 60 * 60 * 8
+# Session-Cookie läuft ab, wenn der Browser geschlossen wird – verhindert
+# dauerhafte Wiederverwendung eines gestohlenen Cookies über Browserneustarts.
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 # CSRF-Cookie nicht über JavaScript (document.cookie) lesbar machen. Django
