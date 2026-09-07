@@ -310,7 +310,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 162–163)
 
-**Status: umgesetzt in 2.4.5.** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` nach der Session-Cookie-Konfiguration und ist unabhängig vom `DEBUG`-Modus aktiv. Das `csrftoken`-Cookie wird mit `HttpOnly` gesetzt; die App-Skripte beziehen das Token unverändert aus dem `{% csrf_token %}`-Formularfeld. `trading/tests/test_csrf_cookie.py` (7 Tests mit erzwungener CSRF-Prüfung) reproduzierte den Vorzustand (rot) und sichert den Fix ab. Siehe [Changelog](CHANGELOG.md) und [Audit §2.5](SECURITY_AUDIT.md).
+**Status: umgesetzt in 2.4.5.** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` nach der Session-Cookie-Konfiguration und ist unabhängig vom `DEBUG`-Modus aktiv. Das `csrftoken`-Cookie wird mit `HttpOnly` gesetzt; die App-Skripte beziehen das Token unverändert aus dem `{% csrf_token %}`-Formularfeld. `trading/tests/test_csrf_cookie.py` (7 Tests mit erzwungener CSRF-Prüfung) reproduzierte den Vorzustand (rot) und sichert den Fix ab. Nachgeprüft in **2.4.6** mit nun 11 Tests, tatsächlich verwendetem Formular-Token und zusätzlichen Cookie-/Origin-Negativtests. HttpOnly schützt nur den Cookie-Zugriff, nicht allgemein vor XSS; das DOM-Token bleibt sichtbar. Siehe [Changelog](CHANGELOG.md), [Audit §2.5](SECURITY_AUDIT.md) und [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -344,6 +344,8 @@ VALIDIERUNGSKRITERIEN:
 **Prompt-Titel:** `[MissingContentTypeNosniff] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`
+
+**Status: Fixed in 2.4.6.** `SECURE_CONTENT_TYPE_NOSNIFF = True` ist explizit und DEBUG-/Render-unabhängig gesetzt. Die vorhandene `SecurityMiddleware` bleibt an erster Stelle; 10 Regressionstests prüfen Settings und ausgelieferte Header einschließlich Fehlern, Downloads und WhiteNoise. **Korrektur des historischen Prompts:** Django 5.2.17 aktiviert nosniff schon per Default; es fehlte die explizite Projektkonfiguration, nicht der Header im geprüften Standard-Stack. [Finding und Fix-Commit](SEC-06-rule-lifecycle-authz.md), [Audit §2.6](SECURITY_AUDIT.md).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
