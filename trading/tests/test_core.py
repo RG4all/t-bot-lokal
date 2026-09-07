@@ -153,6 +153,8 @@ class FormTests(TestCase):
             "stop_loss": "1",
             "fee": "0.1",
             "has_live_credentials": False,
+            "leverage": "1",
+            "trade_direction": "long",
             "countdown": "0",
             "time_interval": "2",
             "div_DVA_prev_NDA_threshold_buy": "0",

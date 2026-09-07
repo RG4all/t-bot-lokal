@@ -3,11 +3,12 @@ name: t-bot-local
 x-app-environment: &app-environment
   DEBUG: "True"
   RENDER: "False"
-  SECRET_KEY: ${SECRET_KEY:-django-insecure-local-compose-only}
-  PASSPHRASE: ${PASSPHRASE:-local-t-bot}
-  # Der lokale Compose-Stack benötigt standardmäßig weder Gate noch Passwort.
-  # In einer geschützten Umgebung explizit PASSPHRASE_GATE_ENABLED=True setzen.
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the env file or run scripts/setup_local.sh}
+  PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in the env file or run scripts/setup_local.sh}
+  # Nur lokaler DEBUG-Stack: Gate optional. Private Secrets bleiben Pflicht,
+  # damit ein später aktivierter Gate nicht mit öffentlichen Defaults arbeitet.
   PASSPHRASE_GATE_ENABLED: ${PASSPHRASE_GATE_ENABLED:-False}
+  RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-}
   DATABASE_URL: postgresql://${POSTGRES_USER:-tbot}:${POSTGRES_PASSWORD:-tbot-local-password}@postgres:5432/${POSTGRES_DB:-tbot}
   DATABASE_SSL_REQUIRE: "False"
   REDIS_URL: redis://redis:6379/0

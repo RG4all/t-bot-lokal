@@ -10,7 +10,7 @@
 #      Bereits vorhandene Secrets (SECRET_KEY, PASSPHRASE, POSTGRES_PASSWORD)
 #      bleiben beim Retuning erhalten.
 #   3. Legt beim ersten Lauf .env.local an (Mode 0600), schreibt aber nie
-#      hartcodierte Credentials.
+#      hartcodierte App-Secrets (das lokale DB-Passwort bleibt kompatibel).
 #   4. Baut die Images und startet den isolierten Stack mit
 #      `docker compose up --build -d`.
 #
@@ -139,14 +139,16 @@ write_env_local() {
     printf 'dry-run: .env.local würde mit WEB_PORT=8369 und PASSPHRASE_GATE_ENABLED=False erzeugt\n'
     return 0
   fi
-  local secret_key passphrase pg_password web_port
+  local secret_key passphrase gate_enabled pg_password web_port
   secret_key="$(read_existing_secret SECRET_KEY)"
   passphrase="$(read_existing_secret PASSPHRASE)"
+  gate_enabled="$(read_existing_secret PASSPHRASE_GATE_ENABLED)"
   pg_password="$(read_existing_secret POSTGRES_PASSWORD)"
   web_port="$(read_existing_secret WEB_PORT)"
 
   [[ -z "${secret_key}" ]]  && secret_key="$(random_secret)"
-  [[ -z "${passphrase}" ]]   && passphrase="local-t-bot"
+  [[ -z "${passphrase}" ]]  && passphrase="$(random_secret)"
+  [[ -z "${gate_enabled}" ]] && gate_enabled="False"
   # Ein festes, nur-lokal Default-Passwort verhindert Password-Mismatches
   # gegenueber frueheren Compose-Laeufen mit demselben Default. Wer ein
   # individuelles Passwort moechte, kann es vor dem ersten Lauf in .env.local
@@ -156,6 +158,9 @@ write_env_local() {
 
   info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."
   umask 077
+  if [[ -f "${ENV_LOCAL}" ]]; then
+    chmod 600 "${ENV_LOCAL}"
+  fi
   {
     echo "# ============================================================================"
     echo "# t-bot-lokal .env.local - automatisch erzeugt von setup_local.sh"
@@ -166,7 +171,7 @@ write_env_local() {
     echo "SECRET_KEY=${secret_key}"
     echo "PASSPHRASE=${passphrase}"
     # Docker ist lokal standardmäßig ohne zusätzliche Passphrase-Ebene.
-    echo "PASSPHRASE_GATE_ENABLED=False"
+    echo "PASSPHRASE_GATE_ENABLED=${gate_enabled}"
     echo "AUTOSTART_BOTS=True"
     echo ""
     echo "POSTGRES_DB=tbot"
@@ -306,4 +311,7 @@ main() {
   start_stack
 }
 
-main "$@"
+# Beim Sourcen nur die testbaren Setup-Funktionen laden.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

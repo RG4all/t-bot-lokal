@@ -21,8 +21,11 @@ RENDER_SIMULATION=False
 # Django / App
 # ----------------------------------------------------------------------------
 DEBUG=True
-SECRET_KEY=replace-with-a-long-random-string
-PASSPHRASE=replace-with-a-private-passphrase
+# Für Produktion (DEBUG=False oder RENDER=True) und mehrere Worker beide setzen.
+# install.sh generiert eine private Passphrase; keine öffentlichen Default-Secrets.
+# Nur lokale Settings erzeugen bei leeren Werten temporäre Secrets (Passphrase-WARNING).
+SECRET_KEY=
+PASSPHRASE=
 PASSPHRASE_GATE_ENABLED=True
 AUTOSTART_BOTS=True
 

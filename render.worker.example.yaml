@@ -1,13 +1,14 @@
 # OPTIONAL PAID BACKTEST WORKER – intentionally not merged into render.yaml.
 # Render Free does not support isolated background workers. Copy/adapt these
 # resources only after provisioning paid/external Redis and a paid worker.
+# SECRET_KEY und PASSPHRASE müssen mit dem Web-Service übereinstimmen.
 services:
   - type: worker
     name: t-bot-backtest-worker
     runtime: docker
     plan: starter
     region: frankfurt
-    branch: arena/01a01bc6-t-bot
+    branch: tbot.local
     dockerfilePath: ./Dockerfile
     dockerCommand: >-
       celery -A trading_bot_project worker -Q backtest --loglevel=INFO
@@ -38,7 +39,7 @@ services:
     runtime: docker
     plan: starter
     region: frankfurt
-    branch: arena/01a01bc6-t-bot
+    branch: tbot.local
     dockerfilePath: ./Dockerfile
     dockerCommand: celery -A trading_bot_project beat --loglevel=INFO
     envVars:

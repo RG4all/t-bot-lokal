@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.3 · Stand 7. September 2026**
+**Version 2.4.4 · Stand 7. September 2026**
 
 [TOC]
 
@@ -32,6 +32,14 @@ Jeder Benutzer sieht ausschließlich seine eigenen Konfigurationen, Logs, Backte
 6. Konfiguration aktivieren und das Dashboard öffnen.
 
 Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelisteten Symbolen oder nicht erreichbarer Exchange nicht stillschweigend akzeptiert. Jedes bearbeitbare Eingabefeld verfügt über ein interaktives Info-Symbol (ⓘ) mit Tooltip-Hilfe.
+
+### Passphrase-Gate ab Version 2.4.4
+
+Die Produktions-Passphrase wird vom Betreiber privat als `PASSPHRASE` gesetzt (auf Render vom Blueprint erzeugt). Sie steht nicht im Repository und wird nicht von der App geloggt. Ohne sie oder ohne `SECRET_KEY` startet die App bei `DEBUG=False` bzw. auf Render nicht. Ein deaktivierter Gate ist dort ebenfalls ein Startfehler.
+
+Nur lokale Entwicklung (`DEBUG=True`, kein Render) darf ohne konfigurierte Passphrase starten: `secrets.token_urlsafe(32)` erzeugt pro Laden der Settings einen neuen Wert, der als WARNING in der Startkonsole erscheint. Bei mehreren Prozessen/Autoreload können verschiedene Werte entstehen. Für stabile Sessions `SECRET_KEY` und `PASSPHRASE` explizit setzen; ein fehlender lokaler Signierschlüssel wird ebenfalls zufällig erzeugt, aber nicht ausgegeben. Die Setup-Skripte speichern private App-Secrets in der ignorierten Env-Datei (Modus 0600).
+
+Nach einem Upgrade auf 2.4.4 oder einer Passphrase-Rotation muss der Gate erneut freigegeben werden. Der Session-Nachweis enthält keinen Klartext, sondern einen HMAC der aktuellen Passphrase unter dem privaten Signierschlüssel. Anmeldung und Eigentümerprüfung bleiben zusätzlich erforderlich. Das lokale Compose-Profil darf den Gate explizit abschalten, ist aber kein Produktionsprofil.
 
 ## 3. Konfigurationsfelder und Indikatoren-Mapping
 
@@ -291,6 +299,12 @@ Orderbuch führen immer zum Ausschluss und werden nicht günstig geschätzt. Das
 Ergebnis ist keine Anlageempfehlung; volatile Märkte benötigen ein begrenztes
 Risiko und eine passende Stop-Loss-Order.
 
+### Zugriff auf HTTP-API und WebSockets
+
+Die vorhandenen API-URLs und Nutzdatenformate bleiben in 2.4.4 unverändert. Ohne aktuelle Gate-Freigabe leiten geschützte HTTP-Endpunkte zuerst mit `302` auf `/gate/?next=…` um; `/health/` und statische Dateien bleiben ausgenommen. WebSocket-Verbindungen zu `/ws/backtest/<id>/` benötigen beim Aufbau zusätzlich zum angemeldeten Eigentümer einen aktuellen Gate-Nachweis; andernfalls werden sie vor Annahme mit Anwendungscode `4403` abgelehnt.
+
+`POST /gate/`, `/login/`, `/register/` und `/admin/login/` teilen ein prozesslokales Limit von fünf POSTs je IP in 15 Minuten, auch für erfolgreiche POSTs. Der nächste POST liefert `429` mit `Retry-After: 900`. Hinter Proxys `RATE_LIMIT_TRUSTED_PROXIES` korrekt setzen; mehrere Web-Prozesse brauchen zusätzlich ein gemeinsames Limit. Siehe [Deployment-Anleitung](https://github.com/RG4all/t-bot-lokal/blob/tbot.local/docs/README.md).
+
 ## 12. Fehler-Log und Betrieb
 
 Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Technische Details enthalten Exchange, Markt, Symbol und Retry-Informationen. Gelöste Einträge können als erledigt markiert werden.
@@ -312,7 +326,7 @@ Typische Meldungen:
 5. `DATABASE_POOL_URL` wird nur verwendet, wenn bei einer bezahlten Render-Datenbank PgBouncer aktiviert wurde. Render-Managed-Pooling ist für Free-Datenbanken nicht verfügbar.
 6. Ein alternativer DB-Host wird nur noch über `DATABASE_FALLBACK_HOST` verwendet; ein automatisch geratener Host ist entfernt.
 
-Bei einem DB-Ausfall zeigt das Webinterface HTTP 503 statt einer internen Fehlerseite. Das bereits geöffnete Dashboard stoppt weitere API-Aufrufe lokal, verdoppelt die Wartezeit bis maximal 60 Sekunden und lässt jeweils nur einen Recovery-Test zu. Login und Passphrase liegen in signierten Cookie-Sessions und verursachen deshalb keine zusätzliche DB-Request-Schleife.
+Bei einem DB-Ausfall zeigt das Webinterface HTTP 503 statt einer internen Fehlerseite. Das bereits geöffnete Dashboard stoppt weitere API-Aufrufe lokal, verdoppelt die Wartezeit bis maximal 60 Sekunden und lässt jeweils nur einen Recovery-Test zu. Login-Zustand und HMAC-Gate-Nachweis liegen in signierten Cookie-Sessions und verursachen deshalb keine zusätzliche DB-Request-Schleife.
 
 ### Weiterhandel bei Frontend-/DB-Störung
 
@@ -345,7 +359,7 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 
 ## 15. Sicherheits- und Risikocheckliste
 
-- Passphrase und Django `SECRET_KEY` niemals veröffentlichen.
+- Passphrase und Django `SECRET_KEY` niemals veröffentlichen. Temporäre lokale Gate-Werte erscheinen bewusst nur im Entwicklungs-WARNING; auch diese Logs privat halten. Produktions-Secrets müssen stabil und für alle Worker identisch sein.
 - API-Schlüssel als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) beim Container-Start übergeben — niemals in der Datenbank speichern.
 - Paper Trading simuliert Ausführungen – keine Garantie für reale Marktausführungen.
 - Alle bearbeitbaren Felder vor dem Bot-Start per Info-Hover (ⓘ) und Backtest prüfen.

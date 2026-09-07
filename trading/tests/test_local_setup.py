@@ -35,11 +35,20 @@ class HardwareTuningTests(SimpleTestCase):
         hardware = HardwareInfo("x86_64", 4, 8_192, 50_000, 300_000, 200)
         values = build_environment(
             recommend_profile(hardware),
-            {"SECRET_KEY": "keep-me", "POSTGRES_PASSWORD": "keep-db"},
+            {"SECRET_KEY": "keep-me", "PASSPHRASE": "keep-gate", "POSTGRES_PASSWORD": "keep-db"},
         )
         self.assertEqual(values["SECRET_KEY"], "keep-me")
+        self.assertEqual(values["PASSPHRASE"], "keep-gate")
         self.assertEqual(values["POSTGRES_PASSWORD"], "keep-db")
         self.assertEqual(values["SIMULATE_RENDER_FREE"], "False")
+
+    def test_tuner_generates_independent_url_safe_passphrases(self):
+        hardware = HardwareInfo("x86_64", 4, 8_192, 50_000, 300_000, 200)
+        profile = recommend_profile(hardware)
+        first = build_environment(profile, {})["PASSPHRASE"]
+        second = build_environment(profile, {})["PASSPHRASE"]
+        self.assertRegex(first, r"^[A-Za-z0-9_-]{43}$")
+        self.assertNotEqual(first, second)
 
     def test_tuner_writes_private_env_file(self):
         with tempfile.TemporaryDirectory() as directory:

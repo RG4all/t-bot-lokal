@@ -10,6 +10,8 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 
+from .passphrase import is_passphrase_verified
+
 logger = logging.getLogger("trading")
 _DB_LOG_LOCK = threading.Lock()
 _DB_LAST_LOG_AT = 0.0
@@ -42,11 +44,11 @@ def database_unavailable_response(request):
 <title>Datenbank vorübergehend nicht erreichbar</title>
 <style>body{font-family:system-ui;background:#f8f9fa;margin:0;padding:3rem;color:#212529}
 main{max-width:42rem;margin:auto;background:white;padding:2rem;border-radius:.75rem;
-box-shadow:0 2px 12px #0002}h1{color:#b02a37}button{padding:.6rem 1rem}</style></head>
+box-shadow:0 2px 12px #0002}h1{color:#b02a37}a{display:inline-block;padding:.6rem 1rem}</style></head>
 <body><main><h1>Dienst vorübergehend eingeschränkt</h1>
 <p>PostgreSQL ist momentan nicht erreichbar. Der Bot versucht die Verbindung
 automatisch mit Backoff wiederherzustellen. Bitte warte kurz und lade die Seite erneut.</p>
-<button onclick="location.reload()">Erneut versuchen</button></main></body></html>""",
+<a href="">Erneut versuchen</a></main></body></html>""",
             status=503,
             content_type="text/html; charset=utf-8",
         )
@@ -98,7 +100,7 @@ class PassphraseGateMiddleware:
         if exempt:
             return self.get_response(request)
         try:
-            verified = request.session.get("passphrase_verified")
+            verified = is_passphrase_verified(request.session)
         except (OperationalError, InterfaceError) as exc:
             _log_database_outage(
                 "Passphrase-Session wegen Datenbankausfall nicht lesbar: %s",

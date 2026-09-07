@@ -1,10 +1,10 @@
-# t-bot
+# t-bot-lokal
 
 Django-/Channels-Anwendung für **Paper Trading**, Marktvisualisierung und parametrisierte Backtests. Der Bot simuliert Orders; er sendet keine echten Kauf- oder Verkaufsaufträge an eine Börse.
 
 Binance-Kurse laufen über einen persistenten kombinierten WebSocket-Stream (kein REST-Polling/Request-Weight). BitMart Spot nutzt die aktuelle V3-Public-API; Bitunix Spot/Futures ist über öffentliche, defensiv gedrosselte Adapter integriert. Beim Speichern und Aktivieren werden alle Symbole live geprüft. Das Dashboard bietet paginierte Logs, PDF/HTML/CSV-Reports und einen doppelt bestätigten Kill-Switch.
 
-Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: [`VERSION`](../VERSION).
+Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: **2.4.4** ([`VERSION`](../VERSION)). Security-Review mit Befunden und Prüfgrenzen: [`SECURITY_REVIEW_2.4.4.md`](SECURITY_REVIEW_2.4.4.md).
 
 ## Docker Compose (empfohlen)
 
@@ -88,21 +88,45 @@ python manage.py runserver
 
 Django lädt `.env` nicht automatisch. Die Variablen müssen von der Shell, einem Prozessmanager oder einer IDE exportiert werden.
 
+### Passphrase und Startkonfiguration
+
+Private Werte **getrennt** erzeugen und außerhalb von Git in der Env-Datei bzw. im Secret-Store speichern:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(50))"  # SECRET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"  # PASSPHRASE
+```
+
+| Umgebung | Verhalten bei fehlender/leerer `PASSPHRASE` | Gate deaktivierbar? |
+|---|---|---|
+| Lokal: `DEBUG=True`, `RENDER=False` bzw. nicht gesetzt | Temporärer Zufallswert mit 32 Zufallsbytes; WARNING mit Wert in der Startkonsole | Ja, nur explizit lokal |
+| `DEBUG=False`, auch ohne Render | `RuntimeError`, kein Zufallswert und kein Secret-Log | Nein |
+| Render (`RENDER=True`), auch mit `DEBUG=True` | `RuntimeError`, kein Zufallswert und kein Secret-Log | Nein |
+
+Nur aus Leerraum bestehende Werte gelten als fehlend. Nichtleere explizite Passphrasen werden unverändert verglichen, einschließlich Unicode und Leerzeichen. Fehlende Signierschlüssel werden nur lokal zufällig erzeugt; Produktion benötigt einen expliziten `SECRET_KEY`.
+
+Ohne gesetzte Secrets entstehen bei jedem Laden der Settings neue Werte: auch Management-Kommandos und der Entwicklungs-Autoreloader können jeweils andere Werte ausgeben. Für einen temporären Ein-Prozess-Test `python manage.py runserver --noreload` verwenden und nur den Wert dieses laufenden Servers eingeben. Für mehrere Worker und stabile Sessions **immer dieselben expliziten Secrets** verwenden. Lokale Startlogs mit der temporären Passphrase nicht teilen.
+
+Das Setup speichert neue App-Secrets in `.env.local` statt sie zu loggen; bestehende Werte und ein eingeschalteter Gate bleiben beim Retuning erhalten. Manuelles Compose bricht bei leeren App-Secrets ab. Das Basis-Docker-Image deaktiviert den Gate nicht mehr; die lokale Ausnahme steht ausschließlich im Compose-Profil.
+
 ## Qualitätssicherung
 
 ```bash
 # Shell-Skripte linten und Test-Suite ausfuehren
-shellcheck install.sh hardware-test.sh docker-entrypoint.sh docker/*.sh tests/*.sh
+shellcheck install.sh hardware-test.sh docker-entrypoint.sh docker/*.sh scripts/*.sh tests/*.sh
 ./tests/run_tests.sh
 
 # Distro-Smoke-Tests (benoetigt Docker, prueft apt/pacman/dnf)
 ./tests/distro_smoke_test.sh
 
-# Django- / Python-Tests
+# Django- / Python-Tests (lokale Testumgebung, kein Bot-Autostart)
+export AUTOSTART_BOTS=False DEBUG=True RENDER=False
+ruff check .
 python manage.py check
 python manage.py makemigrations --check --dry-run
-python manage.py test
+python manage.py test --noinput
 python manage.py collectstatic --noinput
+python -m pip check
 pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 ```
 
@@ -110,15 +134,17 @@ pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 
 `render.yaml` definiert einen Docker-Web-Service und PostgreSQL in Frankfurt. Der Container installiert die für PDF-Reports benötigten Systembibliotheken, wartet beim Start mit DNS-/Connection-Backoff auf PostgreSQL, führt Migrationen aus und startet Daphne auf `$PORT`.
 
-1. Branch `arena/01a01bc6-t-bot` zu GitHub pushen.
+1. Den geprüften PR in den Integrationsbranch `tbot.local` übernehmen; beide Render-Vorlagen referenzieren diesen Branch.
 2. In Render **New → Blueprint** wählen und dieses Repository verbinden.
-3. Blueprint anwenden. `SECRET_KEY`, `PASSPHRASE` und `DATABASE_URL` werden automatisch erzeugt/verknüpft.
+3. Blueprint anwenden. `SECRET_KEY`, `PASSPHRASE` und `DATABASE_URL` werden automatisch erzeugt/verknüpft; `PASSPHRASE_GATE_ENABLED=True` ist explizit gesetzt.
 4. Die erzeugte `PASSPHRASE` unter **t-bot-web → Environment** anzeigen und sicher aufbewahren.
 5. Optional über die Render Shell einen Admin anlegen:
    ```bash
    python manage.py createsuperuser
    ```
 6. `/health/`, Passphrase-Gate, Registrierung/Login, Dashboard und WebSocket-Fortschritt prüfen.
+7. Bei einem Reverse-Proxy die tatsächlich vertrauenswürdigen Peer-IPs/CIDRs für `RATE_LIMIT_TRUSTED_PROXIES` ermitteln und im Service konfigurieren. Der Proxy muss `X-Forwarded-For` bereinigen oder die tatsächliche Peer-IP anhängen. Ohne Allowlist wird der Header ignoriert; hinter einem Proxy teilen sich sonst dessen Clients ein Rate-Limit. Keine pauschalen Netze wie `0.0.0.0/0` verwenden.
+8. Für zusätzliche Web-Prozesse/Instanzen ein gemeinsames Auth-Rate-Limit am Edge/Proxy bzw. in einem geteilten Backend vorsehen; das App-Limit gilt pro Prozess.
 
 ### Einschränkungen des kostenlosen Render-Plans
 
@@ -133,10 +159,10 @@ pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 
 ## Sicherheit
 
-- In Produktion sind `SECRET_KEY` und `PASSPHRASE` Pflichtvariablen.
+- In Produktion (`DEBUG=False` oder Render) sind `SECRET_KEY`, `PASSPHRASE` und ein aktiver Gate Pflicht. `DEBUG=True` ohne Render ist ausdrücklich ein lokaler Entwicklungsmodus, keine automatische Erkennung einer sicheren Deployment-Umgebung.
 - Zustandsändernde Endpunkte akzeptieren nur POST und sind CSRF-geschützt.
-- **Auth-Endpunkte** (Login, Passphrase-Gate, Registrierung) sind mit einem IP-basierten **Rate-Limit** (5 Versuche / 15 min) gegen Brute-Force geschützt.
-- Die Anwendung setzt eine strikte **Content-Security-Policy (CSP)** (nur lokale Ressourcen) gegen XSS sowie `X-Content-Type-Options: nosniff`.
+- **Auth-Endpunkte** (Login, Passphrase-Gate, Registrierung, Admin-Login) teilen ein IP-basiertes **Rate-Limit** von 5 POSTs / 15 min / Prozess, einschließlich erfolgreicher POSTs. Reservierung und Prüfung sind atomar; der Speicher ist begrenzt. Proxy-Header werden nur über eine explizite Allowlist vertraut.
+- Die Anwendung setzt eine **Content-Security-Policy (CSP)** für lokale Ressourcen; nur mit einer frischen Request-Nonce markierte Template-Skripte dürfen inline laufen. Kein `unsafe-inline` für Skripte. `X-Content-Type-Options: nosniff` bleibt aktiv.
 - `ALLOWED_HOSTS` enthält keinen Wildcard-Eintrag – auch im DEBUG-Modus werden nur explizite lokale Hosts akzeptiert (Schutz gegen Host-Header-Injection).
-- Konfigurationen, Logs, Backtests, PDFs und WebSockets sind benutzerbezogen autorisiert.
+- Konfigurationen, Logs, Backtests, PDFs und WebSockets sind benutzerbezogen autorisiert. Gate-Freigaben sind HMAC-gebunden an die aktuelle Passphrase und den privaten Signierschlüssel; alte boolesche Gate-Cookies werden beim Upgrade abgelehnt. WebSockets prüfen bei Verbindungsaufbau sowohl Gate als auch Eigentümerschaft.
 - API-Schlüssel werden **niemals** in der Datenbank gespeichert. Sie werden beim Container-Start als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) injiziert und existieren nur im Arbeitsspeicher des laufenden Prozesses. Für Live-Handel Umgebungsvariablen in `docker-compose.yml` oder über Render Secrets setzen.

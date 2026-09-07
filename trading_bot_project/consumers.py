@@ -2,8 +2,10 @@ import json
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.conf import settings
 
 from trading.models import BacktestTask
+from trading.passphrase import is_passphrase_verified
 
 
 class BacktestConsumer(AsyncWebsocketConsumer):
@@ -13,6 +15,10 @@ class BacktestConsumer(AsyncWebsocketConsumer):
         return bool(
             user
             and user.is_authenticated
+            and (
+                not settings.PASSPHRASE_GATE_ENABLED
+                or is_passphrase_verified(self.scope.get("session", {}))
+            )
             and BacktestTask.objects.filter(
                 id=task_id,
                 configuration__user_id=user.id,

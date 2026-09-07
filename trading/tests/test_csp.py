@@ -7,8 +7,13 @@ externen Domains erlaubt sind.
 Basierend auf ARENA_AI_PROMPTS.md Prompt 3.
 """
 
-from django.test import TestCase, override_settings
-from django.urls import reverse
+import re
+from pathlib import Path
+from types import SimpleNamespace
+
+from django.template.loader import render_to_string
+from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.utils import translation
 
 from trading_bot_project import settings
 
@@ -123,3 +128,39 @@ class CSPHeaderTest(TestCase):
         response = self.client.get("/health/")
         csp_header = response.get("Content-Security-Policy", "")
         self.assertIn("frame-ancestors 'self'", csp_header)
+
+
+class CSPTemplateTests(SimpleTestCase):
+    def test_template_scripts_use_a_fresh_nonce_matching_the_response_policy(self):
+        nonces = []
+        for _ in range(2):
+            response = self.client.get("/gate/")
+            policy = response["Content-Security-Policy"]
+            nonce = re.search(r"'nonce-([^']+)'", policy).group(1)
+            self.assertContains(response, f'<script nonce="{nonce}">')
+            self.assertNotIn("'unsafe-inline'", policy.split("script-src ")[1].split(";")[0])
+            nonces.append(nonce)
+        self.assertNotEqual(nonces[0], nonces[1])
+
+    def test_no_unmarked_inline_scripts_or_event_handlers_remain_in_templates(self):
+        templates = Path(__file__).resolve().parents[1] / "templates" / "trading"
+        for path in templates.glob("*.html"):
+            with self.subTest(template=path.name):
+                source = path.read_text()
+                self.assertNotIn("<script>", source)
+                self.assertNotRegex(source, r"\son[a-z]+=", msg="Use a nonce script/event listener")
+
+    def test_german_locale_does_not_break_backtest_javascript_numbers(self):
+        request = RequestFactory().get("/backtesting/1/")
+        with translation.override("de"):
+            html = render_to_string(
+                "trading/backtesting_form.html",
+                {
+                    "config": SimpleNamespace(id=1, name="Test"),
+                    "resource_profile": SimpleNamespace(
+                        estimated_seconds_per_combination_at_1000_points=0.125
+                    ),
+                },
+                request=request,
+            )
+        self.assertIn("const secondsPerThousand = 0.125;", html)

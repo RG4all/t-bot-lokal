@@ -7,7 +7,7 @@ und dass nur explizite lokale Entwicklungshosts erlaubt sind.
 Basierend auf ARENA_AI_PROMPTS.md Prompt 2.
 """
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from trading_bot_project import settings
 

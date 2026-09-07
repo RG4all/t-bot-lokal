@@ -31,7 +31,7 @@ def read_env(path):
 def build_environment(profile, existing):
     generated = {
         "SECRET_KEY": existing.get("SECRET_KEY") or secrets.token_urlsafe(48),
-        "PASSPHRASE": existing.get("PASSPHRASE") or secrets.token_urlsafe(24),
+        "PASSPHRASE": existing.get("PASSPHRASE") or secrets.token_urlsafe(32),
         "PASSPHRASE_GATE_ENABLED": existing.get("PASSPHRASE_GATE_ENABLED", "True"),
         "AUTOSTART_BOTS": existing.get("AUTOSTART_BOTS", "True"),
         "POSTGRES_DB": existing.get("POSTGRES_DB", "tbot"),
@@ -53,8 +53,10 @@ def write_env(path, values, hardware):
         "",
     ]
     lines.extend(f"{key}={value}" for key, value in values.items())
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as output:
+        os.fchmod(output.fileno(), 0o600)
+        output.write("\n".join(lines) + "\n")
 
 
 def main():
