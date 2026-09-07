@@ -135,5 +135,8 @@ pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 
 - In Produktion sind `SECRET_KEY` und `PASSPHRASE` Pflichtvariablen.
 - Zustandsändernde Endpunkte akzeptieren nur POST und sind CSRF-geschützt.
+- **Auth-Endpunkte** (Login, Passphrase-Gate, Registrierung) sind mit einem IP-basierten **Rate-Limit** (5 Versuche / 15 min) gegen Brute-Force geschützt.
+- Die Anwendung setzt eine strikte **Content-Security-Policy (CSP)** (nur lokale Ressourcen) gegen XSS sowie `X-Content-Type-Options: nosniff`.
+- `ALLOWED_HOSTS` enthält keinen Wildcard-Eintrag – auch im DEBUG-Modus werden nur explizite lokale Hosts akzeptiert (Schutz gegen Host-Header-Injection).
 - Konfigurationen, Logs, Backtests, PDFs und WebSockets sind benutzerbezogen autorisiert.
-- API-Schlüssel werden aktuell im Django-Datenbankfeld gespeichert. Für sensible echte Schlüssel sollte vor Nutzung zusätzlich Verschlüsselung auf Feldebene eingerichtet werden.
+- API-Schlüssel werden **niemals** in der Datenbank gespeichert. Sie werden beim Container-Start als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) injiziert und existieren nur im Arbeitsspeicher des laufenden Prozesses. Für Live-Handel Umgebungsvariablen in `docker-compose.yml` oder über Render Secrets setzen.

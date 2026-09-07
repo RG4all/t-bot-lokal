@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.0 · Stand 23. August 2026**
+**Version 2.4.3 · Stand 7. September 2026**
 
 [TOC]
 
@@ -37,6 +37,17 @@ Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelist
 
 ### 3.1 Basis- und Kontofelder
 
+> **Hinweis zu API-Schlüsseln:** API-Schlüssel werden **nicht** in der Datenbank gespeichert. Sie werden beim Start des Containers als Umgebungsvariablen `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` übergeben. Der Bot liest sie einmal beim Start in den Arbeitsspeicher. Das Feld `has_live_credentials` in der Datenbank signalisiert nur, ob Live-Handel aktiviert ist.
+
+Für Live-Handel:
+```bash
+# In docker-compose.yml oder .env.local setzen:
+EXCHANGE_API_KEY=dein-api-key
+EXCHANGE_SECRET_KEY=dein-secret-key
+```
+
+Für Paper-Trading: `has_live_credentials` auf `false` lassen (Standard) und keine Umgebungsvariablen setzen.
+
 | Feld im Formular | Interner Name / Model | Bedeutung & Standardwert | Hover / Tooltip |
 |---|---|---|---|
 | **Name der Konfiguration** | `name` | Frei wählbare Bezeichnung (mindestens 3 Zeichen), z. B. `Binance Spot Top 5`. | Eindeutiger Name zur Unterscheidung im Dashboard. |
@@ -52,10 +63,7 @@ Fehlerhafte Felder werden rot markiert. Eine Konfiguration wird bei nicht gelist
 | **Start-Countdown (Minuten)** | `countdown` | Wartezeit nach Botstart in Minuten, bevor Käufe erlaubt sind. | Sammelt vorab Kursdaten zur Indikatorstabilisierung. |
 | **Indikatoren nach Verkauf zurücksetzen** | `countdown_reset_indicators` | Leert den 10-Punkte-Preisbuffer nach einem Verkauf. | Verhindert Sofort-Wiedereinstiege auf altem Momentum. |
 | **Auswertungsintervall (Sekunden)** | `time_interval` | Pause zwischen zwei Preisabfragen/Prüfzyklen (1 bis 300 s). | BitMart/Bitunix Spot min. 5 s für API-Schonung. |
-| **API-Key (optional)** | `api_key` | Öffentlicher Börsen-API-Schlüssel. | Für öffentliches Paper-Trading leer lassen. |
-| **Secret-Key (optional)** | `secret_key` | Geheimer Börsen-API-Schlüssel. | Nur zusammen mit API-Key; für Paper-Trading leer lassen. |
-
----
+| **Echtzeit-Handel aktiviert** | `has_live_credentials` | `true` oder `false`. | Nur auf `true` setzen, wenn `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` als Umgebungsvariablen beim Container-Start uebergeben wurden. |
 
 ### 3.2 Indikatoren-Zuordnungsmatrix (Live-Konfiguration vs. Backtesting)
 
@@ -338,6 +346,7 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 ## 15. Sicherheits- und Risikocheckliste
 
 - Passphrase und Django `SECRET_KEY` niemals veröffentlichen.
+- API-Schlüssel als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) beim Container-Start übergeben — niemals in der Datenbank speichern.
 - Paper Trading simuliert Ausführungen – keine Garantie für reale Marktausführungen.
 - Alle bearbeitbaren Felder vor dem Bot-Start per Info-Hover (ⓘ) und Backtest prüfen.
 - Regelmäßige Backups der Datenbank durchführen.

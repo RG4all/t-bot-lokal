@@ -2,6 +2,36 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.3] – 2026-09-07
+
+### Sicherheitsfix: Content-Security-Policy (CSP)
+
+- **Neue Abhängigkeit `django-csp==3.8`** (in `requirements.txt`) implementiert die Content-Security-Policy über die Django-Middleware.
+- **CSPMiddleware** wurde in `MIDDLEWARE` nach der `SecurityMiddleware` registriert; die App `csp` ist in `INSTALLED_APPS`.
+- **9 CSP-Direktiven** strikt auf lokale Ressourcen ausgerichtet: `CSP_DEFAULT_SRC = ("'self'",)`, `CSP_SCRIPT_SRC = ("'self'",)`, `CSP_STYLE_SRC = ("'self'", "'unsafe-inline'")`, `CSP_IMG_SRC = ("'self'", "data:")`, `CSP_FONT_SRC`, `CSP_CONNECT_SRC`, `CSP_FRAME_ANCESTORS`, `CSP_BASE_URI`, `CSP_FORM_ACTION`. Es werden keine externen Domains erlaubt.
+- **Zweck:** Verhindern von XSS-Angriffen über Inline-/externe Skripte trotz `mark_safe()`-Markdown-Rendering.
+- **Tests:** Neu `trading/tests/test_csp.py` (12 Tests) validiert die Einstellungen, präsente CSP-Header in Responses und das Fehlen externer Domains.
+
+## [2.4.2] – 2026-09-07
+
+### Sicherheitsfix: ALLOWED_HOSTS-Wildcard entfernt
+
+- Der Entwicklungspfad `if DEBUG: ALLOWED_HOSTS.append("*")` wurde durch eine **explizite Liste lokaler Hosts** ersetzt (`localhost`, `127.0.0.1`, `tbot.local`, `[::1]`).
+- **Zweck:** Verhindert durch den Wildcard-Eintrag mögliche **Host-Header-Injection**, Cache-Poisoning und CSRF-Bypass in der lokalen Entwicklung.
+- Der Quellcode-Scan stellt sicher, dass `"*"` nicht mehr bedingt ergänzt wird.
+- **Tests:** Neu `trading/tests/test_settings.py` (6 Tests) prüft das Fehlen des Wildcards, die vorhandenen lokalen Hosts sowie einen Source-Scan gegen `append("*")`.
+
+## [2.4.1] – 2026-09-07
+
+### Sicherheitsfix: Rate-Limiting auf Auth-Endpunkte
+
+- **Neue Middleware `trading.rate_limit.RateLimitMiddleware`** implementiert IP-basiertes Rate-Limiting auf Auth-Endpunkte (Login, Passphrase-Gate, Registrierung).
+- **Regeln:** maximal 5 POST-Versuche pro IP innerhalb eines 15-Minuten-Fensters (900 Sekunden); bei Überschreitung HTTP `429` mit `Retry-After`-Header.
+- Thread-sichere In-Memory-Speicherung über `threading.Lock`; `X-Forwarded-For` wird für Proxy-Setups berücksichtigt; GET-Anfragen werden nicht limitiert.
+- Middleware ist in `MIDDLEWARE` nach `AuthenticationMiddleware` registriert (`trading.rate_limit.RateLimitMiddleware`).
+- **Zweck:** Verhindert Brute-Force-Angriffe und Credential-Stuffing auf das Passphrase-Gate, Login und Registrierung.
+- **Tests:** Neu `trading/tests/test_rate_limit.py` (11 Tests) deckt Limit, Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs und einen Integrationstest ab.
+
 ## [2.4.0] – 2026-08-23
 
 ### Help-Seite, adaptive Backtests und geprüfte Marktvorlagen
@@ -15,6 +45,19 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - Binance lädt 24h-Ticker kompakt ohne überlange `symbols=[...]`-URL und validiert Spot- sowie aktive Perpetual-Futures-Symbole gegen die maßgeblichen Exchange-Kataloge. Bitunix nutzt die dokumentierten Spot-/Futures-Marktdatenpfade statt des nicht vorhandenen Spot-Ticker-Endpunkts.
 - Backtest-Ergebnisse enthalten Profit pro Markt, Brutto-Gewinn/-Verlust, Gebühren, Profit-Faktor, maximalen Drawdown, durchschnittliche Trade-Dauer, zeitgestempelte Trades und Mark-to-Market-Equity-Kurven. Nutzergebundene Exporte stehen als A4-Querformat-PDF, eigenständiges HTML und erweitertes UTF-8-CSV bereit.
 - Zusätzliche Python-, Django- und Shell-Tests decken Ressourcenheuristik, Cache, Marktfilter, Exchange-Adapter, Symbolkataloge, Backtest-Berichte, Exporte, Formulare und lokale Start-/Portkonfiguration ab.
+
+## [2.3.2] – 2026-09-06
+
+### Sicherheitsarchitektur: API-Schlüssel aus der Datenbank entfernt
+
+- **API-Schlüssel werden nicht mehr im Django-Datenbankmodell gespeichert.** Die Felder `api_key` und `secret_key` wurden aus dem `Configuration`-Modell entfernt. Stattdessen werden sie als Umgebungsvariablen `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` beim Container-Start injiziert.
+- **Neues Feld `has_live_credentials`** (BooleanField) im `Configuration`-Modell signalisiert, ob Live-Handel aktiviert ist, ohne die tatsächlichen Schlüssel zu speichern.
+- **Migration 0013** entfernt die alten Datenbankfelder und fügt `has_live_credentials` hinzu.
+- **Management-Befehl `clear_api_keys`**: Einmaliger Befehl zum Bereinigen eventuell noch vorhandener Klartext-API-Schlüssel aus der Datenbank: `python manage.py clear_api_keys`
+- **Formular aktualisiert**: `ConfigurationForm` enthält `api_key`/`secret_key` nicht mehr; dafür den Schalter `has_live_credentials`.
+- **TradingBot aktualisiert**: Liest API-Schlüssel aus `os.environ.get("EXCHANGE_API_KEY")` und `os.environ.get("EXCHANGE_SECRET_KEY")` statt aus `self.config.api_key`.
+- **Docker-Konfiguration aktualisiert**: `docker-compose.yml`, `.env.example` und `.env.local` enthalten die neuen Umgebungsvariablen.
+- **Sicherheitsverbesserung**: API-Schlüssel existieren nun nur im Arbeitsspeicher des laufenden Prozesses und nie auf der Festplatte der Datenbank.
 
 ## [2.3.1] – 2026-08-22
 
