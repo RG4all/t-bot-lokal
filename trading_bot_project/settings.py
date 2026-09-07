@@ -63,15 +63,19 @@ DEBUG = env_bool("DEBUG", default=not env_bool("RENDER", False))
 # Render stellt den öffentlichen Hostnamen automatisch als Env-Var bereit
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ['tbot.local', 'localhost', '127.0.0.1', 't-bot-local-web-1']
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 extra_hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", "")
 ALLOWED_HOSTS += [h.strip() for h in extra_hosts.split(",") if h.strip()]
 if DEBUG:
-    ALLOWED_HOSTS.append("*")
+    # WICHTIG: Niemals "*" verwenden – ermöglicht Host-Header-Injection,
+    # Cache-Poisoning und CSRF-Bypass. Nur explizit lokale
+    # Entwicklungshosts erlauben.
+    ALLOWED_HOSTS += ["localhost", "127.0.0.1", "tbot.local", "[::1]"]
 
-CSRF_TRUSTED_ORIGINS = []
+CSRF_TRUSTED_ORIGINS = ['http://tbot.local', 'https://tbot.local', 'http://tbot.local:8369', 'https://tbot.local:8369']
+
 if RENDER_EXTERNAL_HOSTNAME:
     CSRF_TRUSTED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
 extra_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "")
@@ -128,18 +132,8 @@ BACKTEST_LOCAL_FALLBACK_ENABLED = env_bool(
     default=not env_bool("RENDER", False),
 )
 BACKTEST_EXECUTION_AVAILABLE = bool(REDIS_URL) or BACKTEST_LOCAL_FALLBACK_ENABLED
-# Absolute Limits gelten als Sicherheitsgeländer; das Hardwareprofil kann sie
-# im laufenden Prozess weiter verkleinern.
-BACKTEST_MAX_COMBINATIONS = min(
-    100_000,
-    env_int("BACKTEST_MAX_COMBINATIONS", 20_000, minimum=100),
-)
-BACKTEST_MAX_PRICE_POINTS = min(
-    50_000,
-    env_int("BACKTEST_MAX_PRICE_POINTS", 5_000, minimum=100),
-)
 BACKTEST_DEFAULT_PRICE_POINTS = min(
-    BACKTEST_MAX_PRICE_POINTS,
+    5_000,
     env_int("BACKTEST_DEFAULT_PRICE_POINTS", 5_000, minimum=100),
 )
 
@@ -162,6 +156,21 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
+# ---------------------------------------------------------------------------
+# Content-Security-Policy (CSP) – schützt vor XSS-Angriffen
+# ---------------------------------------------------------------------------
+# Alle Ressourcen werden lokal aus /static/ geladen – keine externen Domains.
+# django-csp setzt den Content-Security-Policy Header automatisch.
+CSP_DEFAULT_SRC = ("'self'",)
+CSP_SCRIPT_SRC = ("'self'",)
+CSP_STYLE_SRC = ("'self'", "'unsafe-inline'")
+CSP_IMG_SRC = ("'self'", "data:")
+CSP_FONT_SRC = ("'self'",)
+CSP_CONNECT_SRC = ("'self'",)
+CSP_FRAME_ANCESTORS = ("'self'",)
+CSP_BASE_URI = ("'self'",)
+CSP_FORM_ACTION = ("'self'",)
+
 LOGIN_URL = "/login/"
 # Signierte Cookie-Sessions entkoppeln Login und Passphrase vom kurzzeitig
 # nicht erreichbaren Free-Postgres. Inhalte sind signiert (nicht manipulierbar)
@@ -182,11 +191,13 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
+    "csp",
     "trading.apps.TradingConfig",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "csp.middleware.CSPMiddleware",
     "trading.middleware.DatabaseAvailabilityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -196,6 +207,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "trading.middleware.PassphraseGateMiddleware",
+    # Rate-Limiting für Auth-Endpunkte (Login, Gate, Register)
+    # Muss NACH AuthenticationMiddleware sein
+    "trading.rate_limit.RateLimitMiddleware",
 ]
 
 ROOT_URLCONF = "trading_bot_project.urls"
