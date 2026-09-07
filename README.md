@@ -16,6 +16,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **Nur lokale Entwicklung:** Ohne `PASSPHRASE` erzeugen die Settings mit `secrets.token_urlsafe(32)` einen temporären Wert und zeigen ihn als WARNING in der Startkonsole. Nicht in öffentliche Logs übernehmen. Ein fehlender lokaler `SECRET_KEY` wird ebenfalls zufällig erzeugt, aber nicht ausgegeben.
 - Für mehrere Prozesse und stabile Sessions beide Werte explizit setzen. Eine Passphrase-Rotation macht alte Gate-Freigaben ungültig; der Gate ersetzt nicht den Benutzer-Login.
 - Das lokale Compose-Profil läuft mit `DEBUG=True` und standardmäßig ohne Gate. Es ist **kein Produktionsprofil**; vor Team-/Netzwerkzugriff den Gate einschalten und private Secrets konfigurieren.
+- **Cookies (ab 2.4.5):** Session- und CSRF-Cookie werden mit `HttpOnly` gesetzt. Das CSRF-Token ist damit nicht über JavaScript (`document.cookie`) lesbar; es wird den Seiten stattdessen über `{% csrf_token %}` als verstecktes Formularfeld ausgegeben.
 
 ## Dokumentation
 

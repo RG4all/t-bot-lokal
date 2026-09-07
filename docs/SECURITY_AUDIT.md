@@ -6,7 +6,7 @@
 
 ---
 
-> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.4 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
+> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.5 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
 
 ## 1. Executive Summary
 
@@ -156,7 +156,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 MITTEL – Kein `Session-Cookie-HttpOnly` für Django-Admin
+### 2.5 CSRF-Cookie ohne HttpOnly – behoben in 2.4.5
 
 **Datei:** `trading_bot_project/settings.py` (Zeilen 162–163)
 
@@ -177,6 +177,8 @@ CSRF_COOKIE_HTTPONLY = True  # ← FEHLT
 ```python
 CSRF_COOKIE_HTTPONLY = True
 ```
+
+**Umgesetzt in 2.4.5:** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` direkt nach der Session-Cookie-Konfiguration und ist bewusst unabhängig vom `DEBUG`-Modus aktiv (HttpOnly ist auch über plain HTTP unproblematisch; in Produktion ergänzt `CSRF_COOKIE_SECURE` das Flag). Das `csrftoken`-Cookie wird seither mit `HttpOnly` gesetzt und ist nicht mehr über `document.cookie` lesbar. Die eigenen App-Skripte sind nicht betroffen, da sie das Token aus dem `{% csrf_token %}`-Formularfeld beziehen. Regressionsschutz: `trading/tests/test_csrf_cookie.py` (7 Tests, inkl. Draht-Prüfung und echtem CSRF-Fluss mit `enforce_csrf_checks=True`).
 
 ---
 
@@ -670,7 +672,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 
 - [ ] Rate-Limiting auf Login/Passphrase-Gate
 - [ ] ALLOWED_HOSTS ohne Wildcard
-- [ ] CSRF_COOKIE_HTTPONLY = True
+- [x] CSRF_COOKIE_HTTPONLY = True
 - [ ] CSP-Header implementiert
 - [ ] Cache-Control für API-Endpunkte
 - [ ] Error-Messages ohne technische Details
