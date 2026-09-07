@@ -2,6 +2,26 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.7] – 2026-09-07
+
+### Sicherheit
+
+- **SEC-07 – Session-Lebensdauer reduziert und Logout invalidiert die Session:** `SESSION_COOKIE_AGE` wurde von 12 auf **8 Stunden** (28.800 s) herabgesetzt und `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` explizit gesetzt. Die Einstellungen gelten DEBUG-/Render-unabhängig und verkleinern das Fenster für die Wiederverwendung eines gestohlenen signierten Session-Cookies.
+- **`request.session.flush()` in `logout_view`:** Die Abmeldung (POST `/logout/`) leert nun alle Session-Daten und rotiert den Session-Key unmittelbar. Bisher wurde nur `logout(request)` aufgerufen; bei `signed_cookies` konnten Restdaten und der bisherige Cookie-Inhalt theoretisch bis zum Ablauf weiterverwendet werden. Nach Logout ist der Benutzer anonym und muss sich – wie auch nach dem Gate-Neustart – neu authentifizieren.
+- Keine neue Runtime-Abhängigkeit, keine Migration und keine API-Änderung. Bereits laufende Sitzungen bleiben bis zur nächsten Abmeldung oder dem Browser-Schluss gültig.
+
+### Tests
+
+- Neu `trading/tests/test_session_invalidate.py` (11 Tests): explizite Settings-Werte inkl. Source-Scan, DEBUG-/Render-Matrix, Ablauf bei Browser-Schluss, wirksame Anonymisierung nach POST-Logout, Reset/Umleitung, erzwungene CSRF-Prüfung (`Client(enforce_csrf_checks=True)`), POST-Only für Logout und Quellcodeprüfung gegen Regressionen des `flush()`-Aufrufs.
+- Rot → grün: Vor dem Fix fehlte `SESSION_EXPIRE_AT_BROWSER_CLOSE`, `SESSION_COOKIE_AGE` betrug 12 Stunden und `logout_view` enthielt kein `request.session.flush()`. Alle drei Konfigurationstests schlugen entsprechend fehl.
+- Lokale Validierung: **165 Django-/Python-Tests** (11 neue + 154 bestehende), Ruff, Systemcheck, Migrationsprüfung und `pip check` bestanden.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.7** erhöht; relevante Sicherheitsabschnitte in beiden READMEs aktualisiert.
+- Befund §2.7 im Security-Audit und Prompt 7 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-07](SEC-07-session-lifetime-invalidation.md) ergänzt.
+- Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Nach dem Deploy die Session-Einstellungen über den öffentlichen HTTPS-Endpunkt (bzw. den vorgeschalteten Proxy) prüfen; Cookie-Flags wie `HttpOnly` und `SameSite` bleiben unverändert wirksam.
+
 ## [2.4.6] – 2026-09-07
 
 ### Sicherheit
