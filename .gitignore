@@ -38,3 +38,6 @@ config/
 .coverage
 coverage.xml
 htmlcov/
+
+#opencode
+.opencode/

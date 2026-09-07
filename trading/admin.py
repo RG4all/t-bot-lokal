@@ -56,7 +56,7 @@ class ConfigurationAdmin(admin.ModelAdmin):
                 )
             },
         ),
-        ("API", {"fields": ("api_key", "secret_key")}),
+        ("API", {"fields": ("has_live_credentials",)}),
     )
 
 

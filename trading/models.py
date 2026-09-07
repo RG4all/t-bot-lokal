@@ -26,6 +26,18 @@ class Configuration(models.Model):
         verbose_name="Bot läuft",
         help_text="Gibt an, ob der Bot aktuell laufen soll.",
     )
+    leverage = models.IntegerField(
+        default=1,
+        validators=[MinValueValidator(0)],
+        verbose_name="Hebel (Leverage)",
+        help_text="Hebelwirkung für Futures-Handel (1 = kein Hebel, >= 1).",
+    )
+    trade_direction = models.CharField(
+        max_length=10,
+        default="long",
+        verbose_name="Richtrichtung",
+        help_text="Richtrichtung des Handels: long (Kauf) oder short (Verkauf).",
+    )
     name = models.CharField(
         max_length=100,
         verbose_name="Name der Konfiguration",
@@ -103,19 +115,10 @@ class Configuration(models.Model):
         verbose_name="Handelsgebühr je Order (%)",
         help_text="Simulierte Handelsgebühr je Kauf und Verkauf in Prozent.",
     )
-    api_key = models.CharField(
-        max_length=120,
-        blank=True,
-        null=True,
-        verbose_name="API-Key (optional)",
-        help_text="Öffentlicher Börsenschlüssel. Für Paper-Trading nicht erforderlich.",
-    )
-    secret_key = models.CharField(
-        max_length=120,
-        blank=True,
-        null=True,
-        verbose_name="Secret-Key (optional)",
-        help_text="Geheimer Börsenschlüssel. Für Paper-Trading nicht erforderlich.",
+    has_live_credentials = models.BooleanField(
+        default=False,
+        verbose_name="Echtzeit-Handel aktiviert",
+        help_text="Gibt an, ob Live-API-Schluessel konfiguriert wurden. Die Schluessel selbst werden als Umgebungsvariablen beim Container-Start uebergeben und nie in der Datenbank gespeichert.",
     )
     countdown = models.IntegerField(
         default=1,

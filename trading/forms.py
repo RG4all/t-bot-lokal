@@ -123,14 +123,15 @@ class ConfigurationForm(forms.ModelForm):
             "take_profit",
             "stop_loss",
             "fee",
-            "api_key",
-            "secret_key",
+            "has_live_credentials",
             "countdown",
             "countdown_reset_indicators",
             "time_interval",
             "div_DVA_prev_NDA_threshold_buy",
             "deltadelta_threshold_buy",
             "nda_threshold_buy",
+            "leverage",
+            "trade_direction",
         ]
         labels = {
             "name": "Name der Konfiguration",
@@ -143,8 +144,7 @@ class ConfigurationForm(forms.ModelForm):
             "take_profit": "Take Profit (%)",
             "stop_loss": "Stop Loss (%)",
             "fee": "Handelsgebühr je Order (%)",
-            "api_key": "API-Key (optional)",
-            "secret_key": "Secret-Key (optional)",
+            "has_live_credentials": "Echtzeit-Handel aktiviert",
             "countdown": "Start-Countdown (Minuten)",
             "countdown_reset_indicators": "Indikatoren nach Verkauf zurücksetzen",
             "time_interval": "Auswertungsintervall (Sekunden)",
@@ -154,8 +154,6 @@ class ConfigurationForm(forms.ModelForm):
         }
         widgets = {
             "symbols": forms.Textarea(attrs={"rows": 3, "placeholder": "BTC/USDT, ETH/USDT"}),
-            "api_key": forms.PasswordInput(attrs={"autocomplete": "off"}),
-            "secret_key": forms.PasswordInput(attrs={"autocomplete": "off"}),
             "countdown_reset_indicators": forms.CheckboxInput(),
         }
         help_texts = {
@@ -169,14 +167,13 @@ class ConfigurationForm(forms.ModelForm):
             "take_profit": "Prozentualer Kursgewinn ab Kaufkurs zum automatischen Verkauf mit Gewinn.",
             "stop_loss": "Prozentualer Kursverlust ab Kaufkurs zur automatischen Verlustbegrenzung.",
             "fee": "Simulierte Handelsgebühr je Order in Prozent, die beim Kauf und Verkauf anfällt.",
-            "api_key": "Öffentlicher API-Schlüssel der Börse. Für Paper-Trading leer lassen.",
-            "secret_key": "Geheimer API-Schlüssel der Börse. Für Paper-Trading leer lassen.",
+            "has_live_credentials": "Aktiviere dies, wenn du deine echten Börse-API-Schlüssel konfiguriert hast (die Schluessel werden beim Container-Start als Umgebungsvariablen uebergeben, nicht in der Datenbank gespeichert).",
             "countdown": "Wartezeit nach Bot-Start in Minuten, in der Kurse gesammelt aber noch keine Käufe ausgeführt werden.",
             "countdown_reset_indicators": "Leert den 10-Punkte-Preisbuffer nach einem Verkauf, damit Indikatoren für den nächsten Trade neu aufgebaut werden.",
             "time_interval": "Pause zwischen zwei Preisprüfzyklen in Sekunden (1–300 s). Für BitMart/Bitunix Spot min. 5 s.",
-            "div_DVA_prev_NDA_threshold_buy": "Untere Schwelle für die Momentum-Beschleunigung (DVA / vorherige NDA). Im Backtesting als „Beschleunigung“ einstellbar.",
-            "deltadelta_threshold_buy": "Untere Schwelle des geglätteten Zwei-Punkt-NDA-Momentums ((NDA + vorherige NDA) / 2). Im Backtesting als „DeltaDelta“ einstellbar.",
-            "nda_threshold_buy": "Untere Schwelle der normalisierten prozentualen Preisänderung zum Vorpreis (((P0 - P1) / P1) * 100). Im Backtesting als „NDA“ einstellbar.",
+            "div_DVA_prev_NDA_threshold_buy": "Untere Schwelle für die Momentum-Beschleunigung (DVA / vorherige NDA). Im Backtesting als „Beschleunigung” einstellbar.",
+            "deltadelta_threshold_buy": "Untere Schwelle des geglätteten Zwei-Punkt-NDA-Momentums ((NDA + vorherige NDA) / 2). Im Backtesting als „DeltaDelta” einstellbar.",
+            "nda_threshold_buy": "Untere Schwelle der normalisierten prozentualen Preisänderung zum Vorpreis (((P0 - P1) / P1) * 100). Im Backtesting als „NDA” einstellbar.",
         }
 
     def __init__(self, *args, **kwargs):
@@ -193,9 +190,7 @@ class ConfigurationForm(forms.ModelForm):
             )
             if field.help_text:
                 field.widget.attrs["title"] = field.help_text
-        if self.instance and self.instance.pk:
-            self.fields["api_key"].widget.attrs["placeholder"] = "Unverändert lassen"
-            self.fields["secret_key"].widget.attrs["placeholder"] = "Unverändert lassen"
+        # has_live_credentials handled by env vars at container startup
 
     def full_clean(self):
         super().full_clean()
@@ -233,25 +228,11 @@ class ConfigurationForm(forms.ModelForm):
             raise forms.ValidationError("Die Symbolliste ist zu lang.")
         return normalized
 
-    def clean_api_key(self):
-        value = self.cleaned_data.get("api_key")
-        if not value and self.instance and self.instance.pk:
-            return self.instance.api_key
-        return value
-
-    def clean_secret_key(self):
-        value = self.cleaned_data.get("secret_key")
-        if not value and self.instance and self.instance.pk:
-            return self.instance.secret_key
-        return value
-
     def clean(self):
         cleaned_data = super().clean()
         start_capital = cleaned_data.get("start_capital")
         trade_amount = cleaned_data.get("trade_amount")
         fee = cleaned_data.get("fee")
-        api_key = cleaned_data.get("api_key")
-        secret_key = cleaned_data.get("secret_key")
         interval = cleaned_data.get("time_interval")
         countdown = cleaned_data.get("countdown")
         loss_threshold = cleaned_data.get("sales_stop_threshold")
@@ -265,10 +246,6 @@ class ConfigurationForm(forms.ModelForm):
                 )
         if fee is not None and fee > 5:
             self.add_error("fee", "Eine simulierte Gebühr über 5 % ist nicht plausibel.")
-        if bool(api_key) != bool(secret_key):
-            message = "API-Key und Secret-Key müssen entweder beide gesetzt oder beide leer sein."
-            self.add_error("api_key", message)
-            self.add_error("secret_key", message)
         if interval is not None and interval > 300:
             self.add_error(
                 "time_interval", "Das Zeitintervall darf höchstens 300 Sekunden betragen."

@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+import os
 import random
 import threading
 import time
@@ -305,8 +306,10 @@ class TradingBot(threading.Thread):
             "timeout": 15_000,
             "options": {"defaultType": default_type},
         }
-        if self.config.api_key and self.config.secret_key:
-            params.update(apiKey=self.config.api_key, secret=self.config.secret_key)
+        api_key = os.environ.get("EXCHANGE_API_KEY")
+        secret_key = os.environ.get("EXCHANGE_SECRET_KEY")
+        if api_key and secret_key:
+            params.update(apiKey=api_key, secret=secret_key)
         return exchange_class(params)
 
     def _sync_symbols(self):
