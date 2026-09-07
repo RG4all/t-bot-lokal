@@ -2,6 +2,21 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.5] – 2026-09-07
+
+### Sicherheit
+
+- **CSRF-Cookie mit HttpOnly:** `CSRF_COOKIE_HTTPONLY = True` in `trading_bot_project/settings.py` (nach der Session-Cookie-Konfiguration). Das `csrftoken`-Cookie wird seither mit dem `HttpOnly`-Flag gesetzt und ist damit nicht mehr über JavaScript (`document.cookie`) lesbar; bei einem XSS-Angriff lässt sich das CSRF-Token nicht mehr exfiltrieren. Die Einstellung ist bewusst unabhängig vom `DEBUG`-Modus aktiv, da `HttpOnly` auch über plain HTTP unproblematisch ist und in Produktion `CSRF_COOKIE_SECURE` ergänzend gilt.
+- **Kein Funktionsverlust:** Django liest das Cookie serverseitig aus; die Templates liefern das Token über `{% csrf_token %}` als verstecktes Formularfeld an. Die eigenen App-Skripte (z. B. Dashboard-Actions) lesen das Token aus dem Formularfeld und sind nicht betroffen. CSRF-Prüfung und Login-Fluss bleiben unverändert wirksam.
+
+### Tests
+
+- Neu `trading/tests/test_csrf_cookie.py` (7 Tests): Präsenz und explizite Quellcodewerte der Einstellung, DEBUG-/Produktions-Matrix, `HttpOnly`-Flag auf dem Draht (exakte `Set-Cookie`-Serialisierung), unveränderte Token-Auslieferung, Ablehnung von POSTs ohne Token (403) und vollständiger Login-Fluss mit erzwungener CSRF-Prüfung (`Client(enforce_csrf_checks=True)`). Die ersten vier reproduzierten den Vorzustand ohne den Fix (rot → grün).
+
+### Dokumentation
+
+- Befund `SECURITY_AUDIT.md` §2.5 als behoben markiert; Prompt 5 in `ARENA_AI_PROMPTS.md` mit Status versehen; Cookie-Härtung in beiden READMEs dokumentiert.
+
 ## [2.4.4] – 2026-09-07
 
 ### Sicherheit

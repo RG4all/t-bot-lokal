@@ -310,6 +310,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 162–163)
 
+**Status: umgesetzt in 2.4.5.** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` nach der Session-Cookie-Konfiguration und ist unabhängig vom `DEBUG`-Modus aktiv. Das `csrftoken`-Cookie wird mit `HttpOnly` gesetzt; die App-Skripte beziehen das Token unverändert aus dem `{% csrf_token %}`-Formularfeld. `trading/tests/test_csrf_cookie.py` (7 Tests mit erzwungener CSRF-Prüfung) reproduzierte den Vorzustand (rot) und sichert den Fix ab. Siehe [Changelog](CHANGELOG.md) und [Audit §2.5](SECURITY_AUDIT.md).
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

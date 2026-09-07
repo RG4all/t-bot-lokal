@@ -194,6 +194,13 @@ SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
 SESSION_COOKIE_AGE = 60 * 60 * 12
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
+# CSRF-Token nicht über JavaScript (document.cookie) lesbar machen: Bei XSS
+# darf ein Angreifer das Token nicht exfiltrieren können. Django liest das
+# Cookie serverseitig aus; die Templates liefern es per {% csrf_token %} als
+# verstecktes Formularfeld, die eigenen Skripte brauchen keinen Cookie-Zugriff.
+# Bewusst nicht in den nicht-DEBUG-Block: HttpOnly funktioniert auch über
+# plain HTTP und gehört in allen Umgebungen aktiviert.
+CSRF_COOKIE_HTTPONLY = True
 
 # ---------------------------------------------------------------------------
 # Apps / Middleware
