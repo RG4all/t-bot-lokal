@@ -1,5 +1,9 @@
 # Peer Review – Lokales Setup v2.3.0
 
+## Nachprüfung 2.4.4 – 2026-09-07
+
+Der historische Architektur-Review wird durch den [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md) ergänzt. App-Secrets sind jetzt ohne öffentliche Fallbacks generiert bzw. in Compose verpflichtend. Retuning bewahrt einen aktivierten Gate. Der lokale PostgreSQL-Kompatibilitätsdefault bleibt ein reines Entwicklungsdetail; die frühere pauschale Aussage zu generierten Secrets ist nur für die App-Secrets bzw. den Python-Tuner zutreffend.
+
 ## Scope
 
 Review von Installer, Hardware-Tuner, Docker Compose, Celery-Isolation, Redis-/Worker-Fallback, Secrets, Monitoring und Testbarkeit.

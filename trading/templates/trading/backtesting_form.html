@@ -1,4 +1,5 @@
 {% extends "trading/base.html" %}
+{% load l10n %}
 {% block title %}Backtesting · {{ config.name }}{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -197,7 +198,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (() => {
     "use strict";
     const estimate = document.getElementById("combination-estimate");
@@ -232,7 +233,7 @@
         const total = perSymbol * symbolCount;
         const points = Number(document.getElementById("id_max_price_points")?.value) || 0;
         const selectedLimit = Number(document.getElementById("id_max_combinations")?.value) || profileLimit;
-        const secondsPerThousand = {{ resource_profile.estimated_seconds_per_combination_at_1000_points|default:0 }};
+        const secondsPerThousand = {{ resource_profile.estimated_seconds_per_combination_at_1000_points|default:0|unlocalize }};
         const seconds = perSymbol * symbolCount * (points / 1000) * secondsPerThousand;
         if (!total) {
             estimate.textContent = "Bitte gültige Bereiche und positive Schrittweiten eingeben.";

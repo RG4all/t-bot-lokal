@@ -7,7 +7,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: arena/01a01bc6-t-bot
+    branch: tbot.local
     dockerfilePath: ./Dockerfile
     # Kein dockerCommand-Override: Render verwendet den exec-form CMD aus dem
     # Dockerfile. Dadurch gibt es keine zweite Shell-/Quote-Ebene.
@@ -18,6 +18,8 @@ services:
         generateValue: true
       - key: PASSPHRASE
         generateValue: true
+      - key: PASSPHRASE_GATE_ENABLED
+        value: "True"
       - key: DEBUG
         value: "False"
       - key: RENDER

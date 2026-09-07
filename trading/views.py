@@ -23,9 +23,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 from django.utils.dateparse import parse_datetime
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import mark_safe
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django.views.decorators.http import require_GET, require_POST
 
 from .backtest_templates import build_backtest_templates
@@ -44,6 +46,7 @@ from .market_scanner import (
 )
 from .models import BacktestTask, Configuration, DataLog, ErrorLog
 from .monitoring import runtime_heartbeat
+from .passphrase import is_passphrase_verified, passphrase_session_token
 from .resource_optimizer import (
     estimate_backtest_runtime,
     get_backtest_resource_profile,
@@ -247,20 +250,22 @@ def home(request):
     return redirect("dashboard" if request.user.is_authenticated else "login")
 
 
+@sensitive_post_parameters("passphrase")
+@sensitive_variables("submitted")
 def passphrase_gate_view(request):
     requested_next = request.POST.get("next") or request.GET.get("next")
     next_url = _safe_next_url(request, requested_next)
-    if request.session.get("passphrase_verified"):
+    if is_passphrase_verified(request.session):
         return redirect(next_url or "login")
 
     error = None
     if request.method == "POST":
-        import secrets
-
-        submitted = request.POST.get("passphrase", "").strip()
-        if secrets.compare_digest(submitted, str(settings.PASSPHRASE)):
+        # Byte-basierter, timing-sicherer Vergleich unterstützt auch Unicode.
+        # Explizite Secrets werden weder hier noch in den Settings normalisiert.
+        submitted = request.POST.get("passphrase", "")
+        if constant_time_compare(submitted, settings.PASSPHRASE):
             request.session.cycle_key()
-            request.session["passphrase_verified"] = True
+            request.session["passphrase_verified"] = passphrase_session_token()
             return redirect(next_url or "login")
         error = "Falsche Passphrase. Zugang verweigert."
     return render(

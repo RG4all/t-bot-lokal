@@ -1,6 +1,7 @@
 # trading_bot_project/settings.py
 import logging
 import os
+import secrets as _secrets
 from pathlib import Path
 
 import dj_database_url
@@ -44,21 +45,25 @@ def env_float(name, default, minimum=0.1):
 # ---------------------------------------------------------------------------
 # Sicherheit / Grundkonfiguration
 # ---------------------------------------------------------------------------
-# WICHTIG: In Produktion (Render) MUSS SECRET_KEY über die Environment-Variable
-# gesetzt werden. Vorher wurde bei jedem Prozessstart ein neuer, zufälliger Key
-# erzeugt (secrets.token_urlsafe(50)) - das invalidiert bei mehreren Workern
-# (oder jedem Neustart/Deploy) sofort alle Sessions und CSRF-Tokens.
+DEBUG = env_bool("DEBUG", default=not env_bool("RENDER", False))
+
+# Signierte Cookie-Sessions brauchen einen privaten Schlüssel. Ein öffentlicher
+# Entwicklungs-Key würde auch eine zufällige Gate-Passphrase wirkungslos machen.
+# Für mehrere Prozesse und stabile Sessions über Neustarts SECRET_KEY setzen.
 SECRET_KEY = os.environ.get("SECRET_KEY")
-if not SECRET_KEY:
+if not SECRET_KEY or not SECRET_KEY.strip():
     if env_bool("RENDER", False):
         raise RuntimeError(
             "SECRET_KEY environment variable is required on Render. "
             "Set it in the service's Environment settings."
         )
-    # Nur für lokale Entwicklung: stabiler Dummy-Key (kein Zufalls-Reset mehr)
-    SECRET_KEY = "django-insecure-local-dev-key-not-for-production"
-
-DEBUG = env_bool("DEBUG", default=not env_bool("RENDER", False))
+    if not DEBUG:
+        raise RuntimeError("SECRET_KEY environment variable is required when DEBUG=False.")
+    SECRET_KEY = _secrets.token_urlsafe(50)
+    logger.warning(
+        "SECRET_KEY nicht gesetzt. Temporärer Schlüssel generiert – "
+        "Nur für lokale Entwicklung! Für stabile Sessions SECRET_KEY setzen."
+    )
 
 # Render stellt den öffentlichen Hostnamen automatisch als Env-Var bereit
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
@@ -163,6 +168,8 @@ else:
 # django-csp setzt den Content-Security-Policy Header automatisch.
 CSP_DEFAULT_SRC = ("'self'",)
 CSP_SCRIPT_SRC = ("'self'",)
+# Nur explizit markierte Template-Skripte dürfen inline ausgeführt werden.
+CSP_INCLUDE_NONCE_IN = ("script-src",)
 CSP_STYLE_SRC = ("'self'", "'unsafe-inline'")
 CSP_IMG_SRC = ("'self'", "data:")
 CSP_FONT_SRC = ("'self'",)
@@ -170,6 +177,14 @@ CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'self'",)
 CSP_BASE_URI = ("'self'",)
 CSP_FORM_ACTION = ("'self'",)
+
+# Nur IPs/CIDRs eigener Reverse-Proxys eintragen, die X-Forwarded-For bereinigen.
+# Leere Allowlist: ausschließlich die tatsächliche Peer-IP wird limitiert.
+RATE_LIMIT_TRUSTED_PROXIES = [
+    value.strip()
+    for value in os.environ.get("RATE_LIMIT_TRUSTED_PROXIES", "").split(",")
+    if value.strip()
+]
 
 LOGIN_URL = "/login/"
 # Signierte Cookie-Sessions entkoppeln Login und Passphrase vom kurzzeitig
@@ -405,11 +420,23 @@ BOT_CONFIG_REFRESH_SECONDS = env_int("BOT_CONFIG_REFRESH_SECONDS", 30, minimum=5
 # Passphrase-Gate (Landingpage vor Registrierung/Login)
 # ---------------------------------------------------------------------------
 PASSPHRASE = os.environ.get("PASSPHRASE")
-if not PASSPHRASE:
+if not PASSPHRASE or not PASSPHRASE.strip():
     if env_bool("RENDER", False):
         raise RuntimeError(
             "PASSPHRASE environment variable is required on Render. "
             "Generate it in the service environment settings."
         )
-    PASSPHRASE = "local-development-only"
+    if not DEBUG:
+        raise RuntimeError("PASSPHRASE environment variable is required when DEBUG=False.")
+    # Nur lokale Entwicklung: ein neuer Wert bei jedem Laden der Settings.
+    # Mehrere Worker/Neustarts benötigen dieselbe explizite Environment-Variable.
+    PASSPHRASE = _secrets.token_urlsafe(32)
+    logger.warning(
+        "PASSPHRASE nicht gesetzt. Generiert: %s – Nur für lokale Entwicklung!",
+        PASSPHRASE,
+    )
 PASSPHRASE_GATE_ENABLED = env_bool("PASSPHRASE_GATE_ENABLED", True)
+if not PASSPHRASE_GATE_ENABLED and (env_bool("RENDER", False) or not DEBUG):
+    raise RuntimeError(
+        "PASSPHRASE_GATE_ENABLED must be True on Render or when DEBUG=False."
+    )

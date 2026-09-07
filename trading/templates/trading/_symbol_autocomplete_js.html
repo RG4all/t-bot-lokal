@@ -1,4 +1,4 @@
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (() => {
   "use strict";
   const input = document.getElementById("id_symbols");
@@ -54,7 +54,7 @@
   });
 })();
 </script>
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (() => {
   "use strict";
   const button = document.getElementById("scan-markets");

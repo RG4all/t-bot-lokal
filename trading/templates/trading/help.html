@@ -14,7 +14,7 @@
 {% block content %}
 <div class="manual-toolbar d-flex justify-content-between align-items-center mb-3">
   <div><h1 class="h3 mb-0">Hilfe & Plattform-Manual</h1><small class="text-muted">Version {{ version }}</small></div>
-  <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="#manual-top">Nach oben</a><button class="btn btn-outline-primary" type="button" onclick="window.print()">Drucken</button></div>
+  <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="#manual-top">Nach oben</a><button class="btn btn-outline-primary" type="button" data-print-page>Drucken</button></div>
 </div>
 <article id="manual-top" class="card manual-content">{{ manual_html }}</article>
 {% endblock %}

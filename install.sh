@@ -588,10 +588,15 @@ write_local_config() {
     return 0
   fi
 
-  local render_flag="False"
+  local render_flag="False" generated_passphrase
   [[ "${RENDER_SIMULATION}" -eq 1 ]] && render_flag="True"
+  generated_passphrase="${PASSPHRASE:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')}" || \
+    die "Sichere Passphrase konnte nicht erzeugt werden."
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    chmod 600 "${CONFIG_FILE}"
+  fi
 
-  cat >"${CONFIG_FILE}" <<EOF
+  (umask 077; cat >"${CONFIG_FILE}" <<EOF
 # ============================================================================
 # t-bot-lokal - lokale Konfiguration (erzeugt von install.sh)
 # Nicht committen - Datei ist in .gitignore enthalten.
@@ -606,7 +611,7 @@ RENDER_SIMULATION=${render_flag}
 # --- Kern-Konfiguration -----------------------------------------------------
 DEBUG=True
 SECRET_KEY=${SECRET_KEY:-$(head -c 48 /dev/urandom 2>/dev/null | base64 | tr -d '/+=' | head -c 48)}
-PASSPHRASE=${PASSPHRASE:-local-t-bot}
+PASSPHRASE=${generated_passphrase}
 PASSPHRASE_GATE_ENABLED=True
 AUTOSTART_BOTS=True
 
@@ -627,6 +632,7 @@ CELERY_LOG_LEVEL=INFO
 CELERY_WORKER_MAX_MEMORY_PER_CHILD=384000
 EOF
 
+  )
   chmod 600 "${CONFIG_FILE}"
   log_info "Lokale Konfiguration geschrieben: ${CONFIG_FILE}"
 }

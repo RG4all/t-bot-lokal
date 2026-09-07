@@ -1,102 +1,102 @@
-"""
-IP-basiertes Rate-Limiting für Auth-Endpunkte.
+"""Begrenztes, prozesslokales Rate-Limit für POSTs auf Auth-Endpunkte.
 
-Schützt Login, Passphrase-Gate und Registrierung vor Brute-Force-Angriffen
-und Credential-Stuffing. Speichert Versuche in-memory – für Multi-Worker-
-Setup sollte Redis verwendet werden.
-
-Implementierung basierend auf ARENA_AI_PROMPTS.md Prompt 1.
+Für mehrere Web-Prozesse/Instanzen zusätzlich ein gemeinsames Limit am
+Reverse-Proxy oder in einem geteilten Backend einsetzen. Forwarded-Header
+werden nur von explizit konfigurierten, vertrauenswürdigen Proxys akzeptiert.
 """
 
 import logging
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict
+from ipaddress import ip_address, ip_network
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.http import JsonResponse
 
 logger = logging.getLogger("trading")
 
 
 class RateLimitMiddleware:
-    """IP-basiertes Rate-Limiting für Auth-Endpunkte.
+    """Zählt alle Auth-POSTs atomar, auch erfolgreiche Versuche."""
 
-    Schützt POST-Anfragen auf geschützten Pfaden vor Brute-Force-Angriffen.
-    Speichert Versuche in-memory (thread-safe mit threading.Lock).
-
-    Für Multi-Worker-Setup (z.B. Gunicorn mit mehreren Workers) sollte
-    Redis oder ein anderes gemeinsames Backend verwendet werden.
-    """
-
-    # Klassen-Variablen für geteilte State über alle Middleware-Instanzen
-    _attempts: dict[str, list[float]] = defaultdict(list)
+    _attempts: OrderedDict[str, list[float]] = OrderedDict()
     _lock = threading.Lock()
 
-    # Konfiguration
-    MAX_ATTEMPTS = 5  # Maximale Versuche pro IP
-    WINDOW_SECONDS = 900  # 15 Minuten Zeitfenster
-    PROTECTED_PATHS = (
-        "/login/",
-        "/gate/",
-        "/register/",
-    )
+    MAX_ATTEMPTS = 5
+    WINDOW_SECONDS = 900
+    MAX_TRACKED_IPS = 10_000
+    PROTECTED_PATHS = ("/login/", "/gate/", "/register/", "/admin/login/")
 
     def __init__(self, get_response):
         self.get_response = get_response
+        try:
+            self._trusted_proxies = tuple(
+                ip_network(network.strip(), strict=False)
+                for network in getattr(settings, "RATE_LIMIT_TRUSTED_PROXIES", ())
+            )
+        except ValueError as exc:
+            raise ImproperlyConfigured(
+                "RATE_LIMIT_TRUSTED_PROXIES must contain IP addresses or CIDR networks."
+            ) from exc
 
     def __call__(self, request):
-        """Verarbeitet eine Anfrage und wendet Rate-Limiting an.
-
-        Nur POST-Anfragen auf geschützten Pfaden werden gezählt.
-        GET-Anfragen werden niemals limitiert.
-        """
-        if request.method == "POST" and request.path in self.PROTECTED_PATHS:
-            client_ip = self._get_client_ip(request)
-            if self._is_rate_limited(client_ip):
-                logger.warning(
-                    "Rate-Limit überschritten für IP %s auf Pfad %s",
-                    client_ip,
-                    request.path,
-                )
-                return JsonResponse(
-                    {
-                        "error": "Zu viele Versuche. Bitte 15 Minuten warten.",
-                    },
-                    status=429,
-                    headers={"Retry-After": str(self.WINDOW_SECONDS)},
-                )
-            self._record_attempt(client_ip)
+        if (
+            request.method == "POST"
+            and request.path_info in self.PROTECTED_PATHS
+            and self._consume_attempt(self._get_client_ip(request))
+        ):
+            logger.warning("Auth-Rate-Limit erreicht auf Pfad %s", request.path_info)
+            return JsonResponse(
+                {"error": "Zu viele Versuche. Bitte 15 Minuten warten."},
+                status=429,
+                headers={"Retry-After": str(self.WINDOW_SECONDS)},
+            )
         return self.get_response(request)
 
-    def _is_rate_limited(self, ip: str) -> bool:
-        """Prüft ob die IP das Rate-Limit überschritten hat.
-
-        Entfernt automatisch abgelaufene Einträge aus dem Speicher.
-        """
-        now = time.time()
+    def _consume_attempt(self, ip):
+        """Prüft und reserviert unter demselben Lock; bei vollem Speicher sperren."""
         with self._lock:
-            # Alte Einträge die außerhalb des Zeitfensters liegen entfernen
-            self._attempts[ip] = [
-                t
-                for t in self._attempts[ip]
-                if now - t < self.WINDOW_SECONDS
-            ]
-            return len(self._attempts[ip]) >= self.MAX_ATTEMPTS
+            now = time.monotonic()
+            cutoff = now - self.WINDOW_SECONDS
+            # Nach letztem akzeptierten Versuch sortiert: auch inaktive IPs
+            # werden entfernt, ohne bei jedem Request die gesamte Map zu scannen.
+            while self._attempts:
+                oldest = next(iter(self._attempts))
+                if self._attempts[oldest][-1] > cutoff:
+                    break
+                self._attempts.popitem(last=False)
 
-    def _record_attempt(self, ip: str) -> None:
-        """Zeichnet einen fehlgeschlagenen Versuch auf."""
-        with self._lock:
-            self._attempts[ip].append(time.time())
+            attempts = [t for t in self._attempts.get(ip, ()) if t > cutoff]
+            if len(attempts) >= self.MAX_ATTEMPTS:
+                return True
+            if ip not in self._attempts and len(self._attempts) >= self.MAX_TRACKED_IPS:
+                return True
+            self._attempts[ip] = [*attempts, now]
+            self._attempts.move_to_end(ip)
+            return False
 
-    @staticmethod
-    def _get_client_ip(request) -> str:
-        """Extrahiert die Client-IP unter Berücksichtigung von Proxys.
+    def _get_client_ip(self, request):
+        """Liest die Proxy-Kette von rechts bis zum ersten nicht vertrauten Hop.
 
-        Unterstützt X-Forwarded-For Header für Reverse-Proxy-Setup.
+        Der Proxy muss die tatsächliche Peer-IP anhängen oder den Header
+        überschreiben. Ohne Allowlist zählt ausschließlich REMOTE_ADDR.
         """
-        xff = request.META.get("HTTP_X_FORWARDED_FOR")
-        if xff:
-            # X-Forwarded-For kann mehrere IPs enthalten (kommagetrennt)
-            # Die erste IP ist der ursprüngliche Client
-            return xff.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "0.0.0.0")
+        remote = request.META.get("REMOTE_ADDR", "")
+        try:
+            address = ip_address(remote)
+        except ValueError:
+            return "unknown"
+
+        forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if len(forwarded) > 2048:
+            return str(address)
+        for hop in reversed(forwarded.split(",")):
+            if not any(address in network for network in self._trusted_proxies):
+                break
+            try:
+                address = ip_address(hop.strip())
+            except ValueError:
+                return str(ip_address(remote))
+        return str(address)

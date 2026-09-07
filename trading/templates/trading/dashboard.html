@@ -27,7 +27,7 @@
             <a class="btn btn-outline-primary" title="Maschinenlesbarer Trading-Export aller Logzeilen für Tabellenkalkulation und weitere Analysen" href="{% url 'generate_report_csv' config.id %}">CSV</a>
         </div>
         <button id="kill-switch" class="btn btn-danger" type="button" title="Notfallfunktion: ruft frische Kurse ab und schließt nach doppelter Bestätigung alle offenen Paper-Positionen" {% if not config.is_running %}disabled{% endif %}>⚠ Alle Positionen schließen</button>
-        <form method="post" action="{% url 'reset_log' config.id %}" onsubmit="return confirm('Trading-Log und simuliertes Portfolio wirklich zurücksetzen?');">
+        <form method="post" action="{% url 'reset_log' config.id %}" data-confirm="Trading-Log und simuliertes Portfolio wirklich zurücksetzen?">
             {% csrf_token %}<button class="btn btn-warning" title="Löscht die Trading-Historie und setzt das simulierte Portfolio zurück" type="submit">Trading-Log zurücksetzen</button>
         </form>
     </div>
@@ -174,7 +174,7 @@
 {% block extra_js %}
 {% if config %}
 <script src="{% static 'js/plotly-3.0.0.min.js' %}"></script>
-<script>
+<script nonce="{{ request.csp_nonce }}">
 (() => {
     "use strict";
     const configId = {{ config.id }};

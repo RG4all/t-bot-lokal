@@ -6,6 +6,8 @@
 
 ---
 
+> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.4 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
+
 ## 1. Executive Summary
 
 Das Projekt **t-bot-lokal** ist eine Django-basierte Kryptocurrency Paper-Trading-Plattform mit integriertem Backtesting, Live-Bot-Steuerung und WebSocket-Marktdaten. Die Codebasis zeigt ein **solides Sicherheitsbewusstsein** mit mehreren schützenden Schichten (Passphrase-Gate, CSRF, Session-Cookies, DB-Circuit-Breaker). Es wurden jedoch mehrere Schwachstellen identifiziert:
@@ -144,36 +146,13 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.4 MITTEL – Passphrase als Fallback-Hardcoded in Settings
+### 2.4 Passphrase-Fallback – behoben in 2.4.4
 
-**Datei:** `trading_bot_project/settings.py` (Zeilen 384–391)
+**Bestätigtes Risiko:** Die frühere öffentliche Default-Passphrase ermöglichte bei fehlender Konfiguration das Passieren des Gates. Ein zusätzlich öffentlicher `SECRET_KEY` erlaubte sogar das Fälschen der signierten Gate-Cookies; der Gate-Fix musste deshalb beide Pfade schließen. In der Render-Docker-Kombination war der Gate außerdem über das Basis-Image deaktiviert.
 
-```python
-PASSPHRASE = os.environ.get("PASSPHRASE")
-if not PASSPHRASE:
-    if env_bool("RENDER", False):
-        raise RuntimeError("PASSPHRASE environment variable is required on Render.")
-    PASSPHRASE = "local-development-only"
-```
+**Umgesetzt:** `secrets.token_urlsafe(32)` und Passphrase-WARNING nur bei lokalem `DEBUG=True` ohne Render. Bei `DEBUG=False` bzw. auf Render starten fehlende/leere Secrets oder ein deaktivierter Gate nicht. Signierschlüssel sind auch lokal privat; Compose und Installer verwenden keine öffentlichen App-Defaults mehr. Alte Gate-Cookies werden durch HMAC-gebundene Freigaben ungültig. Konfigurierte Secrets erscheinen nicht im Log.
 
-**Auswirkung:** Der Hardcoded-Passphrase `local-development-only` ist in der Public-Repository-Datei sichtbar. Wenn jemand vergisst, die Passphrase in einer Docker-Umgebung zu setzen, ist der Gate wirkungslos.
-
-**Lösungsvorschlag:**
-
-```python
-PASSPHRASE = os.environ.get("PASSPHRASE")
-if not PASSPHRASE:
-    if env_bool("RENDER", False):
-        raise RuntimeError("PASSPHRASE environment variable is required on Render.")
-    # Generiere eine zufällige Passphrase pro Prozessstart – verhindert
-    # Nutzung in Produktion, erlaubt lokale Entwicklung
-    import secrets
-    PASSPHRASE = secrets.token_urlsafe(32)
-    logger.warning(
-        "PASSPHRASE nicht gesetzt. Generiert: %s – Lokale Entwicklung nur!",
-        PASSPHRASE
-    )
-```
+**Priorität:** Hoch für die kombinierbaren Gate-/Signierschlüssel-Fehlkonfigurationen; kein automatischer Zugriff auf fremde Nutzerobjekte, deren Autorisierung zusätzlich gilt. Testnachweise, verbleibende Deployment-Anforderungen und False Positives stehen im [Nachreview](SECURITY_REVIEW_2.4.4.md).
 
 ---
 

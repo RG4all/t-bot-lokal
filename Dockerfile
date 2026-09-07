@@ -1,12 +1,11 @@
 FROM python:3.12.7-slim-bookworm
 
-# Lokale Container starten ohne vorgeschaltetes Gate; Produktion kann es per
-# Environment-Variable wieder aktivieren.
+# Gate standardmäßig aktiv lassen, insbesondere auf Render. Nur der lokale
+# Compose-Stack darf es explizit im DEBUG-Modus deaktivieren.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    PASSPHRASE_GATE_ENABLED=False \
     PORT=8369
 
 WORKDIR /app

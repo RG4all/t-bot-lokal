@@ -25,6 +25,7 @@ ASSUME_YES=1
 RENDER_SIMULATION=0
 MODE="host"
 
+unset PASSPHRASE SECRET_KEY
 write_local_config
 assert_file_exists "${CONFIG_FILE}" "Konfigurationsdatei wurde erstellt"
 
@@ -54,6 +55,10 @@ else
   fail "SECRET_KEY enthaelt Placeholder"
 fi
 
+# Passphrase ohne Environment-Wert kryptographisch zufällig (32 Bytes, URL-safe).
+passphrase="$(grep -E '^PASSPHRASE=' "${CONFIG_FILE}" | cut -d= -f2-)"
+assert_match '^[A-Za-z0-9_-]{43}$' "${passphrase}" "PASSPHRASE ist ein URL-safe Zufallswert"
+
 # Keine Hardcoded-Credentials: PASSWORT in DATABASE_URL darf nicht stehen.
 if grep -qE '^DATABASE_URL=.*password' "${CONFIG_FILE}"; then
   fail "DATABASE_URL sollte kein Klartext-Passwort enthalten"
@@ -82,6 +87,17 @@ else
   # Bei gleiches Geheimnis kann der Hash identisch sein - pruefen, dass Datei existiert.
   assert_file_exists "${CONFIG_FILE}" "ASSUME_YES=1: Datei existiert"
 fi
+
+new_passphrase="$(grep -E '^PASSPHRASE=' "${CONFIG_FILE}" | cut -d= -f2-)"
+if [[ "${new_passphrase}" != "${passphrase}" ]]; then
+  pass "Unabhängige Konfigurationen erhalten verschiedene Passphrasen"
+else
+  fail "Passphrase wurde beim Neuanlegen wiederverwendet"
+fi
+PASSPHRASE="installer-explicit-test-only"
+write_local_config
+configured_passphrase="$(grep -E '^PASSPHRASE=' "${CONFIG_FILE}" | cut -d= -f2-)"
+assert_eq "${PASSPHRASE}" "${configured_passphrase}" "Explizite Passphrase bleibt erhalten"
 
 # Template-Vorlage im Repo sollte vorhanden und dokumentiert sein.
 assert_file_exists "${REPO_ROOT}/config.template" "config.template im Repo"

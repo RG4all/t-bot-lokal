@@ -241,7 +241,9 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 384–391)
 
-### Der vollständige Arena.ai Agenten-Prompt
+**Status: umgesetzt in 2.4.4.** Die Nachprüfung ergänzt den ursprünglichen Vorschlag um einen `DEBUG=False`-Startabbruch, private Signierschlüssel, einen aktiven Produktions-Gate und rotationsgebundene Session-Nachweise. Zufällige Secrets allein erkennen keine Produktionsumgebung. Siehe [Security-Review](SECURITY_REVIEW_2.4.4.md).
+
+### Ursprünglicher Arena.ai Agenten-Prompt mit korrigiertem Zielcode
 
 ```
 Du bist ein Senior Security Engineer für ein Django-basiertes Krypto-Paper-Trading-System 
@@ -279,11 +281,12 @@ if not PASSPHRASE:
 import secrets as _secrets
 
 PASSPHRASE = os.environ.get("PASSPHRASE")
-if not PASSPHRASE:
+if not PASSPHRASE or not PASSPHRASE.strip():
     if env_bool("RENDER", False):
         raise RuntimeError("PASSPHRASE environment variable is required on Render.")
-    # Dynamisch generierte Passphrase für lokale Entwicklung
-    # Verhindert Nutzung in Produktion – jeder Prozessstart generiert eine neue
+    if not DEBUG:
+        raise RuntimeError("PASSPHRASE environment variable is required when DEBUG=False.")
+    # Nur für lokale Entwicklung: neuer Wert bei jedem Laden der Settings.
     PASSPHRASE = _secrets.token_urlsafe(32)
     logger.warning(
         "PASSPHRASE nicht gesetzt. Generiert: %s – Nur für lokale Entwicklung!",
@@ -291,12 +294,12 @@ if not PASSPHRASE:
     )
 
 VALIDIERUNGSKRITERIEN:
-- [ ] Kein hardcodierter Passphrase in settings.py
-- [ ] Dynamische Generierung mit secrets.token_urlsafe
-- [ ] Warning-Log wird ausgegeben
-- [ ] RuntimeError wird bei Render ohne PASSPHRASE geworfen
-- [ ] .env.example hat Kommentar
-- [ ] PR-Commit-Message: "fix(security): replace hardcoded passphrase with dynamic generation"
+- [x] Kein hardcodierter Passphrase in settings.py
+- [x] Dynamische Generierung mit secrets.token_urlsafe
+- [x] Warning-Log wird ausgegeben
+- [x] RuntimeError wird bei Render ohne PASSPHRASE geworfen
+- [x] .env.example hat Kommentar
+- [x] PR-Commit-Message: "fix(security): replace hardcoded passphrase with dynamic generation"
 ```
 
 ---

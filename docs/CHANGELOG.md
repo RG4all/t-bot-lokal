@@ -2,6 +2,36 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.4] – 2026-09-07
+
+### Sicherheit
+
+- **Passphrase ohne öffentlichen Fallback:** Lokale Settings generieren mit `secrets.token_urlsafe(32)` einen temporären Wert und melden ihn als WARNING. Auf Render oder bei `DEBUG=False` führen fehlende/leere (auch reine Leerraum-)Secrets zum `RuntimeError`; dort wird kein Zufalls-Secret geloggt. Explizite Passphrasen bleiben unverändert.
+- **Signierte Gate-Sessions:** Auch der lokale `SECRET_KEY` ist bei fehlender Konfiguration zufällig statt öffentlich. Gate-Nachweise sind HMAC-SHA256-gebunden an die aktuelle Passphrase und den Signierschlüssel. Alte boolesche Freigaben sowie Freigaben vor einer Rotation werden abgelehnt; WebSocket-Verbindungen prüfen zusätzlich den Gate.
+- **Produktions-Gate bleibt aktiv:** Das Basis-Docker-Image deaktiviert ihn nicht mehr. Render setzt ihn explizit aktiv; `PASSPHRASE_GATE_ENABLED=False` ist auf Render bzw. bei `DEBUG=False` ein Startfehler. Lokales Compose bleibt ein ausdrücklich isoliertes DEBUG-Profil mit optionalem Gate.
+- **Setup-Secrets:** Compose verlangt `SECRET_KEY` und `PASSPHRASE`. Installer/Tuner erzeugen private Passphrasen, erhalten vorhandene Werte und schreiben Secrets-Dateien mit restriktiven Berechtigungen. Retuning respektiert einen bereits aktivierten Gate.
+- **Auth-Rate-Limit:** Ungeprüftes `X-Forwarded-For` kann keine neuen Zähler mehr erzeugen. Optionale, explizite Proxy-Allowlist mit Auswertung von rechts; atomare Prüfung/Reservierung; begrenzter Speicher mit globalem Ablauf inaktiver Einträge. Admin-Login mitgeschützt, weiterhin fünf POSTs je IP/15 Minuten/Prozess.
+- **Keine neue Runtime-Abhängigkeit.** Vorhandene Pins unverändert; Dependency-Audit und kontextbezogene Bandit-Auswertung im Security-Review dokumentiert.
+
+### Bug-Fixes und Wartbarkeit
+
+- Unicode-Passphrasen lösen keinen `TypeError` mehr aus; timing-sicherer Vergleich ohne unerwartetes Trimmen. Passphrase-POSTs und Vergleichsvariablen sind für Django-Fehlerberichte als sensibel markiert.
+- Bestehende CSP blockiert die eigenen Template-Skripte nicht mehr: frische Request-Nonces statt pauschalem `unsafe-inline`, Event-Listener statt Inline-Handler. Die Backtest-Laufzeitschätzung verwendet localeunabhängige JavaScript-Zahlen.
+- Fehlende Migration `0014_configuration_leverage_trade_direction` ergänzt die bereits im Modell vorhandenen Felder. Veraltete Formular-Testdaten korrigiert; kein neuer Trading-Algorithmus.
+- Render-Vorlagen referenzieren den Integrationsbranch `tbot.local` statt eines veralteten Arbeitsbranches. Redundante Ignore-Regeln und unbenutzte Test-Imports entfernt.
+
+### Tests und Dokumentation
+
+- Startmatrix für lokale Entwicklung/Produktion/Render, Generierung und Logging, Gate/CSRF/Unicode, Rotation und WebSocket-Autorisierung, Rate-Limit-Parallelität/Proxy-Spoofing, CSP-Nonces und Setup-Idempotenz regressionsgetestet.
+- Beide READMEs, Env-Beispiele, Konfigurationstemplate, Handbuch/API-Zugriff, lokale Anleitung, FAQ, historische Review-Verweise und Prompt-Status aktualisiert. [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md) enthält nach Priorität bewertete Befunde, False Positives, Testprotokoll und Prüfgrenzen.
+
+### Upgrade-Hinweise
+
+- Vor dem Deploy private `SECRET_KEY`/`PASSPHRASE` für **alle** App-Prozesse setzen und den Produktions-Gate aktiv lassen. Zuvor öffentliche Default-Secrets ersetzen. Nur lokale Entwicklung darf temporäre Werte aus der Konsole verwenden.
+- `python manage.py migrate --noinput` ausführen. Das Docker-Entrypoint erledigt Migrationen beim Start; bestehende Konfigurationen erhalten `leverage=1` und `trade_direction=long`.
+- Benutzer müssen den Gate nach dem Upgrade erneut freigeben. Signierschlüssel-Rotation invalidiert zusätzlich Login-Cookies. App-Secret-Rotation erfordert **kein Löschen von DB-Volumes**.
+- Proxy-Peer-IPs/CIDRs für `RATE_LIMIT_TRUSTED_PROXIES` prüfen. Ohne Allowlist teilen sich Proxy-Clients dessen IP-Limit. Mehrere Web-Prozesse/Instanzen benötigen ein zusätzliches gemeinsames Rate-Limit.
+
 ## [2.4.3] – 2026-09-07
 
 ### Sicherheitsfix: Content-Security-Policy (CSP)

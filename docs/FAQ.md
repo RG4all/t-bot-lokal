@@ -53,7 +53,7 @@ Dass `tuner` im Status `Exited` steht, ist **erwuenscht** (One-Shot-Container).
 Der lokale Docker-Stack ist standardmäßig ohne Passphrase-Gate aktiviert. Dann
 führt `/` direkt zu `/login/`; der normale Login bleibt davon unberührt. Ein
 302 auf `/gate/` erscheint nur, wenn `PASSPHRASE_GATE_ENABLED=True` gesetzt
-wurde. Das ist für eine öffentlich erreichbare Instanz empfehlenswert.
+wurde. In Produktion ist ein aktiver Gate ab 2.4.4 zwingend; das lokale DEBUG-Compose-Profil ist nicht für öffentlich erreichbare Instanzen geeignet.
 
 Test im Standardsetup:
 
@@ -62,12 +62,19 @@ curl -i http://localhost:8369/          # -> 302, Location: /login/
 curl -i http://localhost:8369/health/   # -> 200 OK, JSON {"status":"ok"}
 ```
 
-Zum Aktivieren des zusätzlichen Gates in `.env` setzen:
+Zum Aktivieren des zusätzlichen Gates in der verwendeten `.env.local` bzw. `.env` `PASSPHRASE_GATE_ENABLED=True` setzen. Eine private Passphrase erzeugen:
 
-```dotenv
-PASSPHRASE_GATE_ENABLED=True
-PASSPHRASE=eigenes-geheimes-wort
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+Den Wert als `PASSPHRASE` in der privaten Env-Datei speichern, dann die App-Container neu erstellen. Compose verlangt ab 2.4.4 **auch bei deaktiviertem lokalem Gate** explizite App-Secrets. `scripts/setup_local.sh` erzeugt sie automatisch und schaltet einen bereits aktivierten Gate beim Retuning nicht mehr aus.
+
+### Warum sehe ich eine generierte Passphrase im WARNING?
+
+Nur lokale Settings (`DEBUG=True`, kein Render) erzeugen bei fehlender/leerer Passphrase einen temporären Zufallswert. Dieser erscheint in der Startkonsole und gilt nur für diesen Settings-Ladevorgang. Management-Kommandos und Autoreload können andere Werte ausgeben; für einen Ein-Prozess-Test `runserver --noreload` verwenden. Für dauerhaften Zugriff beide Secrets explizit setzen. Ein temporärer `SECRET_KEY` wird nie ausgegeben; konfigurierte Passphrasen werden ebenfalls nicht geloggt.
+
+Auf Render oder bei `DEBUG=False` ist stattdessen ein `RuntimeError` beabsichtigt: `SECRET_KEY` und `PASSPHRASE` setzen und `PASSPHRASE_GATE_ENABLED=True` beibehalten. DEBUG nicht aktivieren, um diese Prüfung in Produktion zu umgehen.
 
 ## 4. `http://localhost:8369` antwortet nicht - Container sind aber healthy
 
@@ -156,15 +163,20 @@ Nicht beide gleichzeitig nutzen - es kann zu Passwort-Konflikten kommen
 
 ## 8. Passwoerter aendern / Secret-Rotation
 
+Für **App-Secrets** (`SECRET_KEY`, `PASSPHRASE`):
+
 ```bash
-# 1. In .env.local aendern:
+# Neue private Werte in derselben Env-Datei speichern:
 ${EDITOR:-nano} .env.local
-# 2. Postgres-Volume neu initialisieren (Postgres liest neues Passwort nur bei leerem Volume):
-scripts/setup_local.sh --reset-db --yes
+# Environment-Änderungen übernehmen (restart allein reicht dafür nicht):
+docker compose --env-file .env.local up -d --force-recreate web backtest-worker
+# Falls der Scheduler verwendet wird, auch diesen neu erstellen:
+# docker compose --env-file .env.local --profile scheduler up -d --force-recreate scheduler
 ```
 
-`SECRET_KEY` und `PASSPHRASE` werden von der App bei jedem Neustart
-gelesen und benoetigen kein Volume-Reset.
+Alle App-Prozesse müssen dieselben Secrets erhalten. Eine neue Passphrase widerruft alte Gate-Freigaben; ein neuer Signierschlüssel invalidiert zusätzlich die Django-Login-Cookies. Beim Upgrade auf 2.4.4 werden alte boolesche Gate-Freigaben bereits abgelehnt. Bei zuvor öffentlichen Default-Secrets beide Werte rotieren. Auf Render die Service-Secrets aktualisieren und alle betroffenen Services neu deployen.
+
+**Kein Volume-Reset für App-Secrets.** Ein `POSTGRES_PASSWORD`-Wechsel erfordert eine separate Datenbank-Passwortänderung durch den DB-Administrator sowie die passende Verbindungskonfiguration. `--reset-db --yes` löscht lokale Daten und ist nur für ausdrücklich entbehrliche Entwicklungsdaten gedacht, nicht für Secret-Rotation in Produktion.
 
 ## 9. Render-Free-Simulation lokal testen
 
@@ -255,3 +267,7 @@ tests/distro_smoke_test.sh
    `git pull` immer `--build` verwenden.
 6. **Die Startseite braucht Datenbank/Redis**; `/health/` ist davon
    unabhaengig und der beste erste Erreichbarkeitstest.
+
+## 15. Warum liefert der Gate HTTP 429 hinter einem Proxy?
+
+Alle Auth-POSTs (auch erfolgreiche) teilen ein Limit von fünf Versuchen pro IP, 15 Minuten und Web-Prozess. Ohne `RATE_LIMIT_TRUSTED_PROXIES` wird ausschließlich `REMOTE_ADDR` verwendet. Hinter einem Reverse-Proxy können dadurch alle Nutzer denselben Zähler teilen. Nur tatsächlich kontrollierte Proxy-Peer-IPs/CIDRs eintragen und sicherstellen, dass dieser Proxy `X-Forwarded-For` bereinigt oder die tatsächliche Client-IP anhängt. Client-gelieferte Header alleine dürfen keine neue Identität erzeugen. Bei mehreren Web-Prozessen ein zusätzliches gemeinsames Limit einsetzen.

@@ -7,11 +7,15 @@
 
 ---
 
+## Nachprüfung 2.4.4 – 2026-09-07
+
+Der ursprüngliche Review bleibt als Historie erhalten. Die Nachprüfung korrigiert öffentliche App-Defaults, den im Basis-Image deaktivierten Gate und das Überschreiben einer aktivierten Gate-Konfiguration beim Retuning. Secrets-Dateien werden vor dem Schreiben geschützt. Aktuelle Befunde, Grenzen und Testprotokoll: [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md).
+
 ## 1. Checkliste Sicherheit
 
 | Kriterium | Status | Bewertung / Nachweis |
 |---|---|---|
-| Keine Hardcoded-Credentials | ✅ | `SECRET_KEY`/`PASSPHRASE` werden zur Laufzeit aus `/dev/urandom` generiert bzw. aus Env-Variablen gelesen. In `config.template` und `local.env` stehen nur Platzhalter/Default-Passphrasen fuer lokale Entwicklung. |
+| Private App-Secrets (Nachprüfung 2.4.4) | ✅ | `SECRET_KEY`/`PASSPHRASE` werden privat generiert oder explizit übernommen. Compose verlangt beide Werte; `config.template` enthält leere Pflichtfelder. Der lokale DB-Default ist hiervon ausdrücklich ausgenommen und nicht für Produktion geeignet. |
 | Sichere Temp-Files | ✅ | `mktemp -t tbot-install.XXXXXXXXXX.log` und `trap ... EXIT` in `install.sh`; `mktemp` auch in `hardware-test.sh` und allen Tests. Dateien werden mit `chmod 600` (Config) bzw. `644` (nicht-sensitive Berichte) angelegt. |
 | Input-Validierung | ✅ | `parse_args()` validiert `--mode` (`auto|host|container`) und `--profile` (`full|runtime`); unbekannte Optionen fuehren zu `die()` mit klarem Fehler. `env_int`/Integer-Pruefung in den Heuristiken. |
 | `set -euo pipefail` | ✅ | In allen ausfuehrbaren Skripten aktiv. |
@@ -20,7 +24,7 @@
 | Redis/Bind-Adresse | ✅ | Redis im Compose nur intern; `REDIS_URL=redis://redis:6379/0`. Lokal wird der Default auf `127.0.0.1` gesetzt. |
 | Kein `curl | bash` | ✅ | Es werden ausschliesslich Distributions-Paketquellen verwendet. |
 | Shellcheck-Analyse | ✅ | `shellcheck` (v0.11.0) meldet 0 Warnungen/Fehler fuer alle Produktiv- und Testskripte. |
-| Geheimnisse im Log | ✅ | `SECRET_KEY`/`PASSPHRASE` werden nicht geloggt; Paketmanager-Output geht in eine Datei mit `chmod 600`. |
+| Geheimnisse im Log (Nachprüfung 2.4.4) | ✅ | Installer/Tuner loggen keine persistierten App-Secrets. Ausschließlich lokale Django-Settings zeigen eine temporär generierte Passphrase als WARNING; konfigurierte Passphrasen und Signierschlüssel werden nicht ausgegeben. Produktionsstarts ohne Secrets schlagen fehl. |
 
 ## 2. Checkliste Performance / Ressourcen-Tuning
 
