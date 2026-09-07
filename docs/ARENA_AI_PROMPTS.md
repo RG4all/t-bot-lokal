@@ -436,6 +436,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading/views.py`
 
+**Status: Fixed in 2.4.8.** Der Decorator `no_cache_json` in `trading/views.py` setzt `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache` auf allen zehn API-Endpunkten (inklusive `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api` und `server_resources_api`). Der Decorator ist als innerster Decorator platziert und erfasst damit auch Fehlerantworten (400/503). **9 Regressionstests** in `trading/tests/test_cache_control.py` prüfen Quellcode und ausgelieferte Header über den echten Middleware-Stack; bestehende 165 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](SEC-08-cache-control-api.md), [Audit §2.8](SECURITY_AUDIT.md).
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

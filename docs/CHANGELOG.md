@@ -2,6 +2,27 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.8] – 2026-09-07
+
+### Sicherheit
+
+- **SEC-08 – Cache-Control-Header für alle API-Endpunkte:** Der neue Decorator `no_cache_json` in `trading/views.py` setzt auf jeder API-Antwort `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` sowie `Pragma: no-cache`. Damit speichern Browser und zwischengeschaltete Proxies/CDNs keine benutzerbezogenen Handels-, Portfolio-, Log- oder Marktdaten mehr zwischen. Der Header gilt auch für von den Views erzeugte Fehlerantworten (z. B. 400/503).
+- **Betroffene Endpunkte:** `/api/info/`, `/api/bot/status/`, `/api/logs/`, `/api/data_logs/`, `/api/trades/`, `/api/symbols/`, `/api/market-opportunities/` (und `/api/top-movers/`), `/api/backtesting/status/`, `/api/backtesting/estimate/`, `/api/resources/`.
+- Keine neue Runtime-Abhängigkeit, keine Migration und keine API-/Nutzdatenänderung; die Header ergänzen lediglich die bestehenden Antworten.
+- **SEC-05 nachgeprüft:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen weiterhin grün.
+
+### Tests
+
+- Neu `trading/tests/test_cache_control.py` (9 Tests): Quellcode-Prüfungen, dass der Decorator existiert, die erwarteten Header-Werte setzt und auf alle zehn API-Views angewendet ist; Integrationstests über den echten Middleware-Stack für 200-, 400- und 503-Antworten sowie die unveränderte eigentümerbezogene 404-Autorisierung.
+- Rot → grün: Vor dem Fix fehlte der Decorator vollständig; die Quellcode-Prüfungen und sämtliche Header-Asserts schlugen fehl.
+- Lokale Validierung: **174 Django-/Python-Tests** (9 neue + 165 bestehende), Ruff, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` bestanden.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.8** erhöht; Sicherheitsabschnitte in beiden READMEs und im Handbuch ergänzt.
+- Befund §2.8 im Security-Audit und Prompt 8 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-08](SEC-08-cache-control-api.md) ergänzt.
+- Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Antworten eines vorgeschalteten Reverse-Proxys/CDNs werden von Django nicht automatisch mit den Headern versehen; dort bei Bedarf eine entsprechende no-cache-Konfiguration ergänzen.
+
 ## [2.4.7] – 2026-09-07
 
 ### Sicherheit
