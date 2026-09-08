@@ -9,8 +9,9 @@
 #      fuer Redis, PostgreSQL und die Compose-CPU-Limits zu erzeugen.
 #      Bereits vorhandene Secrets (SECRET_KEY, PASSPHRASE, POSTGRES_PASSWORD)
 #      bleiben beim Retuning erhalten.
-#   3. Legt beim ersten Lauf .env.local an (Mode 0600), schreibt aber nie
-#      hartcodierte App-Secrets (das lokale DB-Passwort bleibt kompatibel).
+#   3. Legt beim ersten Lauf .env.local an (Mode 0600) und schreibt nie
+#      hartcodierte oder oeffentlich bekannte Secrets; das lokale
+#      DB-Passwort wird zufaellig erzeugt und beim Retuning beibehalten.
 #   4. Baut die Images und startet den isolierten Stack mit
 #      `docker compose up --build -d`.
 #
@@ -149,12 +150,25 @@ write_env_local() {
   [[ -z "${secret_key}" ]]  && secret_key="$(random_secret)"
   [[ -z "${passphrase}" ]]  && passphrase="$(random_secret)"
   [[ -z "${gate_enabled}" ]] && gate_enabled="False"
-  # Ein festes, nur-lokal Default-Passwort verhindert Password-Mismatches
-  # gegenueber frueheren Compose-Laeufen mit demselben Default. Wer ein
-  # individuelles Passwort moechte, kann es vor dem ersten Lauf in .env.local
-  # setzen oder dieses Skript mit --reset-db neu initialisieren.
-  [[ -z "${pg_password}" ]]  && pg_password="tbot-local-password"
+  # Zufälliges, privat gehaltenes Datenbank-Passwort statt eines öffentlichen
+  # Defaults: docker-compose.yml verlangt POSTGRES_PASSWORD seit 2.4.11 als
+  # Pflichtwert (${POSTGRES_PASSWORD:?...}). Bestehende Werte bleiben beim
+  # Retuning erhalten; ein einmal initialisiertes Postgres-Volume akzeptiert
+  # nur das Passwort aus dem ersten Lauf (siehe docs/FAQ.md Abschnitt 5).
+  [[ -z "${pg_password}" ]]  && pg_password="$(random_secret)"
   [[ -z "${web_port}" ]]     && web_port="8369"
+
+  # Rotationshinweis, falls noch der frueher oeffentliche Standard verwendet
+  # wird. Der Wert selbst steht seit SEC-12 bewusst nirgends mehr im
+  # Repository; der SHA-256-Vergleich identifiziert ihn ohne erneute
+  # Veroeffentlichung zuverlaessig.
+  legacy_pg_default_sha256="e7013a6e80c208770b6a8a89806e2a2fd7344cdd1596555234254a6df4003236"
+  if [[ "$(printf '%s' "${pg_password}" | sha256sum | cut -d' ' -f1)" == "${legacy_pg_default_sha256}" ]]; then
+    warn "POSTGRES_PASSWORD entspricht dem frueher oeffentlichen Standard-Passwort."
+    warn "Rotation empfohlen: 1) POSTGRES_PASSWORD-Zeile in ${ENV_LOCAL} leeren,"
+    warn "2) dieses Skript erneut ausfuehren, 3) 'scripts/setup_local.sh --reset-db --yes'"
+    warn "(loescht die lokale Datenbank, siehe docs/FAQ.md Abschnitt 5)."
+  fi
 
   info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."
   umask 077

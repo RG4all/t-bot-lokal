@@ -7,9 +7,12 @@ x-app-environment: &app-environment
   PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in the env file or run scripts/setup_local.sh}
   # Nur lokaler DEBUG-Stack: Gate optional. Private Secrets bleiben Pflicht,
   # damit ein später aktivierter Gate nicht mit öffentlichen Defaults arbeitet.
+  # Seit 2.4.11 gilt das auch für POSTGRES_PASSWORD: ${VAR:?...} bricht die
+  # Compose-Interpolation ab, sobald ein Secret fehlt oder leer ist - es gibt
+  # bewusst keinen öffentlich bekannten Default-Passwort-Fallback mehr.
   PASSPHRASE_GATE_ENABLED: ${PASSPHRASE_GATE_ENABLED:-False}
   RATE_LIMIT_TRUSTED_PROXIES: ${RATE_LIMIT_TRUSTED_PROXIES:-}
-  DATABASE_URL: postgresql://${POSTGRES_USER:-tbot}:${POSTGRES_PASSWORD:-tbot-local-password}@postgres:5432/${POSTGRES_DB:-tbot}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-tbot}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the env file or run scripts/setup_local.sh}@postgres:5432/${POSTGRES_DB:-tbot}
   DATABASE_SSL_REQUIRE: "False"
   REDIS_URL: redis://redis:6379/0
   EXCHANGE_API_KEY: ${EXCHANGE_API_KEY:-}
@@ -53,7 +56,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tbot}
       POSTGRES_USER: ${POSTGRES_USER:-tbot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tbot-local-password}
+      # Pflichtwert ohne Default (SEC-12): kein öffentliches Standard-Passwort
+      # im Repository. Nur Benutzer- und DB-Name behalten lokale Defaults.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the env file or run scripts/setup_local.sh}
       # Override in .env moeglich; werden vom Tuner sonst ueberschrieben.
       POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-40}
       POSTGRES_SHARED_BUFFERS_MB: ${POSTGRES_SHARED_BUFFERS_MB:-32}
