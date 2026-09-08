@@ -1007,6 +1007,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Performance  
 **Betroffene Dateien:** `trading/backtesting.py` (Zeilen 13–51)
 
+**Status: Fixed in 2.4.14.** Begrenzter, threadsicherer LRU mit `(id(prices), idx)`, sicherer Listenlebenszeit und Decimal-Kontext-/Signal-Behandlung. `finally` bereinigt beide Backtest-Tasks bei Erfolg, Abbruch und Fehler. 18 neue Regressionstests, insgesamt 260 Tests grün; warmer Mikrobenchmark 1,31× schneller. Das Kandidatenraster war bereits vorberechnet; die historische Größenordnung unten trifft auf den geprüften Stand nicht zu. [Finding mit Fix-Commit und Prüfgrenzen](PERF-16-indicator-memoization.md). Der folgende Prompt ist der historische Ausgangsvorschlag, keine aktuelle Implementierungsanleitung.
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

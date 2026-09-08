@@ -169,6 +169,22 @@ Das Hardwareprofil begrenzt den Formularwert zusätzlich. Ein explizit gesetztes
 reduzieren. Die Anwendung überschreibt dabei nie die sichere Untergrenze von
 100 Punkten im Formular, wenn das Hardwareprofil korrekt ermittelt wurde.
 
+### Indikator-Cache ab 2.4.14
+
+Wiederholte Indikatoraufrufe auf derselben Preisliste nutzen einen prozesslokalen,
+threadsicheren LRU-Cache mit höchstens **8.192 Einträgen**. Das Kandidatenraster
+verwendet weiterhin seine einmal pro Symbol vorberechneten Indikatorzeilen;
+die Memoisierung spart verbleibende Wiederholungen, etwa beim Gewinner-Report.
+Preislistenidentität und Decimal-Kontext werden berücksichtigt. Formeln,
+Schwellenwerte und Finanzpräzision ändern sich nicht.
+
+Beide Backtest-Tasks leeren den Cache bei Ende, auch bei Abbruch und Fehlern.
+Direkte Python-Aufrufer müssen `Backtesting.clear_indicator_cache()` nach ihrem
+Lauf in `finally` aufrufen und Preislisten während des Laufs unverändert lassen.
+Es ist keine neue Einstellung erforderlich. Kalte Zugriffe sind teurer;
+der gemessene Vorteil warmer Indikatoraufrufe ist kein Versprechen für die
+Gesamtlaufzeit. [Technische Details, Tests und Benchmark](PERF-16-indicator-memoization.md).
+
 ## 6. Variable Raster- und Kombinationsgrenze
 
 Das Feld `Maximale Kombinationen (Hard-Limit)` ist eine harte Obergrenze über

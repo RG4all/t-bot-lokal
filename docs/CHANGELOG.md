@@ -2,6 +2,25 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.14] – 2026-09-08
+
+### Performance und Ressourcenbegrenzung
+
+- **PERF-16 / IndicatorMemoization (MEDIUM, Security-Audit §4.1):** Wiederholte Decimal-Indikatorberechnungen im geprüften Stand **2.4.13** werden ab **2.4.14** durch einen threadsicheren, prozesslokalen LRU-Cache mit maximal **8.192 Einträgen** vermieden. Preislistenidentität, relevante Decimal-Kontexte und Signal-Flags bleiben korrekt berücksichtigt; Formeln bleiben unverändert. Dies behebt ein Performance-Finding, keine nachgewiesene ausnutzbare Sicherheitslücke.
+- `run_backtest()` und der kompatible Einzelkandidaten-Task leeren den Cache zuverlässig in `finally`, auch bei Abbruch und Fehlern. Direkte Simulationen erhalten die ursprüngliche Listenidentität für Cache-Zugriffe. Bereits vorhandene Vorberechnung des Kandidatenrasters bleibt unverändert.
+
+### Tests und Qualitätssicherung
+
+- **18 neue Regressionstests**, einschließlich rot → grün nachgewiesener redundanter Konvertierungen, LRU-Kapazität/-Verdrängung, Listenlebenszeit, Kontext-/Trap-/Flag-Verhalten, paralleler Zugriffe, Iterator-Kompatibilität und sämtlicher Task-Ausgangspfade.
+- **260 Django-/Python-Tests**, **8/8 Shell-Testgruppen**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker nicht ausgeführt; kein GitHub-Anwendungstestworkflow vorhanden.
+- Reproduzierbarer `scripts/benchmark_indicator_cache.py`: lokal **1,31×** schnellere warme Indikatoraufrufe bei 5.000 Preisen. Kein End-to-End-Versprechen; kalte Zugriffe kosten zusätzlich Zeit. [Messdaten und Prüfgrenzen](PERF-16-indicator-memoization.md).
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.14** erhöht; Root-/docs-README, Handbuch, Backtesting-Kapitel und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält keine separate Paketversion.
+- Audit §4.1 und Prompt 16 auf **Fixed** gesetzt; [Finding mit Fix-Commit](PERF-16-indicator-memoization.md) dokumentiert.
+- Keine neuen Abhängigkeiten, Umgebungsvariablen oder Migrationen. Worker/Web-Prozesse nach Deployment neu starten; `/health/` auf **2.4.14** prüfen. Direkte Python-Aufrufer leeren den Cache nach ihrem Lauf in `finally`.
+
 ## [2.4.13] – 2026-09-08
 
 ### Sicherheit und Bug-Fixes

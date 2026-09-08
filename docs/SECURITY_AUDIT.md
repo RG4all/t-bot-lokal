@@ -403,33 +403,25 @@ if not config_id or not config_id.isdigit():
 
 ## 4. Optimierungsbedarf
 
-### 4.1 PERFORMANCE – Indikatorberechnung kann memoisiert werden
+### 4.1 PERFORMANCE – Indikatorberechnung kann memoisiert werden – Fixed in 2.4.14
 
-**Datei:** `trading/backtesting.py` (Zeilen 13–51)
+**Status: Fixed.** Geprüfter Ausgangsstand: **2.4.13**. Ein threadsicherer
+LRU-Cache mit maximal 8.192 Einträgen verwendet `(id(prices), idx)`, bindet
+Einträge an die Listenlebenszeit und berücksichtigt relevante Decimal-Kontexte
+und Signal-Flags. Beide Backtest-Tasks leeren ihn in `finally`, auch bei
+Abbruch/Fehler. Formeln und bestehende Kandidaten-Vorberechnung bleiben erhalten.
 
-Die `calculate_indicators()`-Methode wird für jeden Backtest-Kandidaten neu berechnet. Bei 20.000 Kombinationen mit 5.000 Preispunkten sind das 100 Millionen Decimal-Operationen.
+**Einordnung:** Das Raster berechnete Indikatoren bereits einmal pro Symbol.
+Die historische Aussage von 100 Millionen erneuten Berechnungen pro Raster
+trifft auf diesen Stand nicht zu. Behoben wird verbleibende Redundanz beim
+Gewinner-Report und bei direkten wiederholten Aufrufen, keine nachgewiesene
+Sicherheitslücke. Der ursprüngliche unbegrenzte Dictionary-Vorschlag ist
+kein geeigneter LRU-Fix und wurde nicht unverändert übernommen.
 
-**Lösungsvorschlag:**
-
-```python
-# In Backtesting-Klasse:
-_indicator_cache = {}
-
-@classmethod
-def calculate_indicators(cls, prices, idx):
-    cache_key = (id(prices), idx)
-    if cache_key in cls._indicator_cache:
-        return cls._indicator_cache[cache_key]
-    
-    # ... Berechnung ...
-    result = acceleration, deltadelta, current_nda
-    cls._indicator_cache[cache_key] = result
-    return result
-
-@classmethod
-def clear_indicator_cache(cls):
-    cls._indicator_cache.clear()
-```
+**Nachweis:** 18 neue Regressionstests, insgesamt 260 Django-/Python-Tests grün;
+warme Indikatoraufrufe im lokalen Mikrobenchmark 1,31× schneller. Kalte
+Zugriffe kosten zusätzlich Zeit; kein End-to-End-Versprechen.
+[Finding mit Fix-Commit, Tests und Prüfgrenzen](PERF-16-indicator-memoization.md).
 
 ---
 

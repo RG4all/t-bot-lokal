@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.13 · Stand 8. September 2026**
+**Version 2.4.14 · Stand 8. September 2026**
 
 [TOC]
 
@@ -284,6 +284,8 @@ wesentlichen Erläuterungen ebenfalls in diesem Abschnitt.
 ### Isolation und Ressourcenschonung
 
 Auf Render Free ist die Backtest-Ausführung zum Schutz des Trading-Bots deaktiviert. Produktiv wird `REDIS_URL` mit einem separaten Celery-Worker genutzt. Lokal kann der serielle Fallback verwendet werden. Preispunkte und Rastergrößen werden überwacht, um Überlastung zu verhindern. Die effektive Obergrenze ist hardwareabhängig und standardmäßig höchstens 20.000 Kombinationen.
+
+- **Indikator-Memoisierung (ab 2.4.14):** Wiederholte Backtesting-Indikatoraufrufe nutzen einen threadsicheren LRU-Cache mit maximal 8.192 Einträgen. Formeln bleiben unverändert; beide Backtest-Tasks geben den Cache auch bei Abbruch und Fehlern frei. Keine neue Bedienoption erforderlich. [Messung, direkte Python-Nutzung und Grenzen](PERF-16-indicator-memoization.md).
 
 ### Top-Gainer-/Loser-Konfiguration
 
