@@ -1,6 +1,6 @@
 # Lokale Entwicklungsumgebung
 
-**Konfigurationsstand: 2.4.10** · [Security-Review und Upgrade](SECURITY_REVIEW_2.4.4.md)
+**Konfigurationsstand: 2.4.11** · [Security-Review und Upgrade](SECURITY_REVIEW_2.4.4.md)
 
 ## 1. Voraussetzungen und automatische Installation
 
@@ -62,9 +62,9 @@ ein gemeinsam genutztes Volume. Redis startet daraufhin mit berechneten
 Werten fuer `maxmemory`, `maxmemory-policy` und `io-threads`; Web, Worker
 und Beat übernehmen die empfohlenen Werte fuer Worker-Threads,
 Connection-Pools und Speicher-Limits.
-`SECRET_KEY` und `PASSPHRASE` sind ab 2.4.4 auch im lokalen Compose Pflichtwerte: Ohne sie bricht die Compose-Interpolation ab. `scripts/setup_local.sh` erzeugt private App-Secrets automatisch, erhält sie beim Retuning und respektiert ein bereits gesetztes `PASSPHRASE_GATE_ENABLED=True`. Auch `install.sh` verwendet keine bekannte Default-Passphrase mehr. `.env.local` ist durch `.gitignore` ausgeschlossen und darf nicht geteilt werden.
+`SECRET_KEY` und `PASSPHRASE` sind ab 2.4.4 auch im lokalen Compose Pflichtwerte, `POSTGRES_PASSWORD` ab 2.4.11: Ohne sie bricht die Compose-Interpolation ab. `scripts/setup_local.sh` erzeugt private App-Secrets und ein zufälliges lokales Datenbank-Passwort automatisch, erhält sie beim Retuning und respektiert ein bereits gesetztes `PASSPHRASE_GATE_ENABLED=True`. Auch `install.sh` verwendet keine bekannte Default-Passphrase mehr. `.env.local` ist durch `.gitignore` ausgeschlossen und darf nicht geteilt werden.
 
-Der Gate ist ausschließlich im **lokalen DEBUG-Compose-Profil** standardmäßig aus. Für Teamzugriff `PASSPHRASE_GATE_ENABLED=True` setzen und private App-/DB-Secrets konfigurieren. Der bisherige lokale PostgreSQL-Default bleibt aus Kompatibilität mit bestehenden Volumes erhalten; PostgreSQL und Redis veröffentlichen keine Hostports. Dieses Profil niemals als öffentliche Produktionskonfiguration verwenden.
+Der Gate ist ausschließlich im **lokalen DEBUG-Compose-Profil** standardmäßig aus. Für Teamzugriff `PASSPHRASE_GATE_ENABLED=True` setzen und private App-/DB-Secrets konfigurieren. PostgreSQL und Redis veröffentlichen keine Hostports. Dieses Profil niemals als öffentliche Produktionskonfiguration verwenden. Ein Postgres-Volume liest `POSTGRES_PASSWORD` nur beim ersten Initialisieren; danach erfordert eine Passwort-Änderung `scripts/setup_local.sh --reset-db` (löscht die lokale Datenbank, siehe [FAQ](FAQ.md#5-container-starten-werden-aber-nicht-healthy-restart-loop)).
 
 Ohne Docker ist der temporäre Entwicklungsmodus weiterhin möglich: Bei `DEBUG=True` und ohne Render generieren die Settings eine Passphrase mit `secrets.token_urlsafe(32)` und geben sie als WARNING in der Startkonsole aus. Auch ein fehlender lokaler Signierschlüssel wird zufällig erzeugt, aber nicht ausgegeben. Jeder Settings-Ladevorgang kann neue Werte liefern; für stabile Sessions und mehrere Prozesse beide App-Secrets explizit setzen. In Produktion (`DEBUG=False` oder Render) gibt es weder temporäre Secrets noch einen abschaltbaren Gate. Details: [Startmatrix](README.md#passphrase-und-startkonfiguration).
 

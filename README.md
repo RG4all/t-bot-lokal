@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.10** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.11** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -10,7 +10,7 @@ Aktuelle Version: **2.4.10** ([`VERSION`](VERSION)).
 scripts/setup_local.sh
 ```
 
-Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet den lokalen Docker-Stack auf <http://localhost:8369/>. Ein bereits aktivierter Passphrase-Gate und bestehende Secrets bleiben beim erneuten Setup erhalten. Für manuelles Compose müssen `SECRET_KEY` und `PASSPHRASE` in der Env-Datei gesetzt sein.
+Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet den lokalen Docker-Stack auf <http://localhost:8369/>. Ein bereits aktivierter Passphrase-Gate und bestehende Secrets bleiben beim erneuten Setup erhalten. Für manuelles Compose müssen `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` in der Env-Datei gesetzt sein; fehlende oder leere Werte brechen die Compose-Interpolation ab (keine Standard-Passwörter mehr im Repository).
 
 ## Sicherheit
 
@@ -24,6 +24,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **Cache-Control für API-Endpunkte (ab 2.4.8):** Alle JSON-API-Endpunkte (`/api/...`) setzen `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache`. Browser und Proxies/CDNs speichern damit keine benutzerbezogenen Handels-, Portfolio-, Log- oder Marktdaten zwischen. Details: [SEC-08](docs/SEC-08-cache-control-api.md).
 - **Permissions-Policy (ab 2.4.9):** Die Middleware `PermissionsPolicyMiddleware` setzt `Permissions-Policy: camera=(), microphone=(), geolocation=()` aus `SECURE_PERMISSIONS_POLICY` – damit sind Kamera, Mikrofon und Geolokation für alle Origins deaktiviert, auch auf Fehler- und WhiteNoise-Antworten. Das Projekt benötigt diese APIs nicht. Details: [SEC-09](docs/SEC-09-permissions-policy.md).
 - **Fehlermeldungen (ab 2.4.10):** Bot-Aktionen, Marktdaten-/Worker-APIs, Konfigurationsformulare und Reports geben keine technischen Exception-Texte mehr aus. Diagnosen werden mit Traceback serverseitig geloggt. Im Fehler-Log sehen normale Konten generische Einträge mit Referenz; technische Details benötigen zusätzlich zur Eigentümerschaft `is_staff`. Bereits gespeicherte Fehler sind ebenfalls geschützt. Details: [SEC-10](docs/SEC-10-information-disclosure.md).
+- **Keine Standard-Passwörter im Docker-Setup (ab 2.4.11):** `docker-compose.yml` verlangt `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` als Pflichtwerte (`${VAR:?...}`). Fehlende oder leere Secrets brechen den Compose-Start mit klarem Fehler ab; ein öffentlich bekanntes DB-Standard-Passwort existiert nicht mehr. `scripts/setup_local.sh` erzeugt das lokale Datenbank-Passwort zufällig und privat in `.env.local` und bewahrt es beim Retuning. Details: [SEC-12](docs/SEC-12-docker-default-passwords.md).
 
 ## Dokumentation
 
@@ -36,4 +37,5 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [SEC-08: Cache-Control-Header für API-Endpunkte](docs/SEC-08-cache-control-api.md)
 - [SEC-09: Permissions-Policy-Header](docs/SEC-09-permissions-policy.md)
 - [SEC-10: Sichere Fehlermeldungen und SEC-05-Nachprüfung](docs/SEC-10-information-disclosure.md)
+- [SEC-12: Keine Standard-Passwörter im Compose-Setup](docs/SEC-12-docker-default-passwords.md)
 - [Changelog](docs/CHANGELOG.md) · [Aktuelle Version](VERSION)

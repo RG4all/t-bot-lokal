@@ -289,7 +289,7 @@ Aber: Für `localhost`/`127.0.0.1` wird kein HTTPS erzwungen, was korrekt ist. K
 
 ---
 
-### 2.12 NIEDRIG – Docker-Compose Standard-Passwörter
+### 2.12 NIEDRIG – Docker-Compose Standard-Passwörter – Fixed in 2.4.11
 
 **Datei:** `docker-compose.yml` (Zeilen 11, 54)
 
@@ -307,6 +307,10 @@ PASSPHRASE: ${PASSPHRASE:-local-t-bot}
 POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
 PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in .env}
 ```
+
+**Umgesetzt (2.4.11):** `PASSPHRASE` (und `SECRET_KEY`) waren bereits seit 2.4.4 Pflichtwerte; ab 2.4.11 gilt dies auch für `POSTGRES_PASSWORD` – sowohl im `postgres`-Service als auch in der daraus gebauten `DATABASE_URL`. Fehlende oder leere Secrets brechen die Compose-Interpolation ab; öffentliche Defaults existieren in keiner ausgelieferten Konfigurations-/Skriptdatei mehr. `scripts/setup_local.sh` erzeugt das lokale DB-Passwort zufällig in `.env.local` und warnt beim Wiedererkennen des früher öffentlichen Werts vor fehlender Rotation.
+
+**Nachweis:** Neue Shell-Testgruppe `tests/test_compose_security.sh` (25 Assertions) und erweiterte `tests/test_setup_local.sh`, vor dem Fix rot, danach grün. [Finding, Fix-Commit und Prüfgrenzen](SEC-12-docker-default-passwords.md).
 
 ---
 
@@ -620,7 +624,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 | 1 | **Rate-Limiting auf Auth-Endpunkte** implementieren | 2h | `views.py`, `settings.py` |
 | 2 | **ALLOWED_HOSTS: Kein Wildcard** in DEBUG | 5min | `settings.py` |
 | 3 | **CSRF_COOKIE_HTTPONLY = True** setzen | 5min | `settings.py` |
-| 4 | **Docker-Passwörter ohne Defaults** setzen | 15min | `docker-compose.yml` |
+| 4 | **Docker-Passwörter ohne Defaults setzen – Fixed in 2.4.11 (§2.12)** | 15min | `docker-compose.yml` |
 
 ### Kurzfristig umsetzen (P1 – 1–2 Wochen)
 
@@ -652,7 +656,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [ ] CSP-Header implementiert
 - [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](SEC-08-cache-control-api.md))
 - [x] Error-Messages ohne technische Details (ab 2.4.10; Diagnose-Log mit Staff-/Eigentümergrenze, siehe §2.10 und [SEC-10](SEC-10-information-disclosure.md))
-- [ ] Docker-Passwörter ohne Defaults
+- [x] Docker-Passwörter ohne Defaults (ab 2.4.11; `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` als `${VAR:?...}`-Pflichtwerte, zufälliges lokales DB-Passwort im Setup, siehe §2.12 und [SEC-12](SEC-12-docker-default-passwords.md))
 - [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))
 - [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)
 - [ ] HSTS-Header für Produktion korrekt
