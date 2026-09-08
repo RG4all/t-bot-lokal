@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -695,6 +696,18 @@ class TradingBotTests(TransactionTestCase):
             fee=Decimal("0.1"),
             countdown=0,
         )
+
+    def test_manager_start_bot_uses_unlocked_running_check(self):
+        """start_bot darf is_running nicht unter dem gehaltenen Lock re-enteren."""
+        from trading.trading_bot import TradingBotManager
+
+        start = inspect.getsource(TradingBotManager.start_bot)
+        public = inspect.getsource(TradingBotManager.is_running)
+        unlocked = inspect.getsource(TradingBotManager._is_running_unlocked)
+        self.assertIn("self._is_running_unlocked(", start)
+        self.assertNotIn("self.is_running(", start)
+        self.assertIn("with self._lock", public)
+        self.assertNotIn("with self._lock", unlocked)
 
     def test_trade_is_buffered_and_position_kept_during_db_outage(self):
         bot = TradingBot(self.config)

@@ -316,39 +316,15 @@ PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in .env}
 
 ## 3. Bugs & Funktionale Fehler
 
-### 3.1 MITTEL – Race Condition in Bot-Start/Stop
+### 3.1 MITTEL – Race Condition in Bot-Start/Stop – Fixed in 2.4.12
 
-**Datei:** `trading/trading_bot.py` (Zeilen 810–817)
+**Datei:** `trading/trading_bot.py` · **Status:** Fixed
 
-```python
-def start_bot(self, config):
-    with self._lock:
-        if self.is_running(config.id):  # ← is_running acquire lock intern
-            return self.bots[config.id]
-        bot = TradingBot(config, on_exit=self._forget)
-        self.bots[config.id] = bot
-        bot.start()
-        return bot
-```
+**Vorzustand:** `start_bot()` rief unter gehaltenem `self._lock` die öffentliche Methode `is_running()` auf, die denselben Lock intern erneut erwarb. Mit `threading.RLock` entstand kein Deadlock; ein nicht-reentrantes `Lock` würde hängen. Die verschachtelte Acquisition war ein Code-Smell und erschwerte die Trennung von interner und öffentlicher Laufzustandsprüfung.
 
-**Problem:** `is_running()` acquire `_lock` intern, aber `self._lock` ist bereits gehalten → **Deadlock mit `threading.RLock()`**. Glücklicherweise löst `RLock()` dies auf, aber die verschachtelte Lock-Acquisition ist ein Code-Smell.
+**Umgesetzt:** Interne Methode `_is_running_unlocked()` prüft und räumt beendete Threads ohne Lock-Acquisition. `is_running()` umschließt sie mit dem Lock für externe Aufrufer. `start_bot()` und `stop_bot()` rufen die unlocked-Variante unter dem bereits gehaltenen Lock auf. Views bleiben bei der öffentlichen API.
 
-**Lösungsvorschlag:**
-
-```python
-def is_running(self, config_id):
-    bot = self.bots.get(config_id)  # Ohne Lock – nur intern von start_bot aufgerufen
-    if bot and bot.is_alive():
-        return True
-    if bot:
-        self.bots.pop(config_id, None)
-    return False
-
-# is_running() für externe Aufrufe:
-def is_running_external(self, config_id):
-    with self._lock:
-        return self.is_running(config_id)
-```
+**Nachweis:** 16 Regressionstests in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf `threading.Lock`). [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md).
 
 ---
 

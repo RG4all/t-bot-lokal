@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.11** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.12** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -25,6 +25,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **Permissions-Policy (ab 2.4.9):** Die Middleware `PermissionsPolicyMiddleware` setzt `Permissions-Policy: camera=(), microphone=(), geolocation=()` aus `SECURE_PERMISSIONS_POLICY` – damit sind Kamera, Mikrofon und Geolokation für alle Origins deaktiviert, auch auf Fehler- und WhiteNoise-Antworten. Das Projekt benötigt diese APIs nicht. Details: [SEC-09](docs/SEC-09-permissions-policy.md).
 - **Fehlermeldungen (ab 2.4.10):** Bot-Aktionen, Marktdaten-/Worker-APIs, Konfigurationsformulare und Reports geben keine technischen Exception-Texte mehr aus. Diagnosen werden mit Traceback serverseitig geloggt. Im Fehler-Log sehen normale Konten generische Einträge mit Referenz; technische Details benötigen zusätzlich zur Eigentümerschaft `is_staff`. Bereits gespeicherte Fehler sind ebenfalls geschützt. Details: [SEC-10](docs/SEC-10-information-disclosure.md).
 - **Keine Standard-Passwörter im Docker-Setup (ab 2.4.11):** `docker-compose.yml` verlangt `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` als Pflichtwerte (`${VAR:?...}`). Fehlende oder leere Secrets brechen den Compose-Start mit klarem Fehler ab; ein öffentlich bekanntes DB-Standard-Passwort existiert nicht mehr. `scripts/setup_local.sh` erzeugt das lokale Datenbank-Passwort zufällig und privat in `.env.local` und bewahrt es beim Retuning. Details: [SEC-12](docs/SEC-12-docker-default-passwords.md).
+- **Thread-sicherer Bot-Start/Stop (ab 2.4.12):** `TradingBotManager` prüft den Laufzustand ohne verschachtelte Lock-Acquisition. Gleichzeitige Start- und Status-Aufrufe erzeugen keinen zweiten Trading-Thread für dieselbe Konfiguration. Details: [BUG-12](docs/BUG-12-race-condition-bot-start-stop.md).
 
 ## Dokumentation
 
