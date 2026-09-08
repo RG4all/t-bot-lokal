@@ -165,6 +165,16 @@ else:
 # DEBUG-unabhängig; SecurityMiddleware erfasst auch Fehler und WhiteNoise-Antworten.
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
+# Permissions-Policy (Nachfolger von Feature-Policy) beschränkt den Zugriff auf
+# Browser-APIs, die dieses Projekt nicht benötigt. Kamera, Mikrofon und
+# Geolokation werden für alle Origins deaktiviert; das verkleinert die
+# Angriffsfläche über diese APIs. Django erzeugt selbst keinen
+# Permissions-Policy-Header – die Middleware
+# trading.middleware.PermissionsPolicyMiddleware setzt ihn aus diesem Wert auf
+# jeder Antwort (auch Fehler-, Redirect- und WhiteNoise-Antworten), weil sie
+# direkt nach der SecurityMiddleware registriert ist.
+SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
+
 # ---------------------------------------------------------------------------
 # Content-Security-Policy (CSP) – schützt vor XSS-Angriffen
 # ---------------------------------------------------------------------------
@@ -228,6 +238,10 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Permissions-Policy direkt nach SecurityMiddleware: setzt den Header auch
+    # auf Antworten, die innere Middleware (z. B. WhiteNoise, Redirects oder
+    # Fehler) erzeugt, bevor die Response-Phase wieder nach außen läuft.
+    "trading.middleware.PermissionsPolicyMiddleware",
     "csp.middleware.CSPMiddleware",
     "trading.middleware.DatabaseAvailabilityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",

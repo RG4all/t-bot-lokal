@@ -504,6 +504,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** LOW – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`
 
+**Status: Fixed in 2.4.9.** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation. Die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (direkt nach der `SecurityMiddleware`) setzt den `Permissions-Policy`-Header aus dieser Einstellung auf jeder Antwort, da Django selbst keinen solchen Header erzeugt. **11 Regressionstests** in `trading/tests/test_permissions_policy.py` prüfen Settings und ausgelieferte Header über den echten Middleware-Stack; bestehende 174 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](SEC-09-permissions-policy.md), [Audit §2.9](SECURITY_AUDIT.md).
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

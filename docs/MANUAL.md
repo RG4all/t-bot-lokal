@@ -307,6 +307,8 @@ Die vorhandenen API-URLs und Nutzdatenformate bleiben in 2.4.4 unverändert. Ohn
 
 Alle JSON-API-Endpunkte unter `/api/…` senden seit 2.4.8 die Header `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache`. Browser und zwischengeschaltete Proxies/CDNs speichern die benutzerbezogenen Handels-, Portfolio-, Log- und Marktdaten damit nicht zwischen.
 
+Seit 2.4.9 setzt jede HTTP-Antwort zusätzlich den Header `Permissions-Policy: camera=(), microphone=(), geolocation=()`. Kamera, Mikrofon und Geolokation sind damit für alle Origins deaktiviert; die Anwendung benötigt diese Browser-APIs nicht.
+
 ## 12. Fehler-Log und Betrieb
 
 Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Technische Details enthalten Exchange, Markt, Symbol und Retry-Informationen. Gelöste Einträge können als erledigt markiert werden.
@@ -367,4 +369,5 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 - Alle bearbeitbaren Felder vor dem Bot-Start per Info-Hover (ⓘ) und Backtest prüfen.
 - Regelmäßige Backups der Datenbank durchführen.
 - Die JSON-API-Endpunkte liefern no-cache-Header (`Cache-Control`/`Pragma`), damit keine Handelsdaten zwischengespeichert werden; ein vorgeschalteter Reverse-Proxy/CDN muss dies bei Bedarf zusätzlich absichern.
+- Seit 2.4.9 ist der Zugriff auf Kamera, Mikrofon und Geolokation per `Permissions-Policy`-Header deaktiviert (`camera=(), microphone=(), geolocation=()`).
 

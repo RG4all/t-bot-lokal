@@ -79,6 +79,28 @@ class DatabaseAvailabilityMiddleware:
         return None
 
 
+class PermissionsPolicyMiddleware:
+    """Setzt den Permissions-Policy-Header auf jeder HTTP-Antwort.
+
+    Django erzeugt selbst keinen Permissions-Policy-Header. Die Middleware
+    liest den Wert live aus ``settings.SECURE_PERMISSIONS_POLICY`` und
+    beschränkt damit den Zugriff auf nicht benötigte Browser-APIs (Kamera,
+    Mikrofon, Geolokation). Sie ist direkt nach der SecurityMiddleware
+    registriert, damit auch Fehler-, Redirect- und WhiteNoise-Antworten den
+    Header tragen. Ein leerer Policy-Wert lässt die Antwort unverändert.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        policy = getattr(settings, "SECURE_PERMISSIONS_POLICY", "")
+        if policy:
+            response["Permissions-Policy"] = policy
+        return response
+
+
 class PassphraseGateMiddleware:
     """Schützt HTTP-Endpunkte bis zur Passphrase-Freigabe der Session."""
 
