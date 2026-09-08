@@ -1220,6 +1220,22 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Code Quality  
 **Betroffene Dateien:** `trading/backtesting.py` (Zeilen 14–51), `trading/trading_bot.py` (Zeilen 577–591)
 
+**Status: Fixed in 2.4.15.** Neu ist `trading/indicators.py` als einzige Quelle der Indikatorarithmetik:
+`compute_indicator_values(prices, idx, *, rounding=…)` liefert den vollständigen Snapshot (inklusive
+`current_da`, `previous_da`, `dva` für `DataLog`), `calculate_trading_indicators(prices, idx)` die quantisierte
+Strategie-Stufe `(acceleration, deltadelta, nda)`, `build_indicator_rows(prices)` die indexgleiche
+Vorabberechnung und `EIGHT_PLACES` die gemeinsame Präzisionskonstante. `backtesting.py`, `trading_bot.py`,
+`tasks.py` (beide Raster-Durchläufe) und `scripts/backtest_resource_probe.py` delegieren dorthin;
+`Backtesting.calculate_indicators` bleibt als Kompatibilitäts-Wrapper. **Abweichung vom historischen
+Lösungsvorschlag:** Der Bot nutzt bewusst die Rohwert-Stufe statt der quantisierten Funktion – sonst
+verschieben sich Live-Schwellwertvergleiche und die bereits gespeicherten DataLog-Werte. Zusätzlich
+behoben: fehlende Index-Validierung (`idx=1`, `idx=0`, negative Indizes rechneten über die
+Listendefinition stillschweigend mit `prices[-1]`). **28 Regressionstests** in
+`trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung,
+Backtest-Reports byte-identisch, insgesamt **277 Django-/Python-Tests** grün; SEC-05 mit allen 11
+CSRF-Cookie-Tests erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md),
+[Audit §4.3](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```
@@ -1665,7 +1681,7 @@ VALIDIERUNGSKRITERIEN:
 | 15 | ConfigIdValidation | LOW | Bug | 15min |
 | 16 | IndicatorMemoization | MEDIUM | Performance | 3h |
 | 17 | DbTrimBatchDelete | MEDIUM | Performance | 2h |
-| 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h |
+| 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h ✅ 2.4.15 |
 | 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h |
 | 20 | MissingAllExports | LOW | Tech Debt | 30min |
 | 21 | InfoApiMemoryOptimization | MEDIUM | Performance | 3h |

@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.14 · Stand 8. September 2026**
+**Version 2.4.15 · Stand 8. September 2026**
 
 [TOC]
 
@@ -171,6 +171,32 @@ DeltaDelta = (NDA + vorherige_NDA) / 2
 ```
 
 Mittelwert aus aktuellem und vorigem normalisiertem Momentum zur Rauschreduktion.
+
+### 6.6 Einheitliche Berechnung im Code (ab 2.4.15)
+
+Alle Formeln dieses Kapitels stammen aus genau einer Quelle:
+`trading/indicators.py`. Der Live-Bot (`calculate_and_store`), das Backtesting
+(`calculate_indicators`, Reports, Plots) und die Rasterläufe der
+Celery-Tasks rufen diese Funktionen auf – eine Formeländerung wirkt damit
+immer in beiden Pfaden gleichzeitig.
+
+Zwei Präzisionsstufen sind bewusst unterschiedlich und beide unverändert:
+
+- **Live-Bot:** rechnet mit ungerundeten Werten und rundet erst beim Schreiben
+  in die `DataLog`-Tabelle auf 8 Nachkommastellen (`ROUND_HALF_UP`).
+- **Backtesting/Reports:** quantisiert jede Zwischenstufe (NDA, vorherige NDA,
+  DVA, DeltaDelta, Beschleunigung) sofort auf 8 Nachkommastellen.
+
+Daraus kann in Grenzfällen ein Unterschied in der letzten Kommastelle resultieren
+(z. B. `0.50000000` im Bot gegenüber `0.49999999` im Backtest). Die
+Schwellwertvergleiche im Bot verwenden weiterhin die Rohwerte, damit bestehende
+Konfigurationen und die gespeicherte Historie ihre Bedeutung behalten.
+
+Zusätzliche Absicherung: Ein Datenpunkt unterhalb von Index 2 (kein Vor- und
+Vorvorpreis) oder außerhalb der Preisreihe wird mit einem Fehler abgewiesen,
+statt – wie vor 2.4.15 – über die Listendefinition den letzten Preis zu
+verwenden und einen unsichtbar falschen Indikatorwert zu liefern. Technische
+Details und Prüfgrenzen: [CODE-18](CODE-18-indicator-dedup.md).
 
 ### 6.5 MVD – Verhältnis Minimum zu Maximum
 

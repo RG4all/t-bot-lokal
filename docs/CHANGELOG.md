@@ -2,6 +2,29 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.15] – 2026-09-08
+
+### Wartung und Code-Qualität
+
+- **Duplizierte Indikator-Logik entfernt (DuplicatedIndicatorLogic, MEDIUM – Code Quality, Security-Audit §4.3):** Die Berechnung von NDA, DeltaDelta und Acceleration existierte zweimal – quantisiert in `Backtesting.calculate_indicators()` (`trading/backtesting.py`, Zeilen 14–51) und ungerundet in `TradingBot.calculate_and_store()` (`trading/trading_bot.py`, Zeilen 577–591). Neu ist **`trading/indicators.py`** als einzige Quelle der Arithmetik: `compute_indicator_values(prices, idx, *, rounding=…)` liefert den vollständigen Snapshot inklusive der `DataLog`-Nebenwerte `current_da`/`previous_da`/`dva`, `calculate_trading_indicators(prices, idx)` die quantisierte Strategie-Stufe `(acceleration, deltadelta, nda)`, `build_indicator_rows(prices)` die indexgleiche Vorabberechnung einer Preisreihe und `EIGHT_PLACES` die gemeinsame Rundungskonstante. `backtesting.py`, `trading_bot.py`, beide Raster-Durchläufe in `tasks.py` und `scripts/backtest_resource_probe.py` delegieren dorthin; `Backtesting.calculate_indicators()` bleibt als dünner Kompatibilitäts-Wrapper erhalten.
+- **Latenter Defekt mit behoben:** Beide Kopien hatten **keine Index-Validierung**. `calculate_indicators(prices, 1)` griff über die Listendefinition auf `prices[-1]` zu und lieferte für `100, 101, 102` stillschweigend `(-1.5, -0.5, 1.0)` statt zu scheitern. Die zentrale Funktion prüft jetzt `idx >= 2` und `idx < len(prices)` (bei einer Preisreihe mit fester Länge) und weist `TypeError` für Nicht-Sequenzen aus.
+- **Zwei Präzisionsstufen, eine Implementierung:** Der Live-Bot rechnet weiterhin mit ungerundeten Rohwerten und rundet erst beim Schreiben (`_bounded`), Backtests quantisieren jede Zwischenstufe auf 8 Nachkommastellen (`ROUND_HALF_UP`). Der Unterschied ist auf einen `rounding`-Hook reduziert und im Modul-Docstring begründet. Ein Deduplizierungs-Refactoring darf keine laufenden Schwellwertentscheidungen und keine gespeicherte `DataLog`-Historie verschieben; die Vereinheitlichung der Präzision bleibt eine separate, bewusste Entscheidung.
+- Die Rundungskonstante `_EIGHT_PLACES` war zweimal definiert (`backtesting.py`, `trading_bot.py`), das Vorabberechnungsmuster `[None, None] + [… ]` viermal kopiert (`backtesting.py`, `tasks.py` zweimal, Ressourcen-Probe). Beides ist zugunsten der zentralen Definitionen entfallen. Keine neue Abhängigkeit, kein neues Architekturmuster, keine Settings-, Model- oder Migrationsänderung, keine API-Änderung für Views, Celery-Tasks und Reports.
+
+### Tests und Qualitätssicherung
+
+- **28 neue Regressionstests** in `trading/tests/test_indicators.py`: von Hand nachgerechnete Referenzwerte, `ROUND_HALF_UP` auf der 9. Nachkommastelle, Nullstellen-Absicherungen (Vorpreis `0`/`None`, `previous_nda == 0`), Index-Grenzfälle, Nicht-Decimal-Eingaben, dokumentierter Präzisionsunterschied Rohwert/quantisiert, strukturelle Prüfung, dass keine Formel und kein Vorabberechnungsmuster mehr in den Aufrufern steht, plus Bitgenauigkeit der `DataLog`-Zeile und der an `check_trading` übergebenen Rohwerte. **Rot → grün:** Am Ausgangsstand scheiterte das Modul am Import, die Index- und Duplikatsprüfungen waren rot; die Bot-Verhaltenstests sind als Charakterisierungstests gegen eine still veränderte Präzision gedacht.
+- **Numerische Reproduktion:** deterministischer Alt-/Neu-Vergleich über 3.000 Preisreihen (Null-Vorpreise, `None`-Preise, Float-/String-Mischtypen, Extremwerte um 10³⁰) – **16.693 Vergleichsfälle, 0 Abweichungen**; Backtest-Reports einer 2.000-Punkte-Reihe mit Defekt-Ticks über drei Schwellwert-Raster sind vor und nach dem Refactoring **byte-identisch** (Endkapital, Rendite, Trades, Gebühren, Drawdown, Equity-Kurve).
+- **277 Django-/Python-Tests** (28 neue + 249 bestehende), **8/8 Shell-Testgruppen**, Ruff 0.16.6, ShellCheck 0.11.0, Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und die Ressourcen-Probe lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
+- **SEC-05-Nachprüfung:** Alle 11 CSRF-Cookie-Tests (`CSRF_COOKIE_HTTPONLY = True`) bestehen unverändert; SEC-05 bleibt Fixed.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](CODE-18-indicator-dedup.md#ci-und-auslieferung) sind dokumentiert.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.15** erhöht; Root-/docs-README, Handbuch, Backtesting-Kapitel und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
+- Audit §4.3 und Prompt 18 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md) ergänzt. Handbuch §6 und Backtesting-Kapitel verweisen jetzt auf `trading/indicators.py` als Maß aller Formeln und erklären die beiden Präzisionsstufen.
+- Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.15** prüfen. Bestehende `DataLog`-Zeilen und laufende Bot-Konfigurationen bleiben gültig; Backtests müssen nicht neu gestartet werden, ihre Ergebnisse sind reproduzierbar.
+
 ## [2.4.14] – 2026-09-08
 
 ### Performance
