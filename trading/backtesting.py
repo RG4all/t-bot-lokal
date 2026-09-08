@@ -1,70 +1,34 @@
 from decimal import ROUND_HALF_UP, Decimal
 
-_EIGHT_PLACES = Decimal("0.00000001")
-
-
-def _decimal(value, default="0"):
-    if value is None:
-        return Decimal(default)
-    return value if isinstance(value, Decimal) else Decimal(str(value))
+from .indicators import (
+    EIGHT_PLACES,
+    build_indicator_rows,
+    calculate_trading_indicators,
+    to_decimal,
+)
 
 
 class Backtesting:
     @staticmethod
     def calculate_indicators(prices, idx):
-        """Berechnet die drei Strategieindikatoren am angegebenen Index."""
-        current_price = _decimal(prices[idx])
-        previous_price = _decimal(prices[idx - 1])
-        older_price = _decimal(prices[idx - 2])
+        """Wrapper für Abwärtskompatibilität – delegiert an die zentrale Funktion.
 
-        current_da = current_price - previous_price
-        current_nda = (
-            (current_da / previous_price * Decimal(100)).quantize(
-                _EIGHT_PLACES,
-                rounding=ROUND_HALF_UP,
-            )
-            if previous_price
-            else Decimal(0)
-        )
-        previous_da = previous_price - older_price
-        previous_nda = (
-            (previous_da / previous_price * Decimal(100)).quantize(
-                _EIGHT_PLACES,
-                rounding=ROUND_HALF_UP,
-            )
-            if previous_price
-            else Decimal(0)
-        )
-        dva = (current_nda - previous_nda).quantize(
-            _EIGHT_PLACES,
-            rounding=ROUND_HALF_UP,
-        )
-        acceleration = (
-            (dva / previous_nda).quantize(_EIGHT_PLACES, rounding=ROUND_HALF_UP)
-            if previous_nda
-            else Decimal(0)
-        )
-        deltadelta = ((current_nda + previous_nda) / Decimal(2)).quantize(
-            _EIGHT_PLACES,
-            rounding=ROUND_HALF_UP,
-        )
-        return acceleration, deltadelta, current_nda
+        Die Indikatorarithmetik (NDA, DeltaDelta, Acceleration) liegt
+        ausschließlich in :mod:`trading.indicators` und wird dort auch vom
+        Live-Bot genutzt. Hier existiert nur die bisherige API weiter, damit
+        Backtesting-Aufrufer (``tasks.py``, Reports, Ressourcen-Probe) unverändert
+        bleiben.
+        """
+        return calculate_trading_indicators(prices, idx)
 
     @staticmethod
     def compute_indicator_series(prices):
-        indices = []
-        acceleration_series = []
-        deltadelta_series = []
-        nda_series = []
-        for index in range(2, len(prices)):
-            acceleration, deltadelta, nda = Backtesting.calculate_indicators(
-                prices,
-                index,
-            )
-            indices.append(index)
-            acceleration_series.append(acceleration)
-            deltadelta_series.append(deltadelta)
-            nda_series.append(nda)
+        """Indexgleiche Indikatorserien (Plotdaten) aus der zentralen Vorabberechnung."""
+        rows = build_indicator_rows(prices)
+        indices = list(range(2, len(prices)))
+        acceleration_series = [rows[index][0] for index in indices]
+        deltadelta_series = [rows[index][1] for index in indices]
+        nda_series = [rows[index][2] for index in indices]
         return indices, acceleration_series, deltadelta_series, nda_series
 
     @staticmethod
@@ -85,23 +49,21 @@ class Backtesting:
         verbinden. Rasterkandidaten können mit ``include_details=False`` ohne
         große Trade-/Kurvenlisten bewertet werden.
         """
-        prices = [_decimal(price) for price in prices]
+        prices = [to_decimal(price) for price in prices]
         timestamps = list(timestamps or [])
         if len(timestamps) != len(prices):
             timestamps = [None] * len(prices)
-        capital = _decimal(simulation_params.get("start_capital"), "1000")
+        capital = to_decimal(simulation_params.get("start_capital"), "1000")
         start_capital = capital
-        trade_amount = _decimal(simulation_params.get("trade_amount"), "100")
-        take_profit = _decimal(simulation_params.get("take_profit"), "5")
-        stop_loss = _decimal(simulation_params.get("stop_loss"), "100")
-        fee_percentage = _decimal(simulation_params.get("fee_percentage"), "0.1")
-        acc_threshold = _decimal(acc_threshold)
-        nda_threshold = _decimal(nda_threshold)
-        deltadelta_threshold = _decimal(deltadelta_threshold)
+        trade_amount = to_decimal(simulation_params.get("trade_amount"), "100")
+        take_profit = to_decimal(simulation_params.get("take_profit"), "5")
+        stop_loss = to_decimal(simulation_params.get("stop_loss"), "100")
+        fee_percentage = to_decimal(simulation_params.get("fee_percentage"), "0.1")
+        acc_threshold = to_decimal(acc_threshold)
+        nda_threshold = to_decimal(nda_threshold)
+        deltadelta_threshold = to_decimal(deltadelta_threshold)
         if indicator_rows is None:
-            indicator_rows = [None, None] + [
-                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
-            ]
+            indicator_rows = build_indicator_rows(prices)
 
         position = None
         trades = [] if include_details else None
@@ -126,7 +88,7 @@ class Backtesting:
                 buy_fee = trade_amount * fee_percentage / Decimal(100)
                 if should_buy and capital >= trade_amount + buy_fee:
                     amount = (trade_amount / current_price).quantize(
-                        _EIGHT_PLACES,
+                        EIGHT_PLACES,
                         rounding=ROUND_HALF_UP,
                     )
                     capital_before = capital
@@ -343,7 +305,7 @@ class Backtesting:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
-        prices = [_decimal(price) for price in historical_prices]
+        prices = [to_decimal(price) for price in historical_prices]
         prices_float = [float(price) for price in prices]
         indices, acceleration, deltadelta, nda = Backtesting.compute_indicator_series(prices)
 
