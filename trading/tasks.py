@@ -214,6 +214,8 @@ def simulate_candidate(
     except Exception as exc:
         logger.exception("Simulation für %s fehlgeschlagen", symbol)
         return {"symbol": symbol, "error": str(exc)}
+    finally:
+        Backtesting.clear_indicator_cache()
 
 
 _THRESHOLD_LABELS = {
@@ -552,6 +554,9 @@ def run_backtest(self, config_id, params, symbols, task_id):
             completed_at=timezone.now(),
         )
         raise
+    finally:
+        # Gilt auch für frühes return (Abbruch/fehlender Task) und DB-Fehler.
+        Backtesting.clear_indicator_cache()
 
 
 @shared_task

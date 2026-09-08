@@ -1,6 +1,12 @@
-from decimal import ROUND_HALF_UP, Decimal
+import threading
+from collections import OrderedDict
+from decimal import ROUND_HALF_UP, Decimal, getcontext, localcontext
 
 _EIGHT_PLACES = Decimal("0.00000001")
+# Deckt die üblichen 5.000 Preispunkte ab, ohne unbegrenzt zu wachsen.
+_INDICATOR_CACHE_MAXSIZE = 8192
+_indicator_cache = OrderedDict()
+_indicator_cache_lock = threading.Lock()
 
 
 def _decimal(value, default="0"):
@@ -12,7 +18,72 @@ def _decimal(value, default="0"):
 class Backtesting:
     @staticmethod
     def calculate_indicators(prices, idx):
-        """Berechnet die drei Strategieindikatoren am angegebenen Index."""
+        """Berechnet und memoisiert (acceleration, deltadelta, current_nda).
+
+        Preislisten bleiben während eines Backtests unverändert. Direkte Aufrufer
+        müssen den Cache nach ihrem Lauf mit ``clear_indicator_cache()`` leeren.
+        Der prozesslokale LRU hält höchstens 8.192 Einträge; andere Prozesse
+        teilen ihn nicht. Decimal-Kontext und ersetzte Preispunkte werden geprüft.
+        """
+        cache_key = (id(prices), idx)
+        context = getcontext()
+        context_key = (
+            context.prec,
+            context.rounding,
+            context.Emin,
+            context.Emax,
+            context.clamp,
+            tuple(context.traps.values()),
+        )
+        # Auch Berechnung und Einfügen sind geschützt: Ein gleichzeitiges clear
+        # darf nicht von einer zuvor gestarteten Berechnung rückgängig werden.
+        with _indicator_cache_lock:
+            values = (prices[idx], prices[idx - 1], prices[idx - 2])
+            entry = _indicator_cache.get(cache_key)
+            if entry is not None:
+                source, cached_values, cached_context, result, signals = entry
+                if (
+                    source is prices
+                    and cached_context == context_key
+                    and cached_values[0] is values[0]
+                    and cached_values[1] is values[1]
+                    and cached_values[2] is values[2]
+                ):
+                    _indicator_cache.move_to_end(cache_key)
+                    for signal in signals:
+                        context.flags[signal] = True
+                    return result
+
+            # Flags gehören zur Decimal-API. Nur die von dieser Berechnung
+            # gesetzten Flags wiedergeben, nicht fremde, zuvor gesetzte Flags.
+            with localcontext(context) as calculation_context:
+                calculation_context.clear_flags()
+                try:
+                    result = Backtesting._calculate_indicators(prices, idx)
+                finally:
+                    signals = tuple(
+                        signal for signal, raised in calculation_context.flags.items() if raised
+                    )
+                    for signal in signals:
+                        context.flags[signal] = True
+
+            # Starke Referenz verhindert id-Wiederverwendung für andere Listen.
+            # LRU-Eviction und clear geben Liste und Ergebnis gemeinsam frei.
+            _indicator_cache[cache_key] = (prices, values, context_key, result, signals)
+            _indicator_cache.move_to_end(cache_key)
+            if len(_indicator_cache) > _INDICATOR_CACHE_MAXSIZE:
+                _indicator_cache.popitem(last=False)
+            return result
+
+    @classmethod
+    def clear_indicator_cache(cls):
+        """Gibt alle Cache-Einträge frei; auch bei Backtest-Abbruch aufrufen."""
+        with _indicator_cache_lock:
+            _indicator_cache.clear()
+
+    @staticmethod
+    def _calculate_indicators(prices, idx):
+        """Unveränderte Decimal-Formeln für einen Cache-Miss."""
         current_price = _decimal(prices[idx])
         previous_price = _decimal(prices[idx - 1])
         older_price = _decimal(prices[idx - 2])
@@ -85,6 +156,14 @@ class Backtesting:
         verbinden. Rasterkandidaten können mit ``include_details=False`` ohne
         große Trade-/Kurvenlisten bewertet werden.
         """
+        # Indikatoren vor der Decimal-Listenkopie berechnen, damit wiederholte
+        # Simulationen derselben Eingabereihe denselben Cache-Key verwenden.
+        if not isinstance(prices, (list, tuple)):
+            prices = list(prices)
+        if indicator_rows is None:
+            indicator_rows = [None, None] + [
+                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
+            ]
         prices = [_decimal(price) for price in prices]
         timestamps = list(timestamps or [])
         if len(timestamps) != len(prices):
@@ -98,10 +177,6 @@ class Backtesting:
         acc_threshold = _decimal(acc_threshold)
         nda_threshold = _decimal(nda_threshold)
         deltadelta_threshold = _decimal(deltadelta_threshold)
-        if indicator_rows is None:
-            indicator_rows = [None, None] + [
-                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
-            ]
 
         position = None
         trades = [] if include_details else None
