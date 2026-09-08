@@ -2,6 +2,27 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.17] – 2026-09-08
+
+### Wartung und Code-Qualität
+
+- **Explizite öffentliche Exporte für das Trading-Modul (MissingAllExports, LOW – Tech Debt, Security-Audit §4.5):** `trading/__init__.py` definiert jetzt `__all__` mit den zwölf öffentlichen Submodulen und dokumentiert die öffentliche API im Modul-Docstring. Ohne diese Festlegung war der öffentliche Vertrag implizit: `from trading import *` exportierte nach dem Laden interner Module auch `admin`, `apps`, `middleware`, `monitoring`, `passphrase`, `rate_limit`, `urls` usw. Die interne Django-/Channels-Infrastruktur bleibt bewusst außerhalb der öffentlichen API.
+- **Root Cause geschlossen, nicht nur die Symptombehebung der Prompt-Vorlage:** Die im Prompt vorgeschlagene Eager-Import-Variante (`from . import models, views, tasks, ...` direkt in `__init__.py`) wäre für dieses Django-Paket nicht lauffähig, weil `trading/__init__.py` bereits beim Populieren der Apps durch `django.setup()` geladen wird, bevor die App-Registry bereit ist – die Django-Module enden dann mit `AppRegistryNotReady`. Der Fix trennt deshalb bewusst in zwei Policy-Stufen: **Import-sichere Module** (`backtesting`, `indicators`, `market_data`, `market_scanner`, `resource_optimizer`, `symbols`) werden sofort gebunden; **Django-gebundene Module** (`trading_bot`, `views`, `models`, `tasks`, `forms`, `worker_status`) werden per modul-Level-`__getattr__` (PEP 562) erst beim ersten öffentlichen Zugriff geladen und anschließend im Paketnamespace gecacht. `from trading import *` und direkte Submodul-Importe funktionieren unverändert.
+- Keine neue Laufzeit-Abhängigkeit, kein neues Architekturmuster, keine Settings-, Model- oder Migrationsänderung, keine geänderte URL, Response oder API-Form. Es wird **keine behobene Sicherheitslücke behauptet** – der Stern-Import war ein Qualitäts-/Wartbarkeitsproblem, kein nachgewiesener Exploit.
+
+### Tests und Qualitätssicherung
+
+- **11 neue Regressionstests** in `trading/tests/test_module_exports.py`: `__all__` als expliziter Vertrag (exakt die zwölf öffentlichen Module, keine internen Module), Modul-Docstring, explizit gebundene Import-sichere Module, keine Eager-Importe der Django-Module (verhindert `AppRegistryNotReady`), PEP-562-Auflösung der Django-Module, `from trading import *` exportiert exakt den öffentlichen Vertrag und kein `import *` im `__init__`. **Rot → grün:** Gegen den Ausgangsstand (leeres `__init__.py`) scheitern sie mit 4 Failures und 4 Errors; nach dem Fix sind alle grün.
+- **Angriffs- und Regressionsvektoren:** Stern-Import nach dem Laden interner Module leakt keine `admin`/`middleware`/`passphrase`/`urls` mehr; ein neues öffentliches Modul ohne `__all__`-Eintrag fällt automatisch auf; ein versehentlich exportiertes internes Modul fällt über den Mengenvergleich auf.
+- **320 Django-/Python-Tests** (11 neue + 309 bestehende) bestanden; Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und Ruff bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright` nicht ausgeführt (Node nicht eingerichtet).
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](CODE-20-module-exports.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #25](https://github.com/RG4all/t-bot-lokal/pull/25).
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.17** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält weiterhin keine separate Paketversion.
+- Audit §4.5 und Prompt 20 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](CODE-20-module-exports.md) ergänzt.
+- Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.17** prüfen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig.
+
 ## [2.4.16] – 2026-09-08
 
 ### Wartung und Code-Qualität

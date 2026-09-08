@@ -1559,6 +1559,19 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "refactor: add __all__ exports to trading module"
 ```
 
+**Status: Fixed in 2.4.17.** `trading/__init__.py` definiert jetzt `__all__`
+mit den zwölf öffentlichen Submodulen, einen Modul-Docstring und eine explizite
+Import-Policy. Die Eager-Import-Variante der Vorlage wurde bewusst nicht
+übernommen: `trading/__init__.py` wird von Django vor dem Abschluss der
+App-Registry geladen, sodass `from . import models/views/tasks/...` mit
+`AppRegistryNotReady` abbrechen würde. Import-sichere Module werden direkt
+gebunden; die Django-Module (`trading_bot`, `views`, `models`, `tasks`,
+`forms`, `worker_status`) werden per PEP-562-`__getattr__` erst beim ersten
+Zugriff geladen. `trading/tests/test_module_exports.py` (11 Tests) sichert den
+Vertrag, den Stern-Import und die App-Population ab. Siehe
+[CODE-20](CODE-20-module-exports.md), [Changelog](CHANGELOG.md#2417--2026-09-08)
+und [Audit §4.5](SECURITY_AUDIT.md#45-technologische-schuld--fehlende-__all__-exports--fixed-in-2417).
+
 ---
 
 ## Prompt 21: info_api Aggregation
@@ -1705,7 +1718,7 @@ VALIDIERUNGSKRITERIEN:
 | 17 | DbTrimBatchDelete | MEDIUM | Performance | 2h |
 | 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h ✅ 2.4.15 |
 | 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h ✅ 2.4.16 |
-| 20 | MissingAllExports | LOW | Tech Debt | 30min |
+| 20 | MissingAllExports | LOW | Tech Debt | 30min ✅ 2.4.17 |
 | 21 | InfoApiMemoryOptimization | MEDIUM | Performance | 3h |
 
 **Gesamtaufwand:** ~30 Stunden
