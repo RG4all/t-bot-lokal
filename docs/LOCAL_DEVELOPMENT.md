@@ -1,6 +1,6 @@
 # Lokale Entwicklungsumgebung
 
-**Konfigurationsstand: 2.4.8** · [Security-Review und Upgrade](SECURITY_REVIEW_2.4.4.md)
+**Konfigurationsstand: 2.4.9** · [Security-Review und Upgrade](SECURITY_REVIEW_2.4.4.md)
 
 ## 1. Voraussetzungen und automatische Installation
 

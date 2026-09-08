@@ -2,6 +2,27 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.9] – 2026-09-08
+
+### Sicherheit
+
+- **SEC-09 – Permissions-Policy-Header:** Die neue zentrale Einstellung `SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"` in `trading_bot_project/settings.py` deaktiviert den Zugriff auf Kamera, Mikrofon und Geolokation für alle Origins. Da Django selbst keinen `Permissions-Policy`-Header erzeugt, setzt die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` den Header aus dieser Einstellung auf jeder Antwort.
+- Die Middleware ist **direkt nach der `SecurityMiddleware`** registriert und erfasst damit auch Fehlerantworten (400/403/404/405/429/500/503), Redirects (302), Streaming/Downloads und von WhiteNoise beantwortete statische Dateien. Ein leerer Policy-Wert lässt Antworten unverändert.
+- Keine neue Runtime-Abhängigkeit, keine Migration und keine API-/Nutzdatenänderung.
+- **SEC-05 nachgeprüft:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen weiterhin grün.
+
+### Tests
+
+- Neu `trading/tests/test_permissions_policy.py` (11 Tests): explizite Settings in der DEBUG-/Render-Matrix, Middleware-Reihenfolge, synchrone/asynchrone Responses, HTML/JSON, Gate-Redirects, Fehlerantworten, WhiteNoise GET/HEAD/304 sowie die Negativkontrolle, dass ein leerer Policy-Wert keinen Header erzeugt.
+- Rot → grün: Ohne die registrierte Middleware schlugen die Settings-Matrix und sämtliche Header-Asserts fehl (17 fehlgeschlagene Assertions); mit dem Fix sind alle 11 Tests grün.
+- Lokale Validierung: **185 Django-/Python-Tests** (11 neue + 174 bestehende), Ruff, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` bestanden.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.9** erhöht; Sicherheitsabschnitte in beiden READMEs und im Handbuch ergänzt.
+- Befund §2.9 im Security-Audit und Prompt 9 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-09](SEC-09-permissions-policy.md) ergänzt.
+- Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Antworten eines vorgeschalteten Reverse-Proxys/CDNs werden von Django nicht automatisch mit dem Header versehen; dort bei Bedarf eine entsprechende Konfiguration ergänzen.
+
 ## [2.4.8] – 2026-09-07
 
 ### Sicherheit

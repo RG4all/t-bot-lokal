@@ -156,7 +156,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, nachgeprüft in 2.4.6
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, nachgeprüft in 2.4.6 und 2.4.8
 
 **Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
@@ -169,6 +169,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 **Nachprüfung 2.4.6:** `trading/tests/test_csrf_cookie.py` enthält jetzt 11 Tests. Der erfolgreiche Login verwendet tatsächlich den maskierten Formular-Token. Produktions-/Render-Cookie-Flags, fehlende Tokens/Cookies, Tokens anderer Clients und fremde Origins sind geprüft. Eine Testprozess-Mutation mit `CSRF_COOKIE_HTTPONLY=False` wird erkannt. Siehe [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
 
 **Nachprüfung 2.4.8:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Cache-Control-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-08-Nachweis](SEC-08-cache-control-api.md#sec-05-nachprüfung).
+
+**Nachprüfung 2.4.9:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Permissions-Policy-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-09-Nachweis](SEC-09-permissions-policy.md#sec-05-nachprüfung).
 
 ---
 
@@ -239,16 +241,22 @@ def no_cache_json(view_func):
 
 ---
 
-### 2.9 NIEDRIG – Fehlende `Permissions-Policy` / `Feature-Policy`
+### 2.9 NIEDRIG – Fehlende `Permissions-Policy` / `Feature-Policy` – Fixed in 2.4.9
 
-Es wird kein `Permissions-Policy`-Header gesetzt, der den Zugriff auf Browser-APIs (Kamera, Mikrofon, Geolokation) einschränkt.
+**Datei:** `trading_bot_project/settings.py`, `trading/middleware.py` · **Status:** Fixed
 
-**Lösungsvorschlag:**
+**Vorzustand:** Es wurde kein `Permissions-Policy`-Header gesetzt, der den Zugriff auf Browser-APIs (Kamera, Mikrofon, Geolokation) einschränkt. Die App benötigt diese APIs nicht; ohne Header hätte eine erfolgreiche Skript-Injektion die sensiblen APIs anfordern können.
+
+**Lösungsvorschlag (umgesetzt):**
 
 ```python
-# Middleware oder in settings.py:
+# In settings.py nach den anderen Security-Headern:
 SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 ```
+
+**Umgesetzt:** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation für alle Origins. Da Django selbst keinen Permissions-Policy-Header erzeugt, setzt die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (registriert direkt nach der `SecurityMiddleware`) den Header aus dieser Einstellung auf jeder Antwort – auch auf Fehler-, Redirect- und WhiteNoise-Antworten. Ein leerer Policy-Wert lässt Antworten unverändert. Der 301-SSL-Redirect entsteht direkt in der äußersten `SecurityMiddleware` und führt selbst keine Browser-APIs aus; die Abgrenzung ist im [Nachweis](SEC-09-permissions-policy.md) dokumentiert.
+
+**Nachweis:** 11 Regressionstests in `trading/tests/test_permissions_policy.py`; Settings-Matrix und Header-Prüfungen vor dem Fix rot (17 fehlgeschlagene Assertions), nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](SEC-09-permissions-policy.md).
 
 ---
 
@@ -654,6 +662,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)
 - [ ] HSTS-Header für Produktion korrekt
 - [x] X-Content-Type-Options: nosniff – explizit ab 2.4.6, siehe §2.6
+- [x] Permissions-Policy für Kamera/Mikrofon/Geolokation (ab 2.4.9, siehe §2.9 und [SEC-09](SEC-09-permissions-policy.md))
 
 ### Code-Qualität
 
