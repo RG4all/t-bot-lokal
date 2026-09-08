@@ -575,26 +575,27 @@ Details, Negativkontrolle und Prüfgrenzen: [CODE-19](CODE-19-view-type-hints.md
 
 ---
 
-### 4.5 TECHNOLOGISCHE SCHULD – Fehlende `__all__`-Exports
+### 4.5 TECHNOLOGISCHE SCHULD – Fehlende `__all__`-Exports – Fixed in 2.4.17
 
 **Datei:** `trading/__init__.py`
 
-Es gibt kein `__all__` für das `trading`-Modul, was die öffentliche API unklar macht.
+Es gab kein `__all__` und keine explizite Import-Policy für das `trading`-Modul,
+wodurch die öffentliche API unklar war: `from trading import *` exportierte nach
+dem Laden interner Module auch `admin`, `apps`, `middleware`, `monitoring`,
+`passphrase`, `rate_limit`, `urls` usw.
 
-**Lösungsvorschlag:**
-
-```python
-# trading/__init__.py
-__all__ = [
-    'trading_bot',
-    'backtesting',
-    'market_data',
-    'views',
-    'models',
-    'tasks',
-    'forms',
-]
-```
+**Umgesetzt in 2.4.17:** `__all__` deklariert die zwölf öffentlichen Submodule
+(`trading_bot`, `backtesting`, `market_data`, `indicators`, `views`, `models`,
+`tasks`, `forms`, `symbols`, `resource_optimizer`, `market_scanner`,
+`worker_status`); die interne Django-/Channels-Infrastruktur bleibt außerhalb
+der öffentlichen API. Die im ursprünglichen Prompt vorgeschlagene Eager-Import-
+Variante (`from . import models, views, tasks, ...`) wurde bewusst **nicht**
+übernommen, weil das Paket-`__init__` von Django vor dem Abschluss der
+App-Registry geladen wird und die Django-Module dann mit
+`AppRegistryNotReady` abbrechen. Stattdessen werden import-sichere Module
+direkt gebunden und Django-gebundene Module per modul-Level-`__getattr__`
+(PEP 562) erst beim Zugriff geladen. Details, Negativkontrolle und Prüfgrenzen:
+[CODE-20](CODE-20-module-exports.md).
 
 ---
 
@@ -649,15 +650,16 @@ def calculate_performance_metrics_fast(config, limit=2000):
 | 6 | **Cache-Control für API-Endpunkte** setzen | 2h | `views.py` |
 | 7 | **Error-Messages ohne Exception-Details – Fixed in 2.4.10 (§2.10)** | 1h | `views.py` |
 | 8 | **Indikator-Code deduplizieren – Fixed in 2.4.15 (§4.3)** | 3h | `indicators.py` (neu) |
+| 9 | **`__all__`-Exports für Trading-Modul – Fixed in 2.4.17 (§4.5)** | 30min | `trading/__init__.py` |
 
 ### Mittelfristig umsetzen (P2 – 1–2 Monate)
 
 | # | Maßnahme | Aufwand | Datei |
 |---|----------|---------|-------|
-| 9 | **db_restore_state async-fähig machen** | 2h | `trading_bot.py` |
-| 10 | **Indikator-Memoisierung** für Backtesting | 4h | `backtesting.py` |
-| 11 | **DB-Trim mit Batch-Delete** | 2h | `trading_bot.py` |
-| 12 | **Type-Hints für Views ergänzen – Fixed in 2.4.16 (§4.4)** | 3h | `views.py` |
+| 10 | **db_restore_state async-fähig machen** | 2h | `trading_bot.py` |
+| 11 | **Indikator-Memoisierung** für Backtesting | 4h | `backtesting.py` |
+| 12 | **DB-Trim mit Batch-Delete** | 2h | `trading_bot.py` |
+| 13 | **Type-Hints für Views ergänzen – Fixed in 2.4.16 (§4.4)** | 3h | `views.py` |
 
 ---
 
@@ -682,7 +684,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 
 - [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](CODE-18-indicator-dedup.md))
 - [x] Type-Hints für Views (ab 2.4.16, siehe §4.4 und [CODE-19](CODE-19-view-type-hints.md))
-- [ ] `__all__` für Trading-Modul
+- [x] `__all__` für Trading-Modul (ab 2.4.17, siehe §4.5 und [CODE-20](CODE-20-module-exports.md))
 - [ ] db_restore_state async-fähig
 - [ ] Bot-Start/Stop Race-Condition behoben
 
