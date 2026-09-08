@@ -68,7 +68,7 @@ delivery_files=(
   "docker-compose.yml"
   ".env.example"
   ".env.docker.example"
-  "config.template"
+  "config.template.env"
   "install.sh"
   "scripts/setup_local.sh"
   "docker-entrypoint.sh"

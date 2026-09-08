@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased] – 2026-09-09
+
+### Dokumentation und Wartbarkeit (Repo-Restrukturierung)
+
+- **Struktur:** `docs/` ist nach Dokumenttyp getrennt: `manual/` (App-Hilfe, Backtesting-Kapitel), `operations/` (lokales Setup, FAQ, Tailscale, Caddy), `findings/` (13 Audit-Tickets plus Pflichtvorlage `TEMPLATE.md`), `security/` (aktuelles Review), `adr/` (neu: ADR-0001 aus der Backtesting-Studie) und `archive/` (überholte Dokumente mit Lesezugriff-Banner). Die Umzugsphase-Commits sind reine `git mv`-Renames.
+- **Duplikate:** `docs/README.md` war ein zweites Produkt-README (≈41 % Überlappung); einzigartige Inhalte (Host-/manuelle Installation, Passphrase-Matrix, Render-Blueprint + Free-Einschränkungen, QA-Befehle) wanderten nach `docs/operations/LOCAL_DEVELOPMENT.md`. `docs/README.md` ist jetzt der Index. Das Root-README trägt keine hartcodierte Versionszahl mehr.
+- **Links:** ein kaputter Anker gefixt (`PERF-21#ci-und-auslieferung` → `#auslieferung-und-pruefgrenzen`); 37 GitHub-only-Deep-Links auf CHANGELOG-Anker zu reinen Dateilinks zurückgebaut; 162 relative Links an die neue Struktur angepasst; zuvor verwaiste Dokumente (Tailscale, Caddy, Peer-Reviews) sind jetzt im Index bzw. Archiv erreichbar.
+- **Code-Referenzen:** `trading/views.py` rendert das Handbuch von `docs/manual/MANUAL.md` (alte Pfade bleiben als Fallback); Kommentare in `scripts/setup_local.sh`, `tests/test_compose_security.sh` und sechs Test-Docstrings auf Archiv-/Findingspfade nachgezogen.
+- **Namensregeln:** `SEC-06-rule-lifecycle-authz.md` → `SEC-06-content-type-nosniff.md` (Dateiname entspricht dem im Dokument erklärten Befund).
+- **Werkzeuge:** neuer Doku-Wächter `scripts/check_docs.py` (Links, Anker, Orphans, Namenskonventionen, Duplikat-/Versions-Hinweise), versionierte CI-Definition `ci/quality.yml` (vom Maintainer nach `.github/workflows/` zu übernehmen – die GitHub-App besitzt keine `workflows`-Push-Rechte), `CONTRIBUTING.md` (Struktur-/Duplikat-/Namensregeln, Audit-Zyklen) und `patches/` als Peer-Review-Patch-Eingang (`inbox/` → `accepted/`/`done/`, Review-Vorlage).
+- **Konfigurations-Template:** `config.template` heißt jetzt `config.template.env` (Endung = Format); `Dockerfile`-COPY, `.gitignore`-Negation und beide Shell-Prüfungen (`test_compose_security.sh`, `test_config_generation.sh`) nachgezogen; historische CHANGELOG-/Fundstellen-Texte bleiben bewusst im Wortlaut.
+- Keine Code-, Settings-, Modell- oder Migrationsänderung; `/help/`-Auslieferung, Tests und Docker-Stack unverändert gültig (330 Django-/Python-Tests und 8/8 Shell-Tests grün vor und nach der Umstellung).
+
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [2.4.19] – 2026-09-08
@@ -27,7 +40,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **10 neue Regressionstests** in `trading/tests/test_info_api_metrics.py` (alle über den echten Middleware-Stack mit deaktiviertem Passphrase-Gate, analog zu `test_cache_control`): Verhaltensgleichheit der DB-Aggregation mit `calculate_performance_metrics()` über dasselbe Fenster (leere Historie, nur Käufe, nur Gewinn-Verkäufe, nur Verlust-Verkäufe, gemischt); Fensterbegrenzung – mit 2.600 Logs (600 alte Gewinne, 2.000 neue Verluste) liefert die Aggregation `win_rate == 0` und nicht die Gesamthistorie; `limit`-Parameter wird respektiert; `info_api` liefert dieselben Kennzahlen wie vor dem Fix (inkl. verschachteltem `metrics`-Objekt).
 - **Angriffs- und Randvektoren (Rot→Grün):** Ein echter Negativtest patcht `calculate_performance_metrics` auf einen Abbruch; vor dem Fix lieferte `info_api` dadurch HTTP 500, nach dem Fix ignoriert `info_api` den Patch und liefert HTTP 200 – das beweist, dass die Metrik nicht mehr über den Python-Pfad berechnet wird. Division-durch-Null-Vektoren sind abgedeckt: nur Gewinne bzw. nur Verluste ergeben `risk_reward == 0` und `profit_factor == 0` ohne Exception, die Antwort enthält keine `None`-Werte.
 - **330 Django-/Python-Tests** (10 neue + 320 bestehende) bestanden; Systemcheck, Migrationsprüfung (`makemigrations --check`), `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright`/mypy nicht ausgeführt (Node nicht eingerichtet, django-stubs nicht in `requirements.txt`), das Kriterium der statischen Prüfung ist über den ast-basierten Type-Hint-Test (`test_view_type_hints`) erfüllt, der `calculate_performance_metrics` weiterhin mit der verankerten Signatur prüft.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](findings/PERF-21-info-api-db-aggregation.md#auslieferung-und-pruefgrenzen) sind dokumentiert. Auslieferung über [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26).
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](findings/PERF-21-info-api-db-aggregation.md#auslieferung-und-prüfgrenzen) sind dokumentiert. Auslieferung über [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26).
 
 ### Dokumentation und Upgrade
 
