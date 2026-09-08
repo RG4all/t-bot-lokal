@@ -8,7 +8,8 @@
   App-Populationsfehler)
 - **Geprüfter Ausgangsstand:** 2.4.16 / `3e0f1ef` (Branch
   `arena/01a08207-t-bot-lokal`)
-- **Fix-Commit:** `_FILLED_AFTER_COMMIT_` – `refactor: add __all__ exports to trading module`
+- **Fix-Commit:** [`2ae72d9`](https://github.com/RG4all/t-bot-lokal/commit/2ae72d9007b2d525138b7bf14f4122d37a5680a6)
+  – `refactor: add __all__ exports to trading module`
 - **Fix-PR:** `_FILLED_AFTER_PR_` (Ziel-Branch `tbot.local`)
 - **Dokumentation des Releases:** [CHANGELOG 2.4.17](CHANGELOG.md#2417--2026-09-08)
 
