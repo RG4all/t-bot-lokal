@@ -156,7 +156,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, nachgeprüft in 2.4.6 und 2.4.8
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.10
 
 **Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
@@ -171,6 +171,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 **Nachprüfung 2.4.8:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Cache-Control-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-08-Nachweis](SEC-08-cache-control-api.md#sec-05-nachprüfung).
 
 **Nachprüfung 2.4.9:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Permissions-Policy-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-09-Nachweis](SEC-09-permissions-policy.md#sec-05-nachprüfung).
+
+**Nachprüfung 2.4.10:** Alle 11 CSRF-Cookie-Tests erneut grün; eine Testprozess-Mutation mit deaktiviertem `CSRF_COOKIE_HTTPONLY` lässt die Cookie-Prüfung erwartungsgemäß scheitern. Settings, Formular-Token-Login, Produktions-/Render-Flags sowie Cookie-/Token-/Origin-Negativtests bleiben unverändert wirksam. [Nachweis SEC-10](SEC-10-information-disclosure.md#sec-05-nachprüfung).
 
 ---
 
@@ -260,22 +262,15 @@ SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 
 ---
 
-### 2.10 NIEDRIG – Potenzielle Information Disclosure in Error-Messages
+### 2.10 NIEDRIG – Information Disclosure in Fehlermeldungen – Fixed in 2.4.10
 
-**Datei:** `trading/views.py` (Zeilen 383, 894)
+**Dateien:** `trading/views.py` und die direkt beteiligten Formular-/Scanner-/Bot-/Worker-/Fehler-Templates · **Status:** Fixed
 
-```python
-messages.error(request, f"Bot konnte nicht gestartet werden: {exc}")
-```
+**Vorzustand:** Technische Exception-Texte gelangten in Flash-Meldungen, JSON- und Report-Antworten. Nur zwei Flash-Strings zu ersetzen hätte die parallelen Ausgabewege und die Anzeige gespeicherter Diagnosen nicht geschlossen.
 
-**Auswirkung:** Technische Exception-Details werden dem Benutzer angezeigt (z.B. Stacktraces, DB-Verbindungsfehler).
+**Umgesetzt:** Feste, kontextbezogene Benutzer-Meldungen statt technischer Exception-Texte; `logger.exception` erhält Diagnose und Traceback. Das gilt auch für Teilfehler, Bot-Status und gespeicherte Backtest-Fehler. Das Fehler-Log zeigt technische Inhalte nur noch Staff-Konten innerhalb der bestehenden Eigentümergrenze; normale Konten behalten generische Einträge mit Referenz. DB-Fehler beim zusätzlichen Persistieren eines Log-Eintrags verdecken nicht die ursprüngliche sichere Antwort. Keine neue Runtime-Abhängigkeit oder Migration.
 
-**Lösungsvorschlag:**
-
-```python
-messages.error(request, "Bot konnte nicht gestartet werden. Siehe Fehler-Log für Details.")
-logger.exception("Bot-Start für Konfiguration %s fehlgeschlagen", config.id)
-```
+**Nachweis:** 25 neue Regressionstests, am Ausgangsstand rot, nach dem Fix grün; 210 Tests insgesamt bestanden. [Finding, Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](SEC-10-information-disclosure.md).
 
 ---
 
@@ -633,7 +628,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 |---|----------|---------|-------|
 | 5 | **CSP-Header** implementieren | 4h | `settings.py`, Middleware |
 | 6 | **Cache-Control für API-Endpunkte** setzen | 2h | `views.py` |
-| 7 | **Error-Messages ohne Exception-Details** | 1h | `views.py` |
+| 7 | **Error-Messages ohne Exception-Details – Fixed in 2.4.10 (§2.10)** | 1h | `views.py` |
 | 8 | **Indikator-Code deduplizieren** | 3h | `indicators.py` (neu) |
 
 ### Mittelfristig umsetzen (P2 – 1–2 Monate)
@@ -656,7 +651,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [x] CSRF_COOKIE_HTTPONLY = True
 - [ ] CSP-Header implementiert
 - [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](SEC-08-cache-control-api.md))
-- [ ] Error-Messages ohne technische Details
+- [x] Error-Messages ohne technische Details (ab 2.4.10; Diagnose-Log mit Staff-/Eigentümergrenze, siehe §2.10 und [SEC-10](SEC-10-information-disclosure.md))
 - [ ] Docker-Passwörter ohne Defaults
 - [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))
 - [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)

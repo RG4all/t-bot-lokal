@@ -2,6 +2,27 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.10] – 2026-09-08
+
+### Sicherheit
+
+- **SEC-10 – Information Disclosure behoben:** Im geprüften Stand 2.4.9 konnten technische Fehlerdetails in Benutzerantworten erscheinen. Ab 2.4.10 verwenden Bot-Start/Validierung, Verkaufsaktionen, Marktdaten-/Worker-APIs, Formulare und Reportfehler generische Meldungen. Diagnosen bleiben mit Traceback in geschützten Logs; auch Teilfehler und gespeicherte Backtest-Fehler werden nicht als technische Benutzer-Meldungen ausgegeben.
+- **Diagnose-Log abgesichert:** Technische Meldungen, Typen und Details sind im Fehler-Log nur noch für Staff-Konten unter Beibehaltung der Eigentümerprüfung sichtbar. Normale Konten erhalten eine generische Meldung mit Referenz und können eigene Einträge weiterhin filtern und erledigen. Die Einschränkung schützt auch bestehende Einträge ohne Datenmigration.
+- Fehler beim zusätzlichen Speichern eines Diagnose-Log-Eintrags werden separat geloggt und verdrängen nicht die sichere Antwort. Bestehende Statuscodes und erfolgreiche Handels-/Reportantworten bleiben erhalten; PDF-Renderfehler werden ebenfalls kontrolliert mit 503 beantwortet.
+- **SEC-05 erneut geprüft:** Alle 11 CSRF-Cookie-Tests bestanden; eine gezielte Negativkontrolle mit deaktiviertem `HttpOnly` wird erkannt. HttpOnly bleibt zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz.
+
+### Tests und Qualitätssicherung
+
+- 25 neue Regressionstests in `trading/tests/test_error_disclosure.py`: Rot am Ausgangsstand, grün mit Fix. Abdeckung umfasst Flash-Cookies, HTTP-/JSON-Antworten, Fehlertypen und Exception-Ketten, Teilausfälle, Log-Persistenzfehler, alte Diagnosedaten sowie Eigentümer-/Staff-/CSRF-Grenzen.
+- **210 Django-/Python-Tests**, 7/7 Shell-Testgruppen, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und `pip-audit` lokal bestanden.
+- Auslieferung mit ausdrücklich genehmigten lokalen Prüfnachweisen, ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; [CI-Ausnahme und Prüfgrenzen](SEC-10-information-disclosure.md#ci-und-auslieferung) sind dokumentiert.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.10** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
+- Audit §2.10 und Prompt 10 sind **Fixed**; [SEC-10 mit Fix-Commit und SEC-05-Nachprüfung](SEC-10-information-disclosure.md) ergänzt.
+- Keine neue Runtime-Abhängigkeit, keine Datenbankmigration und keine neuen Umgebungsvariablen. Server-Logs privat halten; nach dem Deploy `/health/` auf 2.4.10 und die getrennte Fehler-Log-Anzeige für normale/Staff-Konten prüfen.
+
 ## [2.4.9] – 2026-09-08
 
 ### Sicherheit

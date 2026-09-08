@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.6 · Stand 7. September 2026**
+**Version 2.4.10 · Stand 8. September 2026**
 
 [TOC]
 
@@ -311,9 +311,13 @@ Seit 2.4.9 setzt jede HTTP-Antwort zusätzlich den Header `Permissions-Policy: c
 
 ## 12. Fehler-Log und Betrieb
 
-Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Technische Details enthalten Exchange, Markt, Symbol und Retry-Informationen. Gelöste Einträge können als erledigt markiert werden.
+Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Gelöste Einträge können als erledigt markiert werden. Seit **2.4.10** erhalten normale Konten generische Meldungen mit einer Referenznummer statt technischer Diagnosen; bei anhaltenden Problemen diese Referenz und die Konfiguration dem Betreiber nennen.
 
-Typische Meldungen:
+Technische Log-Meldungen, Exception-Typen und Details sind nur für Betreiberkonten (`is_staff`) sichtbar, weiterhin ausschließlich für eigene Konfigurationen. Das gilt auch für alte Einträge. Betreiber können zusätzlich die geschützten Server-Logs bzw. die vorhandene Django-Administration mit den entsprechenden Berechtigungen verwenden. Staff-Rechte nicht an normale Nutzer vergeben, um die generische Anzeige zu umgehen.
+
+Auch Flash-Meldungen, JSON-Fehler, PDF-/HTML-Reportfehler und gespeicherte Backtest-Fehler zeigen keine internen Exception-Texte mehr. Der ursprüngliche Fehler wird serverseitig mit Traceback geloggt; fällt die zusätzliche Speicherung im Fehler-Log aus, bleibt die generische Antwort erhalten. Fachliche Formularhinweise, etwa zu nicht gelisteten Symbolen aus der eigenen Eingabe, bleiben verfügbar. [Security-Nachweis SEC-10](SEC-10-information-disclosure.md).
+
+Typische **technische Log-Meldungen für Betreiber**:
 
 - `SymbolValidationError`: Paar ist nicht gelistet oder passt nicht zur Marktart.
 - `RateLimitError`: Börse hat 418/429 geliefert; t-bot wartet den angegebenen Zeitpunkt oder Backoff ab.

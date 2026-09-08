@@ -15,7 +15,7 @@ from asgiref.sync import async_to_sync
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.contrib.messages.storage.cookie import CookieStorage
-from django.db import InterfaceError, OperationalError
+from django.db import IntegrityError, InterfaceError, OperationalError
 from django.forms.models import model_to_dict
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -175,6 +175,27 @@ class ErrorDisclosureTests(TestCase):
                     self.assert_activation_failed(response)
                     assert_exception_logged(self, logs, original)
                     assert_exception_logged(self, logs, log_error)
+
+    def test_real_log_integrity_failure_does_not_poison_request_transaction(self):
+        create = ErrorLog.objects.create
+        original = RuntimeError(EXCEPTION_TEXT)
+
+        def invalid_log(**fields):
+            # Echter DB-Fehler statt Mock-Exception: ohne Savepoint wäre die
+            # äußere Request-/Test-Transaktion danach nicht mehr nutzbar.
+            return create(**{**fields, "source": None})
+
+        with (
+            patch("trading.views.validate_exchange_symbols"),
+            patch("trading.views.bot_manager.start_bot", side_effect=original),
+            patch("trading.views.ErrorLog.objects.create", side_effect=invalid_log),
+            self.assertLogs("trading.views", level="WARNING") as logs,
+        ):
+            response = self.client.post(reverse("config_activate", args=[self.config.id]))
+        self.assert_activation_failed(response)
+        assert_exception_logged(self, logs, original)
+        self.assertTrue(any(record.exc_info[0] is IntegrityError for record in logs.records))
+        self.assertFalse(ErrorLog.objects.exists())
 
     def test_successful_activation_keeps_existing_behavior(self):
         with (
@@ -524,3 +545,19 @@ class ErrorDisclosureTests(TestCase):
             self.assertEqual(response.status_code, 503)
             self.assertEqual(response.content.decode(), REPORT_MESSAGE)
             assert_exception_logged(self, logs, exception)
+
+    def test_successful_pdf_response_keeps_content_type_and_download_headers(self):
+        expected_pdf = b"%PDF-1.7\nsec10-test-only"
+        html = Mock()
+        html.return_value.write_pdf.return_value = expected_pdf
+        with (
+            patch("trading.views._build_report_context", return_value={}),
+            patch("trading.views.render_to_string", return_value="<p>Test report</p>"),
+            patch.dict("sys.modules", {"weasyprint": SimpleNamespace(HTML=html)}),
+        ):
+            response = self.client.get(reverse("generate_report", args=[self.config.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, expected_pdf)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertRegex(response["Content-Disposition"], r'^attachment; filename=".+\.pdf"$')
+        html.return_value.write_pdf.assert_called_once_with()
