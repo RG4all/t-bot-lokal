@@ -2,6 +2,25 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.13] – 2026-09-08
+
+### Sicherheit und Bug-Fixes
+
+- **BUG-14 / CsvEchoNotTrueStream (LOW, Security-Audit §3.3):** Der Trading-CSV-Export im geprüften Stand **2.4.12** verwendete einen eigenen Echo-Adapter. Ab **2.4.13** ersetzt ein wiederverwendeter `io.StringIO`-Textpuffer die Klasse `_CsvEcho`. CSV-Inhalte werden mit `getvalue()` ausgelesen, statt vom Rückgabeverhalten des Adapters abzuhängen. Das bisherige Echo-Muster war für `csv.writer` gültig; der Fix verbessert die Standardkompatibilität, ohne eine nachgewiesene Sicherheitslücke zu behaupten.
+- Der synchrone Generator leert den Puffer vor jeder Datenzeile vollständig und schließt ihn bei Ende, Fehler oder Response-Abbruch. UTF-8-BOM, zwölf Spalten, Zeitstempel-/ID-Sortierung, `iterator(chunk_size=1000)`, Dateiname und Eigentümerprüfung bleiben unverändert. Die bestehende ASGI-Anpassung synchroner Iteratoren ist nicht Gegenstand dieses Fixes.
+
+### Tests und Qualitätssicherung
+
+- **15 neue Regressionstests** in `trading/tests/test_report_csv.py`: Standard-Textpuffer, zeilenweise Ausgabe ohne Datenreste, verzögerter Datenbankzugriff über die 1.000er-Grenze, Präzision, Zeitzone, CSV-Sonderzeichen, Pufferfreigabe sowie Login-, Methoden-, Eigentümer- und Dateinamensgrenzen. **Rot → grün:** fünf Tests am Ausgangsstand fehlgeschlagen (sieben Assertions). Negativkontrollen für fehlendes Zurücksetzen, Kürzen und Schließen des Puffers werden erkannt.
+- **242 Django-/Python-Tests**, **8/8 Shell-Testgruppen**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](BUG-14-csv-echo-true-stream.md#ci-und-auslieferung) sind dokumentiert.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.13** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration, keine separate Paketversion.
+- Audit §3.3 und Prompt 14 sind **Fixed**; [Finding mit Fix-Commit](BUG-14-csv-echo-true-stream.md) ergänzt.
+- Keine neuen Abhängigkeiten, Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf **2.4.13** prüfen; CSV-Importe müssen nicht angepasst werden.
+
 ## [2.4.12] – 2026-09-08
 
 ### Bug-Fixes
