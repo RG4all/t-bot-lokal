@@ -337,6 +337,8 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "fix(security): set CSRF_COOKIE_HTTPONLY=True"
 ```
 
+**Nachprüfung 2.4.10:** SEC-05 bleibt **Fixed**; alle 11 Tests bestanden erneut. Eine gezielte Testprozess-Mutation mit deaktiviertem HttpOnly wird erkannt. [Nachweis](SEC-10-information-disclosure.md#sec-05-nachprüfung).
+
 ---
 
 ## Prompt 6: X-Content-Type-Options
@@ -545,6 +547,8 @@ VALIDIERUNGSKRITERIEN:
 ---
 
 ## Prompt 10: Information Disclosure
+
+**Status: Fixed in 2.4.10.** Technische Fehler werden in `trading/views.py` und den direkt beteiligten Ausgabewegen nicht mehr in Flash-/JSON-/Report-Meldungen übernommen; `logger.exception` erhält die Diagnose. Teilfehler und gespeicherte Backtest-Fehler sind eingeschlossen. Das Fehler-Log zeigt technische Details nur Staff-Konten unter Beibehaltung der Eigentümerprüfung, auch für alte Einträge. 25 neue Regressionstests (Rot → grün), insgesamt 210 Django-/Python-Tests bestanden. SEC-05 wurde mit allen 11 Tests und einer HttpOnly-Negativkontrolle erneut geprüft. [Finding mit Fix-Commit und Prüfgrenzen](SEC-10-information-disclosure.md), [Audit §2.10](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 **Prompt-Titel:** `[InformationDisclosureErrors] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** LOW – Security  

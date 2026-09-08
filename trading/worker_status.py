@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 
@@ -7,6 +8,8 @@ from redis import Redis
 from redis.exceptions import RedisError
 
 from trading_bot_project.celery import app
+
+logger = logging.getLogger(__name__)
 
 _STATUS_LOCK = threading.Lock()
 _STATUS_CACHE = None
@@ -25,8 +28,9 @@ def _remote_status():
         if redis_ok:
             replies = app.control.inspect(timeout=1.5).ping() or {}
             workers = sorted(replies)
-    except (RedisError, CeleryError, OSError) as exc:
-        error = f"{type(exc).__name__}: {exc}"
+    except (RedisError, CeleryError, OSError):
+        logger.exception("Backtest-Worker-Verbindung fehlgeschlagen")
+        error = "Backtest-Worker vorübergehend nicht erreichbar."
     worker_ok = bool(workers)
     if worker_ok:
         mode = "celery-worker"

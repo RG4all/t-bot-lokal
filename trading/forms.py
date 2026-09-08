@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 
@@ -10,6 +11,8 @@ from django.utils import timezone
 from .backtest_templates import template_choices
 from .market_data import MarketDataError, SymbolValidationError, validate_exchange_symbols
 from .models import Configuration
+
+logger = logging.getLogger(__name__)
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9._-]+/[A-Z0-9._:-]+$")
 # Sicherheitsabsolute; das wirksame Limit wird zusätzlich pro Hardwareprofil
@@ -280,10 +283,12 @@ class ConfigurationForm(forms.ModelForm):
                 validate_exchange_symbols(exchange, market, symbols)
             except SymbolValidationError as exc:
                 self.add_error("symbols", str(exc))
-            except (MarketDataError, ValueError) as exc:
+            except (MarketDataError, ValueError):
+                # Anders als SymbolValidationError sind dies technische Diagnosen.
+                logger.exception("Exchange-Konfiguration für %s/%s nicht verifizierbar", exchange, market)
                 self.add_error(
                     None,
-                    f"Die Exchange-Konfiguration konnte nicht verifiziert werden: {exc}. "
+                    "Die Exchange-Konfiguration konnte nicht verifiziert werden. "
                     "Bitte Verbindung, Exchange, Markt und Symbole prüfen und erneut speichern.",
                 )
         return cleaned_data

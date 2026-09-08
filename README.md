@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.9** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.10** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -19,10 +19,11 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - Für mehrere Prozesse und stabile Sessions beide Werte explizit setzen. Eine Passphrase-Rotation macht alte Gate-Freigaben ungültig; der Gate ersetzt nicht den Benutzer-Login.
 - Das lokale Compose-Profil läuft mit `DEBUG=True` und standardmäßig ohne Gate. Es ist **kein Produktionsprofil**; vor Team-/Netzwerkzugriff den Gate einschalten und private Secrets konfigurieren.
 - **HTTP-Header (ab 2.4.6 explizit):** `SECURE_CONTENT_TYPE_NOSNIFF = True` setzt `X-Content-Type-Options: nosniff` unabhängig von DEBUG/Render. Die vorhandene `SecurityMiddleware` erfasst auch Fehlerantworten, Downloads und durch WhiteNoise ausgelieferte statische Dateien. Der Fix verlässt sich nicht mehr nur auf den Django-Default.
-- **Cookies (ab 2.4.5, in 2.4.6 nachgeprüft):** Session- und CSRF-Cookie werden mit `HttpOnly` gesetzt und sind nicht über `document.cookie` lesbar. Das CSRF-Token wird über `{% csrf_token %}` als verstecktes Formularfeld ausgegeben und bleibt dort für Skripte derselben Origin zugänglich. `HttpOnly` ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz.
+- **Cookies (ab 2.4.5, zuletzt in 2.4.10 nachgeprüft):** Session- und CSRF-Cookie werden mit `HttpOnly` gesetzt und sind nicht über `document.cookie` lesbar. Das CSRF-Token wird über `{% csrf_token %}` als verstecktes Formularfeld ausgegeben und bleibt dort für Skripte derselben Origin zugänglich. `HttpOnly` ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz.
 - **Session-Lebensdauer und Logout-Invalidierung (ab 2.4.7):** Die Session-Cookie-Lebensdauer ist auf 8 Stunden beschränkt und läuft ab, wenn der Browser geschlossen wird (`SESSION_EXPIRE_AT_BROWSER_CLOSE = True`). POST `/logout/` ruft `request.session.flush()` auf, sodass alle Session-Daten unmittelbar ungültig werden und der Session-Key rotiert. Details: [SEC-07](docs/SEC-07-session-lifetime-invalidation.md).
 - **Cache-Control für API-Endpunkte (ab 2.4.8):** Alle JSON-API-Endpunkte (`/api/...`) setzen `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache`. Browser und Proxies/CDNs speichern damit keine benutzerbezogenen Handels-, Portfolio-, Log- oder Marktdaten zwischen. Details: [SEC-08](docs/SEC-08-cache-control-api.md).
 - **Permissions-Policy (ab 2.4.9):** Die Middleware `PermissionsPolicyMiddleware` setzt `Permissions-Policy: camera=(), microphone=(), geolocation=()` aus `SECURE_PERMISSIONS_POLICY` – damit sind Kamera, Mikrofon und Geolokation für alle Origins deaktiviert, auch auf Fehler- und WhiteNoise-Antworten. Das Projekt benötigt diese APIs nicht. Details: [SEC-09](docs/SEC-09-permissions-policy.md).
+- **Fehlermeldungen (ab 2.4.10):** Bot-Aktionen, Marktdaten-/Worker-APIs, Konfigurationsformulare und Reports geben keine technischen Exception-Texte mehr aus. Diagnosen werden mit Traceback serverseitig geloggt. Im Fehler-Log sehen normale Konten generische Einträge mit Referenz; technische Details benötigen zusätzlich zur Eigentümerschaft `is_staff`. Bereits gespeicherte Fehler sind ebenfalls geschützt. Details: [SEC-10](docs/SEC-10-information-disclosure.md).
 
 ## Dokumentation
 
@@ -34,4 +35,5 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [SEC-07: Session-Lifetime- und Logout-Invalidierung](docs/SEC-07-session-lifetime-invalidation.md)
 - [SEC-08: Cache-Control-Header für API-Endpunkte](docs/SEC-08-cache-control-api.md)
 - [SEC-09: Permissions-Policy-Header](docs/SEC-09-permissions-policy.md)
+- [SEC-10: Sichere Fehlermeldungen und SEC-05-Nachprüfung](docs/SEC-10-information-disclosure.md)
 - [Changelog](docs/CHANGELOG.md) · [Aktuelle Version](VERSION)
