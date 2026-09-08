@@ -1,5 +1,6 @@
 import base64
 import csv
+import io
 import logging
 import math
 import re
@@ -1217,53 +1218,55 @@ def generate_report_html(request, config_id):
     return response
 
 
-class _CsvEcho:
-    def write(self, value):
-        return value
-
-
 @login_required
 @require_GET
 def generate_report_csv(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
     queryset = config.logs.all().order_by("timestamp", "id")
-    writer = csv.writer(_CsvEcho())
 
     def rows():
         yield "\ufeff"
-        yield writer.writerow(
-            [
-                "timestamp",
-                "symbol",
-                "action",
-                "price",
-                "amount",
-                "fee_amount",
-                "order_id",
-                "pl_nominal",
-                "pl_relative",
-                "total_pl",
-                "current_capital",
-                "tank",
-            ]
-        )
-        for log in queryset.iterator(chunk_size=1000):
-            yield writer.writerow(
+        # Erst beim Lesen öffnen; auch bei Stream-Abbruch oder Fehler schließen.
+        with io.StringIO(newline="") as buffer:
+            writer = csv.writer(buffer)
+            writer.writerow(
                 [
-                    timezone.localtime(log.timestamp).isoformat(),
-                    log.symbol,
-                    log.action,
-                    log.price,
-                    log.amount,
-                    log.fee_amount,
-                    log.order_id,
-                    log.pl_nominal,
-                    log.pl_relative,
-                    log.total_pl,
-                    log.current_capital,
-                    log.tank,
+                    "timestamp",
+                    "symbol",
+                    "action",
+                    "price",
+                    "amount",
+                    "fee_amount",
+                    "order_id",
+                    "pl_nominal",
+                    "pl_relative",
+                    "total_pl",
+                    "current_capital",
+                    "tank",
                 ]
             )
+            yield buffer.getvalue()
+            for log in queryset.iterator(chunk_size=1000):
+                # Nur die aktuelle Zeile puffern, ohne Reste längerer Vorgänger.
+                buffer.seek(0)
+                buffer.truncate(0)
+                writer.writerow(
+                    [
+                        timezone.localtime(log.timestamp).isoformat(),
+                        log.symbol,
+                        log.action,
+                        log.price,
+                        log.amount,
+                        log.fee_amount,
+                        log.order_id,
+                        log.pl_nominal,
+                        log.pl_relative,
+                        log.total_pl,
+                        log.current_capital,
+                        log.tank,
+                    ]
+                )
+                yield buffer.getvalue()
 
     response = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{_report_filename(config, "csv")}"'
