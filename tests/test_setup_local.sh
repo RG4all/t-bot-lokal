@@ -14,8 +14,15 @@ TUNING_ENV="${TESTS_TMPDIR}/hardware.env"
 write_env_local >"${TESTS_TMPDIR}/setup.stdout" 2>"${TESTS_TMPDIR}/setup.stderr"
 passphrase="$(read_existing_secret PASSPHRASE)"
 secret_key="$(read_existing_secret SECRET_KEY)"
+pg_password="$(read_existing_secret POSTGRES_PASSWORD)"
 assert_match '^[A-Za-z0-9_-]{48}$' "${passphrase}" "Setup generiert private Passphrase"
 assert_match '^[A-Za-z0-9_-]{48}$' "${secret_key}" "Setup generiert privaten Signierschlüssel"
+assert_match '^[A-Za-z0-9_-]{48}$' "${pg_password}" "Setup generiert privates Datenbank-Passwort"
+if [[ "${pg_password}" == "tbot-local-password" ]]; then
+  fail "Setup darf nicht das fruehere oeffentliche Standard-DB-Passwort setzen"
+else
+  pass "Setup setzt kein oeffentliches Standard-DB-Passwort"
+fi
 assert_eq "False" "$(read_existing_secret PASSPHRASE_GATE_ENABLED)" "Lokaler Gate bleibt opt-in"
 perms="$(stat -c '%a' "${ENV_LOCAL}" 2>/dev/null || stat -f '%Lp' "${ENV_LOCAL}")"
 assert_eq "600" "${perms}" "Env-Datei ist privat"
@@ -31,6 +38,7 @@ mv "${TESTS_TMPDIR}/enabled.env" "${ENV_LOCAL}"
 write_env_local
 assert_eq "${passphrase}" "$(read_existing_secret PASSPHRASE)" "Retuning bewahrt Passphrase"
 assert_eq "${secret_key}" "$(read_existing_secret SECRET_KEY)" "Retuning bewahrt Signierschlüssel"
+assert_eq "${pg_password}" "$(read_existing_secret POSTGRES_PASSWORD)" "Retuning bewahrt Datenbank-Passwort"
 assert_eq "True" "$(read_existing_secret PASSPHRASE_GATE_ENABLED)" "Retuning schaltet Gate nicht ab"
 
 ENV_LOCAL="${TESTS_TMPDIR}/independent.env"
@@ -39,6 +47,11 @@ if [[ "$(read_existing_secret PASSPHRASE)" != "${passphrase}" ]]; then
   pass "Unabhängige Setups erhalten verschiedene Passphrasen"
 else
   fail "Unabhängige Setups teilen dieselbe Passphrase"
+fi
+if [[ "$(read_existing_secret POSTGRES_PASSWORD)" != "${pg_password}" ]]; then
+  pass "Unabhängige Setups erhalten verschiedene Datenbank-Passwörter"
+else
+  fail "Unabhängige Setups teilen dasselbe Datenbank-Passwort"
 fi
 
 finish_test

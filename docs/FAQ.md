@@ -118,6 +118,13 @@ Ursache: Das offizielle Postgres-Image liest `POSTGRES_PASSWORD` nur beim
 Aendern der Umgebungsvariable aendert das Passwort im bestehenden Volume
 **nicht**.
 
+Seit 2.4.11 gilt zusaetzlich: `docker-compose.yml` verlangt
+`POSTGRES_PASSWORD` als Pflichtwert ohne Default, und `setup_local.sh`
+erzeugt fuer neue Setups ein zufälliges, privat gehaltenes Passwort in
+`.env.local`. Wurde ein Volume mit dem frueher oeffentlichen Standard-Passwort
+initialisiert und `.env.local` anschließend gelöscht, meldet `setup_local.sh`
+beim Wiedererkennen dieses Werts einen Rotationshinweis.
+
 Abhilfe (setzt die lokale Datenbank zurueck):
 
 ```bash
@@ -175,6 +182,13 @@ docker compose --env-file .env.local up -d --force-recreate web backtest-worker
 ```
 
 Alle App-Prozesse müssen dieselben Secrets erhalten. Eine neue Passphrase widerruft alte Gate-Freigaben; ein neuer Signierschlüssel invalidiert zusätzlich die Django-Login-Cookies. Beim Upgrade auf 2.4.4 werden alte boolesche Gate-Freigaben bereits abgelehnt. Bei zuvor öffentlichen Default-Secrets beide Werte rotieren. Auf Render die Service-Secrets aktualisieren und alle betroffenen Services neu deployen.
+
+**`POSTGRES_PASSWORD` lokal rotieren (ab 2.4.11):** Zeile in `.env.local`
+leeren, `scripts/setup_local.sh` erneut ausführen (erzeugt einen neuen
+Zufallswert) und danach `scripts/setup_local.sh --reset-db --yes`, damit das
+Volume mit dem neuen Passwort initialisiert wird. Beide Schritte löschen die
+lokale Datenbank; ohne Volume-Reset bleibt das alte Passwort aktiv und Web/
+Worker laufen in einen Passwort-Mismatch (siehe Punkt 5).
 
 **Kein Volume-Reset für App-Secrets.** Ein `POSTGRES_PASSWORD`-Wechsel erfordert eine separate Datenbank-Passwortänderung durch den DB-Administrator sowie die passende Verbindungskonfiguration. `--reset-db --yes` löscht lokale Daten und ist nur für ausdrücklich entbehrliche Entwicklungsdaten gedacht, nicht für Secret-Rotation in Produktion.
 

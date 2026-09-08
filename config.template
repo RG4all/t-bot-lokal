@@ -33,7 +33,7 @@ AUTOSTART_BOTS=True
 # Datenbank / Redis
 # ----------------------------------------------------------------------------
 # Ohne DATABASE_URL nutzt die App SQLite. Docker Compose verwendet PostgreSQL.
-# DATABASE_URL=postgresql://tbot:tbot-local-password@localhost:5432/tbot
+# DATABASE_URL=postgresql://tbot:<privates-db-passwort>@localhost:5432/tbot
 REDIS_URL=redis://127.0.0.1:6379/0
 DATABASE_SSL_REQUIRE=False
 

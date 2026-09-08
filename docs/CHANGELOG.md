@@ -2,6 +2,28 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.11] – 2026-09-08
+
+### Sicherheit
+
+- **SEC-12 – Keine Standard-Passwörter im Compose-Setup:** `docker-compose.yml` verlangt `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` als Pflichtwerte (`${VAR:?...}`). Fehlende oder leere Secrets brechen die Compose-Interpolation mit einer klaren Fehlermeldung ab; der frühere öffentliche Datenbank-Standard-Passwort-Fallback (`${POSTGRES_PASSWORD:-...}` in `DATABASE_URL` und im Postgres-Service) ist entfernt. Ein vergessenes Env-File startet nicht mehr still mit öffentlich bekannten Zugangsdaten.
+- `scripts/setup_local.sh` erzeugt für neue Setups ein zufälliges, privat gehaltenes `POSTGRES_PASSWORD` in `.env.local` (Modus 0600) statt des öffentlichen Defaults und bewahrt bestehende Werte beim Retuning. Erkennt das Skript den früher öffentlichen Standard-Wert, weist es auf die Rotation inklusive `--reset-db` hin, ohne den Wert erneut zu veröffentlichen (SHA-256-Vergleich).
+- Beide Env-Beispiele (`SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD`), `config.template` und `install.sh` enthalten keine benutzbaren oder öffentlich bekannten Secret-Werte mehr; `POSTGRES_PASSWORD=` bleibt bewusst als leerer Platzhalter mit Erzeugungshinweis. Nicht-Secrets (`POSTGRES_USER`, `POSTGRES_DB`) behalten ihre lokalen Defaults.
+- Keine neue Runtime-Abhängigkeit, keine Migration und keine Änderung an App-Verhalten oder Settings; bestehende `.env.local`-Dateien funktionieren unverändert weiter.
+
+### Tests und Qualitätssicherung
+
+- Neue Shell-Testgruppe `tests/test_compose_security.sh` (25 Assertions): Pflicht-Interpolation für alle drei Secrets, keine `${VAR:-...}`-Fallbacks, keine öffentlichen Standard-Passwörter in den 13 ausgelieferten Konfigurations-/Skriptdateien, leere Platzhalter in den Env-Beispielen; optional prüft sie mit Docker, dass `docker compose config` ohne Secrets scheitert und mit Secrets auflöst (ohne Docker übersprungen).
+- `tests/test_setup_local.sh` erweitert (Rot → grün): zufälliges DB-Passwort statt öffentlichem Standard, Erhalt beim Retuning, unterschiedliche Passwörter pro Setup. Vor dem Fix schlugen 3 von 9 Assertions in dieser Gruppe und 7 Assertions in der neuen Compose-Gruppe fehl.
+- **8/8 Shell-Testgruppen** (inkl. neuer Gruppe), **210 Django-/Python-Tests**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` bestanden.
+- Auslieferung mit lokalen Prüfnachweisen ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; Docker/Compose steht für den Interpolationstest lokal nicht zur Verfügung, die Prüfung ist dort statisch ([SEC-12](SEC-12-docker-default-passwords.md)).
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.11** erhöht; Root-/docs-README, Handbuch, lokale Entwicklungsdoku und FAQ aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
+- Audit §2.12 und Prompt 11 sind **Fixed**; [SEC-12 mit Fix-Commit und Prüfgrenzen](SEC-12-docker-default-passwords.md) ergänzt.
+- Upgrade ohne Datenverlust: bestehende `.env.local`-Dateien bleiben nutzbar. Wer noch das frühere öffentliche DB-Passwort verwendet, rotiert es wie in der [FAQ](FAQ.md#8-passwoerter-aendern--secret-rotation) beschrieben (`--reset-db` löscht die lokale Datenbank). Manuelles Compose benötigt jetzt zwingend gesetzte `SECRET_KEY`-, `PASSPHRASE`- und `POSTGRES_PASSWORD`-Werte.
+
 ## [2.4.10] – 2026-09-08
 
 ### Sicherheit

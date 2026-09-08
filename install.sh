@@ -618,7 +618,7 @@ AUTOSTART_BOTS=True
 # --- Datenbank / Redis (lokal) ---------------------------------------------
 # Ohne DATABASE_URL wird SQLite verwendet. Fuer die lokale Compose-Stapel-
 # verarbeitung werden die Werte in .env.docker.example gepflegt.
-# DATABASE_URL=postgresql://tbot:tbot-local-password@localhost:5432/tbot
+# DATABASE_URL=postgresql://tbot:<privates-db-passwort>@localhost:5432/tbot
 REDIS_URL=redis://127.0.0.1:6379/0
 DATABASE_SSL_REQUIRE=False
 

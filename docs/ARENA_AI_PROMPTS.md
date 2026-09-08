@@ -606,6 +606,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** LOW – Security  
 **Betroffene Dateien:** `docker-compose.yml` (Zeilen 11, 54)
 
+**Status: Fixed in 2.4.11.** `PASSPHRASE` und `SECRET_KEY` waren bereits seit 2.4.4 Pflichtwerte; ab 2.4.11 gilt dies auch für `POSTGRES_PASSWORD` – im `postgres`-Service und in der `DATABASE_URL` des App-Environment. `${POSTGRES_PASSWORD:?...}` bricht die Compose-Interpolation ab, wenn das Secret fehlt oder leer ist; der öffentliche Default `tbot-local-password` ist aus allen ausgelieferten Dateien entfernt. `scripts/setup_local.sh` erzeugt das lokale DB-Passwort zufällig in `.env.local` (Modus 0600), bewahrt es beim Retuning und erkennt den früher öffentlichen Wert per SHA-256-Vergleich für einen Rotationshinweis, ohne ihn erneut zu veröffentlichen. Abweichung vom historischen Prompt: Die Env-Beispiele halten Secrets als **leere Platzhalter** fest (statt `change-me`-Werten), damit das unveränderte Kopieren sicher fehlschlägt. **Neue Shell-Testgruppe** `tests/test_compose_security.sh` (25 Assertions) plus erweiterte `tests/test_setup_local.sh`; beide waren vor dem Fix rot. Docker steht lokal nicht zur Verfügung, daher ist die Laufzeit-Interpolationsprüfung statisch bzw. optional. [Finding mit Fix-Commit](SEC-12-docker-default-passwords.md), [Audit §2.12](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```
