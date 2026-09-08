@@ -54,6 +54,10 @@ def _quantize(value):
     return value.quantize(_EIGHT, rounding=ROUND_HALF_UP)
 
 
+def _as_decimal(value):
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
 class IndicatorMathTests(SimpleTestCase):
     """Referenzwerte, Rundung und Absicherungen der geteilten Funktion."""
 
@@ -194,6 +198,106 @@ class IndicatorMathTests(SimpleTestCase):
                     (values.acceleration, values.deltadelta, values.nda),
                     expected,
                 )
+
+    def test_matches_the_historical_reference_formulas(self):
+        """Gegenprobe gegen die beiden Alt-Implementierungen (wörtlich nachgebaut).
+
+        Die Referenzformeln stehen bewusst **im Test** und nicht im Produktivcode:
+        Sie fixieren den Zustand vor der Deduplizierung. Würde jemand die
+        geteilte Funktion andersrum ändern (andere Rundungsreihenfolge, anderer
+        Nenner, andere Nullstellen-Absicherung), schlagen diese Tests fehl,
+        obwohl sie nur noch eine Implementierung im Quellcode gibt.
+        """
+        state = 20260908
+        prices = []
+        for _ in range(60):
+            state = (1103515245 * state + 12345) % (2**31)
+            prices.append(Decimal(100) + Decimal(state % 7777 - 3888) / Decimal(1000))
+
+        def historical_backtest(index):
+            """Altversion trading/backtesting.py (Zeilen 14–51, Stand 2.4.14)."""
+            current = _as_decimal(prices[index])
+            previous = _as_decimal(prices[index - 1])
+            older = _as_decimal(prices[index - 2])
+            current_nda = (
+                ((current - previous) / previous * Decimal(100)).quantize(
+                    _EIGHT, rounding=ROUND_HALF_UP
+                )
+                if previous
+                else Decimal(0)
+            )
+            previous_nda = (
+                ((previous - older) / previous * Decimal(100)).quantize(
+                    _EIGHT, rounding=ROUND_HALF_UP
+                )
+                if previous
+                else Decimal(0)
+            )
+            dva = (current_nda - previous_nda).quantize(_EIGHT, rounding=ROUND_HALF_UP)
+            acceleration = (
+                (dva / previous_nda).quantize(_EIGHT, rounding=ROUND_HALF_UP)
+                if previous_nda
+                else Decimal(0)
+            )
+            deltadelta = ((current_nda + previous_nda) / Decimal(2)).quantize(
+                _EIGHT, rounding=ROUND_HALF_UP
+            )
+            return acceleration, deltadelta, current_nda
+
+        def historical_bot(window):
+            """Altversion TradingBot.calculate_and_store (Zeilen 577–591, Stand 2.4.14)."""
+            current, previous, older = window[-1], window[-2], window[-3]
+            current_da = current - previous
+            nda = current_da / previous * 100 if previous else Decimal(0)
+            previous_da = previous - older
+            previous_nda = previous_da / previous * 100 if previous else Decimal(0)
+            dva = nda - previous_nda
+            return (
+                current,
+                current_da,
+                nda,
+                previous_da,
+                previous_nda,
+                dva,
+                ((nda + previous_nda) / 2),
+                (dva / previous_nda if previous_nda else Decimal(0)),
+            )
+
+        for index in range(2, len(prices)):
+            with self.subTest(index=index):
+                self.assertEqual(
+                    [str(value) for value in calculate_trading_indicators(prices, index)],
+                    [str(value) for value in historical_backtest(index)],
+                )
+                expected = historical_bot(prices[: index + 1])
+                values = compute_indicator_values(prices, index)
+                self.assertEqual(
+                    [str(value) for value in expected],
+                    [
+                        str(value)
+                        for value in (
+                            values.current_price,
+                            values.current_da,
+                            values.nda,
+                            values.previous_da,
+                            values.previous_nda,
+                            values.dva,
+                            values.deltadelta,
+                            values.acceleration,
+                        )
+                    ],
+                )
+
+    def test_accepts_tuples_as_price_sequence(self):
+        """Die Funktion ist nicht auf Listen beschränkt (Bot-/Task-Zwangspunkte)."""
+        as_list = [Decimal(100), Decimal(101), Decimal("102.5")]
+        as_tuple = tuple(as_list)
+
+        self.assertEqual(
+            calculate_trading_indicators(as_tuple, 2),
+            calculate_trading_indicators(as_list, 2),
+        )
+        self.assertEqual(build_indicator_rows(as_tuple), build_indicator_rows(as_list))
 
     def test_build_indicator_rows_is_aligned_with_the_price_index(self):
         prices = [Decimal("97.5"), Decimal("99.25"), Decimal("101.7"), Decimal("100.4")]

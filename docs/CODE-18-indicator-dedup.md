@@ -115,7 +115,7 @@ Extremwerte um 10³⁰ und Reihen mit 6 bis 8 Dezimalstellen):
 
 ## Regressionstests
 
-Neu: `trading/tests/test_indicators.py` mit **28 Tests** in drei Klassen.
+Neu: `trading/tests/test_indicators.py` mit **30 Tests** in drei Klassen.
 
 `IndicatorMathTests` – Arithmetik und Guards:
 
@@ -137,6 +137,11 @@ Neu: `trading/tests/test_indicators.py` mit **28 Tests** in drei Klassen.
   (`0.5`-Verhältnis gegenüber `0.49999999`);
 - der Rundungshook reproduziert an jeder Position exakt den bisherigen
   Backtest-Code;
+- **Gegenprobe gegen beide Altversionen:** die historischen Formeln von
+  `Backtesting.calculate_indicators` und `TradingBot.calculate_and_store` sind
+  wörtlich im Test nachgebaut und werden über 60 deterministische Preispunkte
+  mit der geteilten Funktion abgeglichen (Tripel *und* alle Rohwert-Felder);
+  Tuples als Preisliste werden ebenfalls geprüft;
 - `build_indicator_rows` ist indexgleich, führt `None`-Platzhalter nur für die
   Indizes 0 und 1 und bleibt bei kurzen und leeren Reihen korrekt.
 
@@ -171,6 +176,15 @@ der Bot über seinen DB-Executor in eigenen Transaktionen schreibt):
   (Klemmung auf den Feldbereich), während der quantisierte Pfad lautstark
   fehlschlägt, statt still 0 zu liefern.
 
+**Mutationsnachweis (beigehaltene Prüfkräfte):** Zwei gezielte Mutationen der
+geteilten Funktion wurden ausgeführt und von der Suite erkannt – (1) vorherige
+NDA mit `older_price` statt `previous_price` als Nenner ließ
+`test_matches_the_historical_reference_formulas` an praktisch jedem Index
+fehlschlagen (z. B. `-1.78024392` gegen `-1.77132805`), (2) das Entfernen des
+`idx >= 2`-Guards ließ `test_index_below_two_is_rejected_instead_of_wrapping`
+in drei Teilfällen fehlschlagen. Beide Mutationen wurden zurückgenommen und
+sind nicht Teil des ausgelieferten Codes.
+
 **Rot → grün:** Vor dem Fix scheiterte das Modul bereits am Import
 (`ImportError: cannot import name 'indicators' from 'trading'`). Die
 Index-Tests dokumentieren den Altzustand direkt: `Backtesting.calculate_indicators`
@@ -185,7 +199,7 @@ still veränderte Präzision gedacht, nicht als Nachweis des Alt-Fehlers.
 Wie in den Vorgänger-Releases nachgeprüft: `CSRF_COOKIE_HTTPONLY = True` bleibt
 DEBUG-/Render-unabhängig in `trading_bot_project/settings.py` gesetzt, und alle
 **11 CSRF-Cookie-Tests** in `trading/tests/test_csrf_cookie.py` bestehen
-unverändert – zusammen mit den 28 neuen Indikator-Tests in einem Lauf. SEC-05
+unverändert – zusammen mit den 30 neuen Indikator-Tests in einem Lauf. SEC-05
 bleibt **Fixed** (ursprünglich 2.4.5, zuletzt in 2.4.14 nachgeprüft, erneut in
 2.4.15). Das Refactoring berührt keine Header-, Cookie- oder
 Autorisierungspfade; geändert sind ausschließlich Berechnungs- und
@@ -213,7 +227,7 @@ bash tests/run_tests.sh
 python -m pip check
 ```
 
-- **277 Django-/Python-Tests** (28 neue + 249 bestehende) bestanden.
+- **279 Django-/Python-Tests** (30 neue + 249 bestehende) bestanden.
 - **8/8 Shell-Testgruppen**, Ruff (neue Dateien zusätzlich
   `ruff format`-geprüft), ShellCheck, Systemcheck, Migrationsprüfung,
   `collectstatic` und `pip check` bestanden.

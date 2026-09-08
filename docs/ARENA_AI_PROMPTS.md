@@ -1230,9 +1230,11 @@ Vorabberechnung und `EIGHT_PLACES` die gemeinsame Präzisionskonstante. `backtes
 Lösungsvorschlag:** Der Bot nutzt bewusst die Rohwert-Stufe statt der quantisierten Funktion – sonst
 verschieben sich Live-Schwellwertvergleiche und die bereits gespeicherten DataLog-Werte. Zusätzlich
 behoben: fehlende Index-Validierung (`idx=1`, `idx=0`, negative Indizes rechneten über die
-Listendefinition stillschweigend mit `prices[-1]`). **28 Regressionstests** in
-`trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung,
-Backtest-Reports byte-identisch, insgesamt **277 Django-/Python-Tests** grün; SEC-05 mit allen 11
+Listendefinition stillschweigend mit `prices[-1]`). **30 Regressionstests** in
+`trading/tests/test_indicators.py` (inkl. Gegenprobe gegen die wörtlich nachgebaute
+Altformel über 60 Preispunkte), 16.693 deterministische Alt-/Neu-Vergleichsfälle
+ohne Abweichung, Backtest-Reports byte-identisch, insgesamt **279
+Django-/Python-Tests** grün; SEC-05 mit allen 11
 CSRF-Cookie-Tests erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md),
 [Audit §4.3](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 

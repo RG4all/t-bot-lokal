@@ -176,7 +176,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 **Nachprüfung 2.4.14:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen DB-Trim-Batch-Tests grün. Siehe [SEC-05-Nachprüfung im PERF-17-Nachweis](PERF-17-db-trim-batch-delete.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 28 neuen Indikator-Tests grün (277 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](CODE-18-indicator-dedup.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 30 neuen Indikator-Tests grün (279 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](CODE-18-indicator-dedup.md#sec-05-nachprüfung).
 
 ---
 
@@ -502,7 +502,7 @@ erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-b
 
 Die Indikatorberechnung (NDA, DeltaDelta, Acceleration) war in beiden Dateien fast identisch implementiert, mit eigener Rundungs- und Indexbehandlung. **Umgesetzt in 2.4.15:** neues Modul `trading/indicators.py` ist die einzige Quelle der Arithmetik (`compute_indicator_values()` mit optionalem Rundungs-Hook, `calculate_trading_indicators()` für die quantisierte Backtest-Stufe, `build_indicator_rows()` für die Vorabberechnung, `EIGHT_PLACES` als gemeinsame Konstante). `backtesting.py`, `trading_bot.py`, `tasks.py` und `scripts/backtest_resource_probe.py` delegieren; `Backtesting.calculate_indicators` bleibt als dünner Kompatibilitäts-Wrapper. Beide Präzisionsstufen (Bot rechnet roh, Backtest quantisiert pro Zwischenstufe) bleiben bewusst erhalten – ein Deduplizierungs-Refactoring darf keine laufenden Schwellwertentscheidungen oder gespeicherten DataLog-Werte verschieben. Zusätzlich neu: Index-Guard `idx >= 2` und `idx < len(prices)`; vorher rechnete `idx=1` über die Listendefinition stillschweigend mit `prices[-1]`.
 
-**Nachweis:** 28 Regressionstests in `trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung, Backtest-Reports byte-identisch. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md).
+**Nachweis:** 30 Regressionstests in `trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung, Backtest-Reports byte-identisch. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md).
 
 Historischer Lösungsvorschlag (unvollständig – die Bot-Nebenwerte `current_da`/`prev_da`/`dva` und die Rundungsstufe fehlten):
 
