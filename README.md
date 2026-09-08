@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.17** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.18** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 

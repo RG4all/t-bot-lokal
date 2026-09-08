@@ -1693,6 +1693,8 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "perf(views): optimize info_api with DB aggregation"
 ```
 
+**Status: Fixed in 2.4.18.** `info_api` berechnet die Performance-Kennzahlen seit 2.4.18 über `_calculate_metrics_from_db()` direkt im DBMS (`aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern) statt aller Logs in Python. Die Skalarmathematik läuft bewusst in Python, weil eine reine `Sum(...) / Count(...)`-Division auf PostgreSQL als Ganzzahldivision falsche Werte liefern würde; das Ergebnis bleibt so backend-unabhängig und bitgenau zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`) und API-Antwort sind unverändert. Details, Testnachweis (Rot→Grün) und Prüfgrenzen: [PERF-21](PERF-21-info-api-db-aggregation.md); Release-Nachweis: [CHANGELOG.md](CHANGELOG.md#242418--2026-09-08).
+
 ---
 
 ## Zusammenfassung
@@ -1719,7 +1721,7 @@ VALIDIERUNGSKRITERIEN:
 | 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h ✅ 2.4.15 |
 | 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h ✅ 2.4.16 |
 | 20 | MissingAllExports | LOW | Tech Debt | 30min ✅ 2.4.17 |
-| 21 | InfoApiMemoryOptimization | MEDIUM | Performance | 3h |
+| 21 | InfoApiMemoryOptimization | MEDIUM | Performance | 3h ✅ 2.4.18 |
 
 **Gesamtaufwand:** ~30 Stunden
 
