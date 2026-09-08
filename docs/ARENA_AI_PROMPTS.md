@@ -1457,6 +1457,26 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "refactor(views): add type hints and docstrings"
 ```
 
+**Status: Fixed in 2.4.16.** Alle Kriterien erfüllt: `from typing import Any`
+ist importiert, **alle 65 Top-Level-Funktionen** in `trading/views.py` sind
+vollständig annotiert (nicht nur die zehn genannten), **alle 39 öffentlichen
+Views** haben einen Docstring, und `mypy` meldet für die Datei keine Fehler.
+Die Prüfung ist über einen `[tool.mypy]`-Block in `pyproject.toml`
+reproduzierbar; mypy und django-stubs bleiben bewusst Entwicklungswerkzeuge
+außerhalb von `requirements.txt`. `pyright` wurde nicht ausgeführt (Node in der
+Prüfumgebung nicht eingerichtet) – das Kriterium nennt beide alternativ.
+
+Zwei Präzisierungen gegenüber der Vorlage: `list`/`dict` sind zu Elementtypen
+ausgeschrieben (`list[TradingLog]`, `dict[str, Any]`), weil ein nackter
+Container dem Prüfer keine Information gibt; `_cash_series` und
+`calculate_performance_metrics` erhalten entsprechend `list[TradingLog]`.
+
+Beim Annotieren wurden drei latente Randpfade sichtbar und gehärtet – 26 ORM-Filter
+auf dem untypisierten `request.user` laufen jetzt über `_authenticated_user()`,
+das Gate weist ein leeres Secret ab, und `_equity_svg` überspringt Punkte ohne
+Wert. Keiner war im ausgelieferten Stand erreichbar. Nachweis, Negativkontrolle
+und Prüfgrenzen: [CODE-19](CODE-19-view-type-hints.md).
+
 ---
 
 ## Prompt 20: __all__ Exports
@@ -1684,7 +1704,7 @@ VALIDIERUNGSKRITERIEN:
 | 16 | IndicatorMemoization | MEDIUM | Performance | 3h |
 | 17 | DbTrimBatchDelete | MEDIUM | Performance | 2h |
 | 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h ✅ 2.4.15 |
-| 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h |
+| 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h ✅ 2.4.16 |
 | 20 | MissingAllExports | LOW | Tech Debt | 30min |
 | 21 | InfoApiMemoryOptimization | MEDIUM | Performance | 3h |
 

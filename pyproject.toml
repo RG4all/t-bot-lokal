@@ -7,3 +7,60 @@ ignore = [
   "BLE001",  # Boundary handlers must log unexpected exchange/DB failures.
   "RUF012",  # Django Meta classes intentionally use mutable class attributes.
 ]
+
+# ---------------------------------------------------------------------------
+# Statische Typprüfung
+#
+# mypy ist ein reines Entwicklungswerkzeug und bewusst nicht in
+# requirements.txt aufgenommen; die Laufzeit-Pins des Containers bleiben
+# unverändert. Reproduzierbare lokale Prüfung:
+#
+#   pip install mypy==1.18.2 django-stubs==5.2.7
+#   mypy trading/views.py
+#
+# Geprüft wird gezielt trading/views.py (Prompt 19 / Audit §4.4). Die übrigen
+# Module haben noch keine vollständigen Annotationen; ihre Signaturen werden
+# weiterhin ausgewertet, eigene Befunde dort aber unterdrückt (ignore_errors),
+# damit die Prüfung des Views-Moduls nicht an fremden Altbeständen scheitert.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+plugins = ["mypy_django_plugin.main"]
+files = ["trading/views.py"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+# Markdown liefert keine Typ-Stubs; das Handbuch wird aus einer
+# vertrauenswürdigen, projekteigenen Datei gerendert.
+module = "markdown"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Noch nicht annotierte Module: Ihre Typinformationen werden gelesen, eigene
+# Befunde aber nicht gemeldet. Der Scope wird mit jedem weiteren
+# Annotationsschritt verkleinert.
+module = [
+  "trading.backtesting",
+  "trading.backtest_templates",
+  "trading.forms",
+  "trading.market_data",
+  "trading.market_scanner",
+  "trading.middleware",
+  "trading.models",
+  "trading.monitoring",
+  "trading.passphrase",
+  "trading.rate_limit",
+  "trading.resource_optimizer",
+  "trading.symbols",
+  "trading.tasks",
+  "trading.trading_bot",
+  "trading.worker_status",
+  "trading_bot_project.settings",
+]
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "trading_bot_project.settings"

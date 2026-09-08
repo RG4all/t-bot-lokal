@@ -1,8 +1,8 @@
 # SEC-06 – X-Content-Type-Options: nosniff
 
 - **Finding:** `MissingContentTypeNosniff` (Prompt 6 / Security-Audit §2.6)
-- **Status:** **Fixed** (behoben und in 2.4.15 zuletzt nachgeprüft)
-- **Release:** **2.4.6** · **Nachprüfung:** 2026-09-07, zuletzt 2026-09-08 (2.4.15)
+- **Status:** **Fixed / Resolved** (behoben und in 2.4.16 zuletzt nachgeprüft)
+- **Release:** **2.4.6** · **Nachprüfung:** 2026-09-07, zuletzt 2026-09-08 (2.4.16)
 - **Ursprüngliche Einstufung:** MEDIUM – Security; nach Prüfung explizite Konfigurationshärtung, kein nachgewiesener fehlender Header im bisherigen Django-Standard-Stack.
 - **Fix-Commit:** [`a2e6c4bd18fbcf1649efa1af6ec1822501f93958`](https://github.com/RG4all/t-bot-lokal/commit/a2e6c4bd18fbcf1649efa1af6ec1822501f93958) – `fix(security): enable X-Content-Type-Options nosniff`
 
@@ -36,6 +36,8 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 Die jetzt **11 CSRF-Cookie-Tests** prüfen die expliziten Settings, serialisiertes `Set-Cookie` mit HttpOnly, die Secure-Flags aus real geladenen lokalen/Produktions-/Render-Settings, Token-Auslieferung und erfolgreichen Login. POSTs ohne Token, ohne passendes Cookie, mit dem Token eines anderen Clients oder mit einer fremden Origin werden bei erzwungener CSRF-Prüfung abgelehnt.
 
 **Nachprüfung 2.4.15:** Auslöser war das Indikator-Refactoring (Prompt 18 / Audit §4.3, [CODE-18](CODE-18-indicator-dedup.md)); die Einstellungen blieben unverändert. `CSRF_COOKIE_HTTPONLY = True` steht weiterhin explizit und DEBUG-/Render-unabhängig außerhalb des nicht-DEBUG-Blocks (`trading_bot_project/settings.py`), und alle 11 CSRF-Cookie-Tests bestehen zusammen mit den 30 neuen Indikator-Tests (279 Tests gesamt) in [PR #23](https://github.com/RG4all/t-bot-lokal/pull/23). SEC-05 bleibt **Fixed**; der hier beschriebene nosniff-Befund bleibt ebenfalls **Fixed** (Fix-Commit [`a2e6c4bd`](https://github.com/RG4all/t-bot-lokal/commit/a2e6c4bd18fbcf1649efa1af6ec1822501f93958), Release 2.4.6).
+
+**Nachprüfung 2.4.16:** Auslöser war das Type-Hints-Refactoring der Views (Prompt 19 / Audit §4.4, [CODE-19](CODE-19-view-type-hints.md)); die Einstellungen blieben erneut unverändert. `CSRF_COOKIE_HTTPONLY = True` (`trading_bot_project/settings.py:222`) und `SECURE_CONTENT_TYPE_NOSNIFF = True` (`settings.py:166`) stehen weiterhin explizit und DEBUG-/Render-unabhängig außerhalb des nicht-DEBUG-Blocks. Alle **11 CSRF-Cookie-Tests** und **10 nosniff-Tests** bestehen zusammen mit den 30 neuen Type-Hints-Tests (309 Tests gesamt) in [PR #24](https://github.com/RG4all/t-bot-lokal/pull/24). Ergänzend bestätigte ein Smoke-Test mit tatsächlich geladenen Produktions-/Render-Settings: `/health/` meldet 2.4.16 mit `nosniff`, `/gate/` liefert das CSRF-Cookie mit `HttpOnly` **und** `Secure`, der `/dashboard/`-Redirect und die WhiteNoise-Auslieferung von `/static/css/custom.css` tragen ebenfalls `nosniff`. Das Refactoring berührt weder Header- noch Cookie- oder Autorisierungskonfiguration; die Views-Autorisierung wurde nicht gelockert, sondern mit `_authenticated_user()` um eine zweite Prüfschicht neben `@login_required` ergänzt. SEC-05 und der hier beschriebene nosniff-Befund bleiben **Fixed**.
 
 **Wichtige Abgrenzung:** HttpOnly verhindert nur das direkte Lesen des Cookies. Der Formular-Token bleibt für Skripte derselben Origin im DOM sichtbar; XSS kann weiterhin authentifizierte Requests ausführen. Die frühere Zusicherung, das Token sei damit generell vor XSS-Exfiltration geschützt, wurde in Kommentaren, READMEs und Security-Dokumentation korrigiert. CSP, korrektes Escaping und die CSRF-/Origin-Prüfungen bleiben erforderlich.
 

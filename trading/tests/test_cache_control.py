@@ -78,8 +78,12 @@ class ApiCacheControlSourceTests(TestCase):
 
         Roher Test vor dem Fix: Es gab keinen ``no_cache_json``-Decorator und
         damit keinerlei Cache-Header auf den API-Endpunkten.
+
+        Die Prüfung ist bewusst signaturunabhängig: Der Parametername
+        ``view_func`` bleibt verbindlich, Type-Hints und eine mehrzeilige
+        Signatur dürfen den Regressionstest jedoch nicht brechen.
         """
-        self.assertIn("def no_cache_json(view_func):", self.source)
+        self.assertRegex(self.source, r"def no_cache_json\(\s*\n?\s*view_func")
 
     def test_decorator_sets_expected_header_values(self):
         """Die Header-Werte müssen explizit im Quellcode stehen."""

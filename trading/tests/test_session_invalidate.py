@@ -277,10 +277,13 @@ class SessionLogoutIntegrationTest(TestCase):
             Path(settings.BASE_DIR) / "trading" / "views.py"
         )
         content = views_path.read_text(encoding="utf-8")
-        # Explizite String-Suche statt DOTALL-Regex (Kommentare zwischen
-        # logout() und flush() würden den Regex sonst brechen).
-        logout_start = content.find("def logout_view(request):")
-        self.assertGreater(logout_start, 0, "logout_view nicht in views.py gefunden.")
+        # Nur den Funktionskopf per Regex suchen (signaturunabhängig, damit
+        # Type-Hints den Test nicht brechen); der Blockinhalt wird danach
+        # bewusst per String-Suche geprüft, weil Kommentare zwischen logout()
+        # und flush() einen DOTALL-Regex sonst brechen würden.
+        header = re.search(r"^def logout_view\(", content, re.MULTILINE)
+        self.assertIsNotNone(header, "logout_view nicht in views.py gefunden.")
+        logout_start = header.start()
         # Nur den Block bis zur nächsten Funktionsdefinition betrachten.
         next_def = content.find("\ndef ", logout_start + 1)
         block = content[logout_start : next_def if next_def > 0 else len(content)]

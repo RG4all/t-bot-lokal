@@ -6,10 +6,13 @@ import math
 import re
 import threading
 from collections import Counter, defaultdict
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from datetime import datetime
 from decimal import Decimal
 from functools import lru_cache, wraps
 from html import escape
 from io import BytesIO
+from typing import Any, ParamSpec, TypeVar
 
 import markdown
 from celery.result import AsyncResult
@@ -17,10 +20,19 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, transaction
-from django.db.models import Sum
-from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
+from django.db.models import Model, QuerySet, Sum
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBase,
+    HttpResponseRedirect,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -46,7 +58,7 @@ from .market_scanner import (
     MarketScannerFilterError,
     scan_market_opportunities,
 )
-from .models import BacktestTask, Configuration, DataLog, ErrorLog
+from .models import BacktestTask, Configuration, DataLog, ErrorLog, TradingLog
 from .monitoring import runtime_heartbeat
 from .passphrase import is_passphrase_verified, passphrase_session_token
 from .resource_optimizer import (
@@ -62,9 +74,17 @@ from .worker_status import get_backtest_runtime_status
 logger = logging.getLogger(__name__)
 _PLOT_LOCK = threading.Lock()
 _MANUAL_RENDER_LOCK = threading.Lock()
-_MANUAL_HTML = None
+_MANUAL_HTML: str | None = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
+
+# Typvariablen für generische Helfer und Decorator. ``_ViewParams`` erhält die
+# vollständige Signatur der dekorierten View (inklusive URL-Parametern),
+# ``_ResponseT`` den konkreten Response-Typ, damit ein Decorator die Typen der
+# View nicht auf ``Any`` verwischt.
+_ViewParams = ParamSpec("_ViewParams")
+_ResponseT = TypeVar("_ResponseT", bound=HttpResponseBase)
+_ModelT = TypeVar("_ModelT", bound=Model)
 
 # Exception-Texte sind nicht vertrauenswürdig und können interne Details enthalten.
 # Flash-/HTTP-Antworten verwenden feste Meldungen; Diagnosen bleiben in den Logs.
@@ -75,12 +95,27 @@ _SCANNER_ERROR = "Marktscanner vorübergehend nicht verfügbar. Bitte später er
 _REPORT_ERROR = "Report konnte nicht erstellt werden. Bitte später erneut versuchen."
 
 
-def _record_view_error(*, configuration, source, exception, severity, details):
+def _record_view_error(
+    *,
+    configuration: Configuration,
+    source: str,
+    exception: BaseException,
+    severity: str,
+    details: dict[str, Any],
+) -> None:
     """Ergänzt das Diagnose-Log, ohne die sichere Fehlerantwort zu gefährden.
 
     Der Aufrufer loggt den ursprünglichen Fehler zuerst mit logger.exception.
     Ein DB-Ausfall beim zusätzlichen Persistieren darf ihn nicht verdecken.
     Der Savepoint schützt auch Aufrufer innerhalb einer bestehenden Transaktion.
+
+    Args:
+        configuration: Konfiguration, zu der der Fehler gehört.
+        source: Stabiler Herkunftsschlüssel, z. B. ``views.manual_sell``.
+        exception: Die aufgetretene Ausnahme; nur Typ und gekürzter Text werden
+            gespeichert, niemals an die HTTP-Antwort weitergegeben.
+        severity: Schweregrad gemäß ``ErrorLog.SEVERITY_CHOICES``.
+        details: Zusätzlicher, JSON-serialisierbarer Diagnosekontext.
     """
     try:
         with transaction.atomic():
@@ -96,7 +131,9 @@ def _record_view_error(*, configuration, source, exception, severity, details):
         logger.exception("Fehler-Log für Konfiguration %s nicht speicherbar", configuration.id)
 
 
-def no_cache_json(view_func):
+def no_cache_json(
+    view_func: Callable[_ViewParams, _ResponseT],
+) -> Callable[_ViewParams, _ResponseT]:
     """Setzt Cache-Control- und Pragma-Header für API-Responses.
 
     Die API-Endpunkte liefern benutzerbezogene Handels-, Portfolio- und
@@ -111,10 +148,21 @@ def no_cache_json(view_func):
     platziert, damit er jede von der View erzeugte Antwort erfasst –
     einschließlich Fehlerantworten (z. B. 400/503), die ohne Header sonst
     ebenfalls gecacht werden könnten.
+
+    Die Typvariablen erhalten Parameter- und Response-Typ der dekorierten View,
+    damit statische Prüfungen (mypy/pyright) hinter dem Decorator nicht auf
+    ``Any`` zurückfallen.
+
+    Args:
+        view_func: Die zu dekorierende View.
+
+    Returns:
+        Die View mit identischer Signatur, deren Antwort die Header trägt.
     """
+
     @wraps(view_func)
-    def wrapped(request, *args, **kwargs):
-        response = view_func(request, *args, **kwargs)
+    def wrapped(*args: _ViewParams.args, **kwargs: _ViewParams.kwargs) -> _ResponseT:
+        response = view_func(*args, **kwargs)
         response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response['Pragma'] = 'no-cache'
         return response
@@ -122,7 +170,42 @@ def no_cache_json(view_func):
     return wrapped
 
 
-def _safe_next_url(request, candidate):
+def _authenticated_user(request: HttpRequest) -> User:
+    """Gibt den angemeldeten Benutzer eines geschützten Requests zurück.
+
+    Alle Views, die Objekte über ``user=…`` bzw. ``configuration__user=…``
+    filtern, laufen hinter ``@login_required``; ``request.user`` ist dort
+    typseitig trotzdem ``User | AnonymousUser``. Die Funktion macht die
+    Voraussetzung explizit und sichert sie zusätzlich ab: Geht der Decorator
+    bei einer späteren Änderung verloren, wird der Request mit 403 abgewiesen,
+    statt mit einem anonymen Benutzer weiterzufiltern und dabei einen
+    Datenbankfehler oder eine unbeabsichtigte Trefferliste zu erzeugen.
+
+    Args:
+        request: Der aktuelle Request.
+
+    Returns:
+        Der angemeldete Benutzer.
+
+    Raises:
+        PermissionDenied: Wenn der Request nicht authentifiziert ist.
+    """
+    user = request.user
+    if not isinstance(user, User) or not user.is_authenticated:
+        raise PermissionDenied
+    return user
+
+
+def _safe_next_url(request: HttpRequest, candidate: str | None) -> str | None:
+    """Gibt ``candidate`` nur zurück, wenn er auf denselben Host zeigt.
+
+    Args:
+        request: Der aktuelle Request; liefert Host und Schema für die Prüfung.
+        candidate: Ungeprüfter Weiterleitungswunsch aus GET/POST.
+
+    Returns:
+        Das geprüfte Ziel oder ``None``, wenn es eine offene Weiterleitung wäre.
+    """
     if candidate and url_has_allowed_host_and_scheme(
         candidate,
         allowed_hosts={request.get_host()},
@@ -132,36 +215,81 @@ def _safe_next_url(request, candidate):
     return None
 
 
-def _redirect_dashboard(config_id):
+def _redirect_dashboard(config_id: int) -> HttpResponseRedirect:
+    """Leitet auf das Dashboard der angegebenen Konfiguration weiter."""
     return redirect(f"{reverse('dashboard')}?config_id={config_id}")
 
 
-def _latest_rows(queryset, limit):
+def _latest_rows(queryset: QuerySet[_ModelT], limit: int) -> list[_ModelT]:
+    """Lädt die jüngsten ``limit`` Zeilen und gibt sie chronologisch zurück.
+
+    Args:
+        queryset: Zeitgestempeltes QuerySet (``timestamp``/``id``).
+        limit: Obergrenze der geladenen Zeilen; begrenzt Speicher und Laufzeit.
+
+    Returns:
+        Liste der Objekte, aufsteigend nach Zeitstempel sortiert.
+    """
     rows = list(queryset.order_by("-timestamp", "-id")[:limit])
     rows.reverse()
     return rows
 
 
-def _symbols(config):
+def _symbols(config: Configuration) -> list[str]:
+    """Zerlegt das Symbolfeld der Konfiguration in eine bereinigte Liste."""
     return [symbol.strip() for symbol in config.symbols.split(",") if symbol.strip()]
 
 
-def _realized_profit(config):
+def _realized_profit(config: Configuration) -> Decimal:
+    """Summiert den realisierten Gewinn aller Verkäufe der Konfiguration.
+
+    Args:
+        config: Trading-Konfiguration.
+
+    Returns:
+        Summe von ``pl_nominal`` über alle Verkaufs-Logs, ``Decimal(0)`` wenn
+        noch kein Verkauf existiert.
+    """
     return config.logs.filter(action="sell").aggregate(total=Sum("pl_nominal"))["total"] or Decimal(
         0
     )
 
 
-def _cash_flow(log):
+def _cash_flow(log: TradingLog) -> Decimal:
+    """Berechnet die Kassenwirkung eines einzelnen Trades.
+
+    Args:
+        log: Einzelner Trading-Log-Eintrag.
+
+    Returns:
+        Negativer Betrag inklusive Gebühr bei Käufen, positiver Nettoerlös
+        nach Gebühr bei Verkäufen.
+    """
     notional = log.amount * log.price
     return -(notional + log.fee_amount) if log.action == "buy" else notional - log.fee_amount
 
 
-def _portfolio_snapshot(config):
+def _portfolio_snapshot(config: Configuration) -> dict[str, Any]:
+    """Erstellt einen Portfolio-Snapshot für die angegebene Konfiguration.
+
+    Args:
+        config: Trading-Konfiguration.
+
+    Returns:
+        Dictionary mit Portfolio-Metriken:
+        - ``cash``: Verfügbares Kapital (``Decimal``)
+        - ``realized_profit``: Realisierter Gewinn (``Decimal``)
+        - ``invested``: Investiertes Kapital (``Decimal``)
+        - ``market_value``: Marktwert offener Positionen nach geschätzter
+          Ausstiegsgebühr (``Decimal``)
+        - ``equity``: Gesamtes Eigenkapital (``Decimal``)
+        - ``unrealized_profit``: Unrealisierter Gewinn (``Decimal``)
+        - ``positions``: Liste offener Positionen als ``dict``
+    """
     realized_profit = _realized_profit(config)
     invested = Decimal(0)
     market_value = Decimal(0)
-    positions = []
+    positions: list[dict[str, Any]] = []
     for symbol in _symbols(config):
         latest_trade = config.logs.filter(symbol=symbol).order_by("-timestamp", "-id").first()
         if not latest_trade or latest_trade.action != "buy":
@@ -201,16 +329,36 @@ def _portfolio_snapshot(config):
     }
 
 
-def _cash_series(logs, opening_cash):
+def _cash_series(logs: list[TradingLog], opening_cash: Decimal) -> list[dict[str, Any]]:
+    """Entwickelt den Kassenstand entlang der übergebenen Trades.
+
+    Args:
+        logs: Chronologisch aufsteigende Trading-Logs.
+        opening_cash: Kassenstand vor dem ersten Eintrag in ``logs``.
+
+    Returns:
+        Liste aus ``{"t": ISO-Zeitstempel, "v": Kassenstand als float}``.
+    """
     cash = opening_cash
-    series = []
+    series: list[dict[str, Any]] = []
     for log in logs:
         cash += _cash_flow(log)
         series.append({"t": log.timestamp.isoformat(), "v": float(cash)})
     return series
 
 
-def calculate_performance_metrics(logs):
+def calculate_performance_metrics(logs: list[TradingLog]) -> dict[str, float]:
+    """Berechnet Kennzahlen der abgeschlossenen Verkäufe.
+
+    Args:
+        logs: Trading-Logs; Käufe werden ignoriert.
+
+    Returns:
+        Dictionary mit ``win_rate``, ``avg_profit``, ``total_wins``,
+        ``total_losses``, ``avg_win``, ``avg_loss``, ``risk_reward``,
+        ``profit_factor``, ``max_win`` und ``max_loss``. Ohne Verkäufe sind
+        alle Werte ``0``.
+    """
     sell_profits = [float(log.pl_nominal) for log in logs if log.action == "sell"]
     wins = [profit for profit in sell_profits if profit > 0]
     losses = [profit for profit in sell_profits if profit <= 0]
@@ -233,12 +381,13 @@ def calculate_performance_metrics(logs):
 
 
 @require_GET
-def health_view(request):
+def health_view(request: HttpRequest) -> JsonResponse:
+    """Health-Check-Endpunkt für Monitoring und Load-Balancer."""
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
 
 
 @lru_cache(maxsize=1)
-def _render_manual():
+def _render_manual() -> str:
     """Kompiliert das vertrauenswürdige Handbuch einmal je Prozess.
 
     Der Lock ergänzt den LRU-Cache für den seltenen Fall zweier gleichzeitiger
@@ -284,18 +433,23 @@ def _render_manual():
 _manual_lru_cache_clear = _render_manual.cache_clear
 
 
-def _clear_manual_cache():
+def _clear_manual_cache() -> None:
+    """Leert LRU-Cache und den zusätzlichen, thread-sicheren Cache-Layer."""
     global _MANUAL_HTML
     with _MANUAL_RENDER_LOCK:
         _MANUAL_HTML = None
         _manual_lru_cache_clear()
 
 
-_render_manual.cache_clear = _clear_manual_cache
+# Bewusste Ersetzung der lru_cache-API: Tests und Management-Code rufen
+# weiterhin ``_render_manual.cache_clear()`` auf und müssen dabei beide
+# Cache-Layer leeren. Statische Prüfer kennen dieses Muster nicht.
+_render_manual.cache_clear = _clear_manual_cache  # type: ignore[method-assign]
 
 
 @require_GET
-def help_view(request):
+def help_view(request: HttpRequest) -> HttpResponse:
+    """Zeigt das gerenderte Handbuch (``docs/MANUAL.md``) in der Oberfläche."""
     return render(
         request,
         "trading/help.html",
@@ -303,13 +457,25 @@ def help_view(request):
     )
 
 
-def home(request):
+def home(request: HttpRequest) -> HttpResponseRedirect:
+    """Leitet je nach Authentifizierungsstatus auf Dashboard oder Login weiter."""
     return redirect("dashboard" if request.user.is_authenticated else "login")
 
 
 @sensitive_post_parameters("passphrase")
 @sensitive_variables("submitted")
-def passphrase_gate_view(request):
+def passphrase_gate_view(request: HttpRequest) -> HttpResponse:
+    """Prüft die vorgeschaltete Zugangs-Passphrase.
+
+    Vergleicht die Eingabe zeitkonstant, rotiert bei Erfolg den Session-Key und
+    leitet nur auf geprüfte, hosteigene Ziele weiter.
+
+    Args:
+        request: GET zeigt das Formular, POST prüft die Passphrase.
+
+    Returns:
+        Formularantwort oder Weiterleitung nach erfolgreicher Freigabe.
+    """
     requested_next = request.POST.get("next") or request.GET.get("next")
     next_url = _safe_next_url(request, requested_next)
     if is_passphrase_verified(request.session):
@@ -320,7 +486,10 @@ def passphrase_gate_view(request):
         # Byte-basierter, timing-sicherer Vergleich unterstützt auch Unicode.
         # Explizite Secrets werden weder hier noch in den Settings normalisiert.
         submitted = request.POST.get("passphrase", "")
-        if constant_time_compare(submitted, settings.PASSPHRASE):
+        # Ein leeres/fehlendes Secret darf keine Freigabe erzeugen: Ohne diesen
+        # Guard würde constant_time_compare("", "") den Gate-Schutz aufheben.
+        expected = settings.PASSPHRASE or ""
+        if expected and constant_time_compare(submitted, expected):
             request.session.cycle_key()
             request.session["passphrase_verified"] = passphrase_session_token()
             return redirect(next_url or "login")
@@ -332,7 +501,8 @@ def passphrase_gate_view(request):
     )
 
 
-def register_view(request):
+def register_view(request: HttpRequest) -> HttpResponse:
+    """Registriert einen neuen Benutzer und leitet zum Login weiter."""
     form = RegistrationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         user = form.save()
@@ -342,7 +512,16 @@ def register_view(request):
     return render(request, "trading/register.html", {"form": form})
 
 
-def login_view(request):
+def login_view(request: HttpRequest) -> HttpResponse:
+    """Meldet einen Benutzer an.
+
+    Args:
+        request: GET zeigt das Formular, POST prüft die Zugangsdaten.
+
+    Returns:
+        Formularantwort mit Fehlern oder Weiterleitung auf ein geprüftes Ziel
+        bzw. das Dashboard.
+    """
     form = LoginForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         user = authenticate(
@@ -363,7 +542,8 @@ def login_view(request):
 
 @login_required
 @require_POST
-def logout_view(request):
+def logout_view(request: HttpRequest) -> HttpResponseRedirect:
+    """Meldet den Benutzer ab und invalidiert die Session vollständig."""
     logout(request)
     # Explizite Session-Invalidierung: leert alle Session-Daten und rotiert
     # den Session-Key. Bei signed_cookie-Sessions ist dies entscheidend, da
@@ -376,11 +556,19 @@ def logout_view(request):
 
 
 @login_required
-def config_view(request):
+def config_view(request: HttpRequest) -> HttpResponse:
+    """Legt eine neue Trading-Konfiguration für den angemeldeten Benutzer an.
+
+    Args:
+        request: GET zeigt das Formular, POST speichert die Konfiguration.
+
+    Returns:
+        Formularantwort oder Weiterleitung auf die Konfigurationsliste.
+    """
     form = ConfigurationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         config = form.save(commit=False)
-        config.user = request.user
+        config.user = _authenticated_user(request)
         config.save()
         messages.success(request, "Konfiguration wurde erstellt.")
         return redirect("config_list")
@@ -388,14 +576,16 @@ def config_view(request):
 
 
 @login_required
-def config_list_view(request):
-    configs = Configuration.objects.filter(user=request.user).order_by("-id")
+def config_list_view(request: HttpRequest) -> HttpResponse:
+    """Listet alle Konfigurationen des angemeldeten Benutzers."""
+    configs = Configuration.objects.filter(user=_authenticated_user(request)).order_by("-id")
     return render(request, "trading/config_list.html", {"configs": configs})
 
 
 @login_required
-def config_edit_view(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def config_edit_view(request: HttpRequest, config_id: int) -> HttpResponse:
+    """Bearbeitet eine eigene Konfiguration und startet laufende Bots neu."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     form = ConfigurationForm(request.POST or None, instance=config)
     if request.method == "POST" and form.is_valid():
         was_running = config.is_running
@@ -413,8 +603,9 @@ def config_edit_view(request, config_id):
 
 @login_required
 @require_POST
-def config_activate(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def config_activate(request: HttpRequest, config_id: int) -> HttpResponseRedirect:
+    """Validiert die Symbole und startet den Bot der eigenen Konfiguration."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     try:
         validate_exchange_symbols(config.exchange, config.market, _symbols(config))
     except (SymbolValidationError, MarketDataError, ValueError) as exc:
@@ -458,8 +649,9 @@ def config_activate(request, config_id):
 
 @login_required
 @require_POST
-def config_deactivate(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def config_deactivate(request: HttpRequest, config_id: int) -> HttpResponseRedirect:
+    """Stoppt den Bot der eigenen Konfiguration."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     bot_manager.stop_bot(config)
     if config.is_running:
         config.is_running = False
@@ -469,8 +661,9 @@ def config_deactivate(request, config_id):
 
 
 @login_required
-def config_delete(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def config_delete(request: HttpRequest, config_id: int) -> HttpResponse:
+    """Zeigt die Löschbestätigung (GET) und löscht die Konfiguration (POST)."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if request.method == "POST":
         bot_manager.stop_bot(config)
         config.delete()
@@ -484,12 +677,24 @@ def config_delete(request, config_id):
 
 
 @login_required
-def dashboard_view(request):
+def dashboard_view(request: HttpRequest) -> HttpResponse:
+    """Zeigt Portfolio, Kennzahlen und Trades einer eigenen Konfiguration.
+
+    Args:
+        request: Optionaler GET-Parameter ``config_id`` wählt die Konfiguration;
+            ohne ihn wird die zuletzt angelegte verwendet. POST speichert die
+            Strategieparameter des Dashboard-Formulars.
+
+    Returns:
+        Gerendertes Dashboard oder Weiterleitung nach dem Speichern.
+    """
+    user = _authenticated_user(request)
     config_id = request.GET.get("config_id")
+    config: Configuration | None
     if config_id:
-        config = get_object_or_404(Configuration, id=config_id, user=request.user)
+        config = get_object_or_404(Configuration, id=config_id, user=user)
     else:
-        config = Configuration.objects.filter(user=request.user).order_by("-id").first()
+        config = Configuration.objects.filter(user=user).order_by("-id").first()
 
     if not config:
         return render(
@@ -524,15 +729,16 @@ def dashboard_view(request):
             log.action == "sell" and log.pl_nominal <= 0 for log in metric_logs
         ),
         "symbols": _symbols(config),
-        "all_configs": Configuration.objects.filter(user=request.user).order_by("-id"),
+        "all_configs": Configuration.objects.filter(user=user).order_by("-id"),
     }
     return render(request, "trading/dashboard.html", context)
 
 
 @login_required
 @require_POST
-def reset_log(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def reset_log(request: HttpRequest, config_id: int) -> HttpResponseRedirect:
+    """Setzt Trading-Log und simuliertes Portfolio der Konfiguration zurück."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if config.is_running:
         bot_manager.restart_bot(config, before_start=lambda: config.logs.all().delete())
         messages.success(
@@ -545,7 +751,12 @@ def reset_log(request, config_id):
     return _redirect_dashboard(config.id)
 
 
-def _validated_start_time(request):
+def _validated_start_time(request: HttpRequest) -> datetime | None:
+    """Liest ``start_time`` aus der Query und macht ihn zeitzonenbewusst.
+
+    Returns:
+        Geparster Zeitpunkt oder ``None`` bei fehlendem/ungültigem Wert.
+    """
     raw = request.GET.get("start_time")
     if not raw:
         return None
@@ -558,7 +769,12 @@ def _validated_start_time(request):
 @login_required
 @require_GET
 @no_cache_json
-def symbol_suggestions_api(request):
+def symbol_suggestions_api(request: HttpRequest) -> JsonResponse:
+    """Liefert Symbolvorschläge für Exchange und Marktart.
+
+    Die Vorschläge sind nur eine Eingabehilfe; verbindlich geprüft werden die
+    Symbole erst beim Speichern bzw. Aktivieren der Konfiguration.
+    """
     exchange = request.GET.get("exchange", "").strip().lower()
     market = request.GET.get("market", "").strip().lower()
     query = request.GET.get("q", "").strip().upper()
@@ -592,7 +808,7 @@ def symbol_suggestions_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def market_opportunities_api(request):
+def market_opportunities_api(request: HttpRequest) -> JsonResponse:
     """Liefert geprüfte Top-Mover für die Konfigurationsvorlage.
 
     Die Börsenabfrage bleibt auf diesen GET-Endpunkt begrenzt; keine API-Keys
@@ -604,7 +820,9 @@ def market_opportunities_api(request):
         return JsonResponse({"error": "Ungültige Marktart"}, status=400)
     if exchange not in {"all", *dict(Configuration.EXCHANGE_CHOICES)}:
         return JsonResponse({"error": "Ungültige Exchange"}, status=400)
-    filters = {
+    # Rohwerte aus der Query; der Scanner konvertiert und begrenzt sie selbst
+    # und meldet ungültige Eingaben als MarketScannerFilterError.
+    filters: dict[str, Any] = {
         "volatility_threshold": request.GET.get("volatility_threshold", "10"),
         "volume_spike_multiple": request.GET.get("volume_spike_multiple", "1.5"),
         "min_volume_market_cap_ratio": request.GET.get(
@@ -656,7 +874,7 @@ def market_opportunities_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def server_resources_api(request):
+def server_resources_api(request: HttpRequest) -> JsonResponse:
     """Diagnose-Endpunkt für das erkannte CPU-/RAM-/Speicherprofil."""
     profile = get_backtest_resource_profile(
         get_server_resources(refresh=request.GET.get("refresh") == "1")
@@ -669,7 +887,7 @@ def server_resources_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def backtesting_estimate_api(request):
+def backtesting_estimate_api(request: HttpRequest) -> JsonResponse:
     """Berechnet eine Laufzeitschätzung ohne einen Backtest anzulegen."""
     profile = get_backtest_resource_profile()
     try:
@@ -697,11 +915,12 @@ def backtesting_estimate_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def data_logs_api(request):
+def data_logs_api(request: HttpRequest) -> JsonResponse:
+    """Liefert Marktdatenpunkte eines Symbols der eigenen Konfiguration."""
     config = get_object_or_404(
         Configuration,
         id=request.GET.get("config_id"),
-        user=request.user,
+        user=_authenticated_user(request),
     )
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
@@ -729,11 +948,12 @@ def data_logs_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def trades_api(request):
+def trades_api(request: HttpRequest) -> JsonResponse:
+    """Liefert die Trades eines Symbols der eigenen Konfiguration."""
     config = get_object_or_404(
         Configuration,
         id=request.GET.get("config_id"),
-        user=request.user,
+        user=_authenticated_user(request),
     )
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
@@ -759,8 +979,18 @@ def trades_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def info_api(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def info_api(request: HttpRequest, config_id: int) -> JsonResponse:
+    """Liefert Portfolio-, Kennzahl- und Kurvendaten für das Dashboard.
+
+    Args:
+        request: Authentifizierter Request; nur eigene Konfigurationen.
+        config_id: Primärschlüssel der Konfiguration.
+
+    Returns:
+        JSON mit Kapital, offenen Positionen, Performance-Kennzahlen, Sharpe,
+        Drawdown sowie Equity- und Kassenkurve.
+    """
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     logs = _latest_rows(config.logs.all(), _MAX_LOG_ROWS)
     portfolio = _portfolio_snapshot(config)
     metrics = calculate_performance_metrics(logs)
@@ -770,7 +1000,7 @@ def info_api(request, config_id):
         Decimal(0),
     )
     realized_capital = config.start_capital + portfolio["realized_profit"] - window_realized
-    equity = []
+    equity: list[dict[str, Any]] = []
     for log in logs:
         if log.action == "sell":
             realized_capital += log.pl_nominal
@@ -782,7 +1012,7 @@ def info_api(request, config_id):
     peak = float(config.start_capital)
     max_drawdown = 0.0
     current_drawdown = 0.0
-    sell_returns = []
+    sell_returns: list[float] = []
     previous_capital = float(config.start_capital)
     for point, log in zip(equity, logs):
         capital = point["v"]
@@ -850,11 +1080,16 @@ def info_api(request, config_id):
 @login_required
 @require_GET
 @no_cache_json
-def bot_status_api(request):
+def bot_status_api(request: HttpRequest) -> JsonResponse:
+    """Meldet den Laufzeitstatus des Bots und startet ihn bei Bedarf neu.
+
+    Interne Fehlertexte werden bewusst durch eine feste Meldung ersetzt; die
+    Diagnose bleibt im Fehler-Log.
+    """
     config_id = request.GET.get("config_id")
     if not config_id:
         return JsonResponse({"error": "config_id fehlt"}, status=400)
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if config.is_running and not bot_manager.is_running(config.id):
         try:
             bot_manager.start_bot(config)
@@ -880,8 +1115,9 @@ def bot_status_api(request):
 @login_required
 @require_GET
 @no_cache_json
-def logs_api(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def logs_api(request: HttpRequest, config_id: int) -> JsonResponse:
+    """Liefert die paginierten Trades einer eigenen Konfiguration."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     paginator = Paginator(config.logs.all().order_by("-timestamp", "-id"), 100)
     page = paginator.get_page(request.GET.get("page", 1))
     open_symbols = set(bot_manager.open_symbols(config.id))
@@ -929,8 +1165,18 @@ def logs_api(request, config_id):
 
 @login_required
 @require_POST
-def manual_sell_view(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def manual_sell_view(request: HttpRequest, config_id: int) -> JsonResponse:
+    """Verkauft eine offene Position manuell.
+
+    Args:
+        request: POST mit dem Feld ``symbol``.
+        config_id: Primärschlüssel der eigenen Konfiguration.
+
+    Returns:
+        JSON-Status; Fehlermeldungen sind fest und enthalten keine internen
+        Details.
+    """
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbol = request.POST.get("symbol", "").strip()
     if symbol not in _symbols(config):
         return JsonResponse({"status": "error", "message": "Ungültiges Symbol"}, status=400)
@@ -954,8 +1200,9 @@ def manual_sell_view(request, config_id):
 
 @login_required
 @require_POST
-def kill_switch_view(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def kill_switch_view(request: HttpRequest, config_id: int) -> JsonResponse:
+    """Liquidiert alle offenen Positionen nach doppelter Bestätigung."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if request.POST.get("confirm1") != "LIQUIDATE" or request.POST.get("confirm2") != "LIQUIDATE":
         return JsonResponse(
             {"status": "error", "message": "Doppelte Bestätigung fehlt."},
@@ -982,9 +1229,11 @@ def kill_switch_view(request, config_id):
 
 @login_required
 @require_GET
-def error_log_view(request):
-    configs = Configuration.objects.filter(user=request.user).order_by("name")
-    base_queryset = ErrorLog.objects.filter(configuration__user=request.user)
+def error_log_view(request: HttpRequest) -> HttpResponse:
+    """Zeigt das gefilterte Fehler-Log der eigenen Konfigurationen."""
+    user = _authenticated_user(request)
+    configs = Configuration.objects.filter(user=user).order_by("name")
+    base_queryset = ErrorLog.objects.filter(configuration__user=user)
     queryset = base_queryset.select_related("configuration")
 
     config_id = request.GET.get("config_id", "")
@@ -1022,18 +1271,25 @@ def error_log_view(request):
 
 @login_required
 @require_POST
-def error_log_resolve(request, error_id):
+def error_log_resolve(request: HttpRequest, error_id: int) -> HttpResponseRedirect:
+    """Markiert einen eigenen Fehler-Log-Eintrag als erledigt oder offen."""
     error = get_object_or_404(
         ErrorLog,
         id=error_id,
-        configuration__user=request.user,
+        configuration__user=_authenticated_user(request),
     )
     error.resolved = request.POST.get("action") != "reopen"
     error.save(update_fields=["resolved"])
     return redirect("error_log")
 
 
-def _figure_to_base64(figure, pyplot):
+def _figure_to_base64(figure: Any, pyplot: Any) -> str:
+    """Rendert eine Matplotlib-Figur als Base64-PNG und schließt sie.
+
+    ``figure`` und ``pyplot`` bleiben ``Any``: Matplotlib wird bewusst erst zur
+    Laufzeit importiert, damit der Webprozess die Bibliothek nicht bei jedem
+    Start laden muss.
+    """
     buffer = BytesIO()
     figure.savefig(buffer, format="png", bbox_inches="tight")
     buffer.seek(0)
@@ -1042,7 +1298,26 @@ def _figure_to_base64(figure, pyplot):
     return encoded
 
 
-def _pdf_response(request, template, context, filename, disposition="attachment"):
+def _pdf_response(
+    request: HttpRequest,
+    template: str,
+    context: dict[str, Any],
+    filename: str,
+    disposition: str = "attachment",
+) -> HttpResponse:
+    """Rendert ein Template als PDF-Download.
+
+    Args:
+        request: Request für Template-Kontext und Basis-URL.
+        template: Pfad des zu rendernden Templates.
+        context: Template-Kontext.
+        filename: Dateiname im ``Content-Disposition``-Header.
+        disposition: ``attachment`` (Download) oder ``inline`` (Anzeige).
+
+    Returns:
+        PDF-Antwort oder eine 503-Antwort mit fester Fehlermeldung; Renderfehler
+        können lokale Pfade enthalten und bleiben deshalb im Log.
+    """
     try:
         from weasyprint import HTML
 
@@ -1060,8 +1335,10 @@ def _pdf_response(request, template, context, filename, disposition="attachment"
     return response
 
 
-def _report_filename(config, extension):
-    def safe_component(value):
+def _report_filename(config: Configuration, extension: str) -> str:
+    """Bildet einen kollisionsarmen, dateisystemsicheren Reportnamen."""
+
+    def safe_component(value: object) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value)).strip("-._")
         return cleaned or "unknown"
 
@@ -1079,17 +1356,31 @@ def _report_filename(config, extension):
     )
 
 
-def _build_report_context(config):
+def _build_report_context(config: Configuration) -> dict[str, Any]:
+    """Erzeugt Kennzahlen und Diagramme für den Trading-Report.
+
+    Args:
+        config: Trading-Konfiguration.
+
+    Returns:
+        Template-Kontext mit Trades, Portfolio-Werten und den als Base64-PNG
+        eingebetteten Diagrammen.
+
+    Raises:
+        RuntimeError: Wenn die Diagramm-Engine (Matplotlib) fehlt.
+    """
     logs = list(config.logs.all().order_by("timestamp", "id"))
     portfolio = _portfolio_snapshot(config)
     sell_logs = [log for log in logs if log.action == "sell"]
     symbol_counts = Counter(log.symbol for log in logs)
-    symbol_profits = defaultdict(Decimal)
-    daily_profits = defaultdict(Decimal)
-    symbol_profit_counts = defaultdict(lambda: {"profit": 0, "loss": 0})
+    symbol_profits: defaultdict[str, Decimal] = defaultdict(Decimal)
+    daily_profits: defaultdict[str, Decimal] = defaultdict(Decimal)
+    symbol_profit_counts: defaultdict[str, dict[str, int]] = defaultdict(
+        lambda: {"profit": 0, "loss": 0}
+    )
     cumulative_profit = Decimal(0)
-    profit_times = []
-    cumulative_values = []
+    profit_times: list[str] = []
+    cumulative_values: list[float] = []
     for log in sell_logs:
         symbol_profits[log.symbol] += log.pl_nominal
         daily_profits[timezone.localtime(log.timestamp).date().isoformat()] += log.pl_nominal
@@ -1188,8 +1479,9 @@ def _build_report_context(config):
 
 @login_required
 @require_GET
-def generate_report(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def generate_report(request: HttpRequest, config_id: int) -> HttpResponse:
+    """Erzeugt den Trading-Report der eigenen Konfiguration als PDF."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     try:
         context = _build_report_context(config)
     except Exception:
@@ -1205,8 +1497,9 @@ def generate_report(request, config_id):
 
 @login_required
 @require_GET
-def generate_report_html(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def generate_report_html(request: HttpRequest, config_id: int) -> HttpResponse:
+    """Erzeugt den Trading-Report der eigenen Konfiguration als HTML-Download."""
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     try:
         context = _build_report_context(config)
         html = render_to_string("trading/report.html", context, request=request)
@@ -1220,11 +1513,16 @@ def generate_report_html(request, config_id):
 
 @login_required
 @require_GET
-def generate_report_csv(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def generate_report_csv(request: HttpRequest, config_id: int) -> StreamingHttpResponse:
+    """Streamt alle Trades der eigenen Konfiguration als CSV.
+
+    Die Zeilen werden erst beim Lesen erzeugt; der Textpuffer wird pro Zeile
+    geleert und am Ende, bei Fehlern und bei abgebrochener Antwort geschlossen.
+    """
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     queryset = config.logs.all().order_by("timestamp", "id")
 
-    def rows():
+    def rows() -> Iterator[str]:
         yield "\ufeff"
         # Erst beim Lesen öffnen; auch bei Stream-Abbruch oder Fehler schließen.
         with io.StringIO(newline="") as buffer:
@@ -1273,7 +1571,8 @@ def generate_report_csv(request, config_id):
     return response
 
 
-def _combination_count(params, symbol_count):
+def _combination_count(params: Mapping[str, Any], symbol_count: int) -> int:
+    """Zählt die Rasterkombinationen eines Backtests über alle Symbole."""
     result = symbol_count
     for prefix in ("acc", "nda", "deltadelta"):
         start = params[f"{prefix}_from"]
@@ -1286,7 +1585,8 @@ def _combination_count(params, symbol_count):
 @login_required
 @require_GET
 @no_cache_json
-def backtesting_status_api(request):
+def backtesting_status_api(request: HttpRequest) -> JsonResponse:
+    """Meldet Verfügbarkeit, Ausführungsmodus und Ressourcenprofil des Backtestings."""
     profile = get_backtest_resource_profile(
         get_server_resources(refresh=request.GET.get("refresh") == "1")
     )
@@ -1302,8 +1602,9 @@ def backtesting_status_api(request):
 
 @login_required
 @require_GET
-def backtesting_index(request):
-    configs = Configuration.objects.filter(user=request.user).order_by("-id")
+def backtesting_index(request: HttpRequest) -> HttpResponse:
+    """Zeigt je eigener Konfiguration eine Übersichtskarte der Backtests."""
+    configs = Configuration.objects.filter(user=_authenticated_user(request)).order_by("-id")
     cards = []
     for config in configs:
         tasks = BacktestTask.objects.filter(configuration=config)
@@ -1323,8 +1624,19 @@ def backtesting_index(request):
 
 
 @login_required
-def backtesting_form(request, config_id):
-    config = get_object_or_404(Configuration, id=config_id, user=request.user)
+def backtesting_form(request: HttpRequest, config_id: int) -> HttpResponse:
+    """Plant und startet Backtests einer eigenen Konfiguration.
+
+    Args:
+        request: GET zeigt Formular und Aufgabenlisten, POST legt einen
+            Backtest an bzw. plant ihn.
+        config_id: Primärschlüssel der Konfiguration.
+
+    Returns:
+        Gerendertes Formular mit Aufgabenlisten oder Weiterleitung nach dem
+        Anlegen eines Backtests.
+    """
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbols = _symbols(config)
     resource_profile = get_backtest_resource_profile()
     initial = {
@@ -1438,7 +1750,11 @@ def backtesting_form(request, config_id):
         ).order_by("-completed_at")[:10]
     )
     for completed_task in tasks_completed:
-        completed_task.report_results = _backtest_result_rows(completed_task)
+        # Django-übliche Anreicherung einer Instanz für das Template; das
+        # Attribut ist bewusst kein Modellfeld und wird nicht gespeichert.
+        completed_task.report_results = _backtest_result_rows(  # type: ignore[attr-defined]
+            completed_task
+        )
     return render(
         request,
         "trading/backtesting_form.html",
@@ -1468,11 +1784,12 @@ def backtesting_form(request, config_id):
 
 @login_required
 @require_POST
-def control_backtest(request, task_id):
+def control_backtest(request: HttpRequest, task_id: int) -> HttpResponse:
+    """Bricht einen eigenen Backtest ab, pausiert oder setzt ihn fort."""
     task = get_object_or_404(
         BacktestTask,
         id=task_id,
-        configuration__user=request.user,
+        configuration__user=_authenticated_user(request),
     )
     action = request.POST.get("action")
     if action == "cancel":
@@ -1488,12 +1805,23 @@ def control_backtest(request, task_id):
     return redirect("backtesting_form", config_id=task.configuration_id)
 
 
-def _equity_svg(symbol, curve):
-    """Builds a dependency-free inline SVG for browsers and WeasyPrint."""
-    points = []
+def _equity_svg(symbol: str, curve: Sequence[Mapping[str, Any]] | None) -> str:
+    """Builds a dependency-free inline SVG for browsers and WeasyPrint.
+
+    Args:
+        symbol: Marktsymbol; wird escaped in das SVG-Label übernommen.
+        curve: Punkte der Equity-Kurve; defekte Punkte werden übersprungen.
+
+    Returns:
+        Als sicher markiertes SVG-Markup oder ein leerer String ohne Punkte.
+    """
+    points: list[tuple[int, float, Any]] = []
     for point in curve or []:
         try:
-            value = float(point.get("equity"))
+            raw_equity = point.get("equity")
+            if raw_equity is None:
+                continue
+            value = float(raw_equity)
             index = int(point.get("index", len(points)))
         except (TypeError, ValueError, AttributeError):
             continue
@@ -1511,7 +1839,7 @@ def _equity_svg(symbol, curve):
     first_index, last_index = points[0][0], points[-1][0]
     index_spread = max(1, last_index - first_index)
 
-    def coordinate(index, value):
+    def coordinate(index: float, value: float) -> tuple[float, float]:
         x = left + (index - first_index) / index_spread * (width - left - right)
         y = top + (maximum - value) / (maximum - minimum) * (height - top - bottom)
         return x, y
@@ -1538,8 +1866,9 @@ def _equity_svg(symbol, curve):
     return mark_safe(svg)
 
 
-def _backtest_result_rows(task):
-    rows = []
+def _backtest_result_rows(task: BacktestTask) -> list[dict[str, Any]]:
+    """Bereitet die Symbolergebnisse eines Backtests für Templates auf."""
+    rows: list[dict[str, Any]] = []
     symbol_results = (task.result or {}).get("symbol_results") or {}
     for symbol, result in symbol_results.items():
         report = result.get("report") or {}
@@ -1554,7 +1883,8 @@ def _backtest_result_rows(task):
     return rows
 
 
-def _backtest_report_context(task):
+def _backtest_report_context(task: BacktestTask) -> dict[str, Any]:
+    """Baut den Template-Kontext des Backtest-Reports."""
     return {
         "task": task,
         "config": task.configuration,
@@ -1564,17 +1894,24 @@ def _backtest_report_context(task):
     }
 
 
-def _owned_backtest(request, task_id):
+def _owned_backtest(request: HttpRequest, task_id: int) -> BacktestTask:
+    """Lädt einen Backtest und erzwingt dabei die Eigentümerprüfung.
+
+    Raises:
+        Http404: Wenn der Backtest nicht existiert oder einem anderen Benutzer
+            gehört.
+    """
     return get_object_or_404(
         BacktestTask.objects.select_related("configuration"),
         id=task_id,
-        configuration__user=request.user,
+        configuration__user=_authenticated_user(request),
     )
 
 
 @login_required
 @require_GET
-def generate_backtest_pdf(request, task_id):
+def generate_backtest_pdf(request: HttpRequest, task_id: int) -> HttpResponse:
+    """Zeigt den Report eines abgeschlossenen eigenen Backtests als PDF."""
     task = _owned_backtest(request, task_id)
     if task.status != "completed":
         return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
@@ -1589,7 +1926,8 @@ def generate_backtest_pdf(request, task_id):
 
 @login_required
 @require_GET
-def generate_backtest_html(request, task_id):
+def generate_backtest_html(request: HttpRequest, task_id: int) -> HttpResponse:
+    """Lädt den Report eines abgeschlossenen eigenen Backtests als HTML."""
     task = _owned_backtest(request, task_id)
     if task.status != "completed":
         return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
@@ -1605,7 +1943,8 @@ def generate_backtest_html(request, task_id):
 
 @login_required
 @require_GET
-def generate_backtest_csv(request, task_id):
+def generate_backtest_csv(request: HttpRequest, task_id: int) -> HttpResponse:
+    """Lädt Kennzahlen, Trades und Equity-Punkte eines Backtests als CSV."""
     task = _owned_backtest(request, task_id)
     if task.status != "completed":
         return HttpResponse("Backtest ist nicht abgeschlossen.", status=400)
@@ -1733,7 +2072,20 @@ def generate_backtest_csv(request, task_id):
 
 @login_required
 @require_GET
-def analyse_view(request):
+def analyse_view(request: HttpRequest) -> HttpResponse:
+    """Wertet lokal gesammelte Marktdaten mit einem SMA-Crossover aus.
+
+    Es werden ausschließlich vom Bot gestreamte ``DataLog``-Zeilen des
+    angemeldeten Benutzers verwendet; die Views rufen keine Börsen-API auf.
+
+    Args:
+        request: GET-Parameter ``symbols`` (max. 10) und ``timeframe``.
+
+    Returns:
+        Gerenderte Analyseseite; unzureichende Datenlagen werden je Symbol als
+        Hinweis ausgewiesen.
+    """
+    user = _authenticated_user(request)
     symbols = [symbol.strip().upper() for symbol in request.GET.getlist("symbols") if symbol]
     timeframe = request.GET.get("timeframe", "1h")
     timeframe_seconds = {
@@ -1747,11 +2099,11 @@ def analyse_view(request):
     available_symbols = sorted(
         {
             symbol
-            for config in Configuration.objects.filter(user=request.user)
+            for config in Configuration.objects.filter(user=user)
             for symbol in _symbols(config)
         }
     )
-    context = {
+    context: dict[str, Any] = {
         "available_symbols": available_symbols,
         "selected_symbols": symbols,
         "selected_timeframe": timeframe,
@@ -1763,11 +2115,11 @@ def analyse_view(request):
         context["error"] = "Ungültiger Zeitrahmen oder zu viele Symbole."
         return render(request, "trading/analyse.html", context)
 
-    analysis_results = []
+    analysis_results: list[dict[str, Any]] = []
     bucket_size = timeframe_seconds[timeframe]
     for symbol in symbols:
         source_config_id = (
-            DataLog.objects.filter(configuration__user=request.user, symbol=symbol)
+            DataLog.objects.filter(configuration__user=user, symbol=symbol)
             .order_by("-timestamp", "-id")
             .values_list("configuration_id", flat=True)
             .first()
@@ -1787,7 +2139,7 @@ def analyse_view(request):
             )[:20_000]
         )
         rows.reverse()
-        closes_by_bucket = {}
+        closes_by_bucket: dict[int, float] = {}
         for row in rows:
             bucket = int(row.timestamp.timestamp()) // bucket_size
             closes_by_bucket[bucket] = float(row.price)
