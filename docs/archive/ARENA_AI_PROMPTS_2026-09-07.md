@@ -1,5 +1,8 @@
 # Arena.ai Agent Prompts – t-bot-lokal Security Audit
 
+> **Archiv – Stand 2026-09-08.** Promptsammlung des Security-Audits; alle Prompts sind
+> als Fixed dokumentiert, die Umsetzungsbelege stehen in den [Findings](../README.md#findings).
+> Kein Pflegeobjekt; Ausgangspunkt war die archivierte SECURITY_AUDIT.md (same directory).
 Generiert am: 07. September 2026 · Statusstand: 08. September 2026 (Release 2.4.19)  
 Basiert auf: SECURITY_AUDIT.md  
 Jeder Prompt ist eigenständig und PR-ready.

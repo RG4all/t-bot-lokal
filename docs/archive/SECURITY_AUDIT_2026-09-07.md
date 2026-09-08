@@ -1,5 +1,8 @@
 # Code Review & Security Audit – t-bot-lokal
 
+> **Archiv – Stand 2026-09-07/08.** Historischer Befundsstand; verbindlicher aktueller Status:
+> [Security-Review](../security/SECURITY_REVIEW_2.4.4.md) und die dokumentierten
+> [Findings](../README.md#findings). Inhalt nicht mehr in Pflege; Korrekturen werden nicht nachgezogen.
 **Audit-Datum:** 07. September 2026  
 **Reviewer:** Automated Security Audit  
 **Scope:** Gesamte Codebasis (Django 5.2.17, Trading Bot, Backtesting, Docker-Infra)

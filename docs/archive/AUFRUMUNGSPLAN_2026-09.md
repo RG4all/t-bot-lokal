@@ -1,5 +1,7 @@
 # Aufräum- und Reorganisierungsplan – t-bot-lokal
 
+> **Archiv-Hinweis nach Umsetzung 2026-09-09:** Alle Phasen dieses Plans sind umgesetzt;
+> das Dokument bleibt als Entscheidungsgrundlagen-Archiv. Verbindliche Struktur heute: [docs/README.md](../README.md).
 **Datum:** 2026-09-08 · **Stand:** `0607b77` · Version 2.4.19 · **Branch:** `arena/01a0835f-t-bot-lokal`
 **Methodik:** Vollständiger Repo-Scan (192 Dateien, 29 Markdown-Dokumente), automatisierter Link-/Anchor-Check (193 relative Links, 38 Anker-Links), Referenzgraph-Analyse, Code-Kopplungsprüfung (`grep` über Py/SH/YML/Dockerfile).
 

@@ -1,5 +1,7 @@
 # PEER_REVIEW.md - Selbst-Review der Build-/Install-Ueberarbeitung
 
+> **Archiv – Stand 2026-09-07.** Selbst-Review der Build-/Install-Ueberarbeitung als Historie;
+> aktuelle Bewertung: [Security-Review](../security/SECURITY_REVIEW_2.4.4.md). Kein Pflegeobjekt.
 **Datum:** 2026-08-21
 **Autor:** Backend-Engineering (Cross-Platform-Deployment)
 **Scope:** `install.sh`, `hardware-test.sh`, `config.template`, `docker/`,
