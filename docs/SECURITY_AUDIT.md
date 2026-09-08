@@ -7,6 +7,8 @@
 ---
 
 > **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.6 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
+>
+> **Statuspflege:** Jeder Befund der Abschnitte 2–6 trägt releaseweise seinen Umsetzungsstand („Fixed in X.Y.Z“) in der Abschnittsüberschrift sowie im Abschnittstext; der Stand ist zuletzt für **2.4.19** (08. September 2026) aktualisiert. Die historischen Beschreibungen und Lösungsvorschläge bleiben als Ausgangsbefund erhalten.
 
 ## 1. Executive Summary
 
@@ -32,15 +34,29 @@ Das Projekt **t-bot-lokal** ist eine Django-basierte Kryptocurrency Paper-Tradin
 
 ## 2. Sicherheitslücken
 
-### 2.1 HOCH – Kein Rate-Limiting auf Auth-Endpunkten
+### 2.1 HOCH – Kein Rate-Limiting auf Auth-Endpunkten – Fixed in 2.4.1
 
-**Datei:** `trading/views.py` (Zeilen 250–306)
+**Datei:** `trading/rate_limit.py` (neu), `trading_bot_project/settings.py` · **Status:** Fixed
 
-Das Passphrase-Gate, Login und Registrierung haben keinerlei Brute-Force-Schutz. Ein Angreifer kann beliebig viele Passwort-/Passphrase-Versuche starten.
+**Umgesetzt in 2.4.1:** Die eigene Middleware `trading.rate_limit.RateLimitMiddleware`
+begrenzt Auth-POSTs auf `/login/`, `/gate/`, `/register/` und `/admin/login/` auf
+**5 Versuche pro IP und 15 Minuten pro Web-Prozess** – einschließlich erfolgreicher
+POSTs. Prüfung und Reservierung sind unter `threading.Lock` atomar; der Speicher ist
+auf 10.000 getrackte IPs begrenzt (`OrderedDict`). Bei Überschreitung folgt HTTP 429
+mit `Retry-After`-Header. `X-Forwarded-For` wird nur von explizit über
+`RATE_LIMIT_TRUSTED_PROXIES` (IPs/CIDRs) konfigurierten Proxys akzeptiert; ohne
+Allowlist zählt `REMOTE_ADDR`. Registrierung in `MIDDLEWARE` nach
+`AuthenticationMiddleware`.
+
+**Nachweis:** 11 Regressionstests in `trading/tests/test_rate_limit.py` (Limit,
+Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs,
+Integrationstest). Release-Dokumentation: [Changelog 2.4.1](CHANGELOG.md#241--2026-09-07).
+
+*Historischer Befund (vor 2.4.1):* Das Passphrase-Gate, Login und Registrierung hatten keinerlei Brute-Force-Schutz. Ein Angreifer konnte beliebig viele Passwort-/Passphrase-Versuche starten.
 
 **Auswirkung:** Credential-Stuffing, Passwort-Brute-Force, Account-Übernahme.
 
-**Lösungsvorschlag:**
+**Lösungsvorschlag (historisch):**
 
 ```python
 # In settings.py hinzufügen:
@@ -92,9 +108,21 @@ class RateLimitMiddleware:
 
 ---
 
-### 2.2 HOCH – DEBUG-Modus mit `ALLOWED_HOSTS = ["*"]`
+### 2.2 HOCH – DEBUG-Modus mit `ALLOWED_HOSTS = ["*"]` – Fixed in 2.4.2
 
-**Datei:** `trading_bot_project/settings.py` (Zeilen 61, 71–72)
+**Datei:** `trading_bot_project/settings.py` · **Status:** Fixed
+
+**Umgesetzt in 2.4.2:** Der DEBUG-Pfad `ALLOWED_HOSTS.append("*")` ist entfernt.
+Es gilt eine explizite Liste lokaler Hosts (`localhost`, `127.0.0.1`, `tbot.local`,
+`[::1]`); auf Render wird `RENDER_EXTERNAL_HOSTNAME` ergänzt, optional
+`DJANGO_ALLOWED_HOSTS`. Ein Quellcode-Scan stellt sicher, dass `"*"` nicht mehr
+bedingt ergänzt wird.
+
+**Nachweis:** 6 Regressionstests in `trading/tests/test_settings.py` (kein Wildcard,
+lokale Hosts vorhanden, Source-Scan gegen `append("*")`). Release-Dokumentation:
+[Changelog 2.4.2](CHANGELOG.md#242--2026-09-07).
+
+*Historischer Befund (vor 2.4.2):*
 
 ```python
 DEBUG = env_bool("DEBUG", default=not env_bool("RENDER", False))
@@ -105,7 +133,7 @@ if DEBUG:
 
 **Auswirkung:** Host-Header-Injection, Cache-Poisoning, CSRF-Bypass über Host-Header. Ein Angreifer kann eine Anfrage mit beliebigem Host senden und Django-Session-Cookies oder CSRF-Tokens erhalten.
 
-**Lösungsvorschlag:**
+**Lösungsvorschlag (historisch):**
 
 ```python
 # Niemals "*" verwenden – stattdessen explizite Liste:
@@ -115,15 +143,29 @@ if DEBUG:
 
 ---
 
-### 2.3 HOCH – Kein Content-Security-Policy (CSP) Header
+### 2.3 HOCH – Kein Content-Security-Policy (CSP) Header – Fixed in 2.4.3
 
-**Datei:** `trading_bot_project/settings.py`
+**Datei:** `trading_bot_project/settings.py`, `requirements.txt` · **Status:** Fixed
 
-Es wird weder `django-csp` noch ein manueller CSP-Header konfiguriert. Die Anwendung lädt externe Skripte (Plotly, Bootstrap) und rendert Markdown zu HTML (`mark_safe`), was bei fehlendem CSP zu XSS-Vektoren führt.
+**Umgesetzt in 2.4.3:** `django-csp==3.8` ist in `requirements.txt`; die App `csp`
+und `csp.middleware.CSPMiddleware` sind in `MIDDLEWARE` nach der
+`SecurityMiddleware` registriert (seit 2.4.9 liegt die
+`PermissionsPolicyMiddleware` dazwischen). Die neun CSP-Direktiven sind strikt auf lokale Ressourcen
+ausgerichtet (`CSP_DEFAULT_SRC = ("'self'",)`, …); Skripte nur von `'self'` ohne
+`unsafe-inline`, mit frischer Request-Nonce (`CSP_INCLUDE_NONCE_IN =
+("script-src",)`) für markierte Template-Skripte. Externe Domains sind nicht
+erlaubt – abweichend vom historischen Vorschlag wird auch Plotly/Bootstrap nicht
+von CDNs geladen, sondern aus `/static/`.
+
+**Nachweis:** 12 Regressionstests in `trading/tests/test_csp.py` (Einstellungen,
+präsente CSP-Header, keine externen Domains). Release-Dokumentation:
+[Changelog 2.4.3](CHANGELOG.md#243--2026-09-07).
+
+*Historischer Befund (vor 2.4.3):* Es wurde weder `django-csp` noch ein manueller CSP-Header konfiguriert. Die Anwendung lädt externe Skripte (Plotly, Bootstrap) und rendert Markdown zu HTML (`mark_safe`), was bei fehlendem CSP zu XSS-Vektoren führt.
 
 **Auswirkung:** Cross-Site-Scripting über injectetes Markdown oder kompromittierte CDN-Ressourcen.
 
-**Lösungsvorschlag:**
+**Lösungsvorschlag (historisch):**
 
 ```bash
 pip install django-csp
@@ -156,7 +198,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.15
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.16
 
 **Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
@@ -599,9 +641,32 @@ direkt gebunden und Django-gebundene Module per modul-Level-`__getattr__`
 
 ---
 
-### 4.6 PERFORMANCE – `info_api` lädt alle Logs in den Speicher
+### 4.6 PERFORMANCE – `info_api` lädt alle Logs in den Speicher – Fixed in 2.4.18
 
-**Datei:** `trading/views.py` (Zeilen 677–762)
+**Datei:** `trading/views.py` · **Status:** Fixed (siehe
+[PERF-21](PERF-21-info-api-db-aggregation.md))
+
+**Umgesetzt in 2.4.18:** `info_api` berechnet die Performance-Kennzahlen über die
+neue `_calculate_metrics_from_db(config, limit=_MAX_LOG_ROWS)` direkt im DBMS –
+`django.db.models.aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern – statt
+alle Logs des Fensters nach Python zu laden. Die Skalarmathematik (Quotienten,
+Rundung) läuft bewusst in Python: eine reine `Sum("pl_nominal") / Count("id")`-
+Division würde PostgreSQL als Ganzzahldivision ausführen und verkehrte Kennzahlen
+liefern; das Ergebnis bleibt so backend-unabhängig (SQLite/PostgreSQL) und bitgenau
+zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`),
+API-Antwort und Equity-/Kassenkurve bleiben unverändert (die Kurve lädt weiterhin
+die einzelnen Zeilen).
+
+**Nachweis:** 10 Regressionstests in `trading/tests/test_info_api_metrics.py`
+(Verhaltensgleichheit mit `calculate_performance_metrics()` inkl. Negativtest mit
+gepatchter Python-Funktion, Fensterbegrenzung über 2.600 Logs, `limit`-Parameter);
+insgesamt 330 Django-/Python-Tests grün. Fix-Commit
+[`c7ee446`](https://github.com/RG4all/t-bot-lokal/commit/c7ee446) –
+`perf(views): optimize info_api with DB aggregation`, Auslieferung über
+[PR #26](https://github.com/RG4all/t-bot-lokal/pull/26). Release-Dokumentation:
+[Changelog 2.4.18](CHANGELOG.md#2418--2026-09-08).
+
+*Historischer Befund (vor 2.4.18):*
 
 ```python
 def info_api(request, config_id):
@@ -614,7 +679,7 @@ def info_api(request, config_id):
 
 **Problem:** Bei `MAX_LOG_ROWS = 2000` werden alle 2000 Zeilen in den Speicher geladen. Für große Konfigurationen kann dies zu hohem RAM-Verbrauch führen.
 
-**Lösungsvorschlag:**
+**Lösungsvorschlag (historisch):**
 
 ```python
 # Aggregation auf DB-Ebene statt in Python:
@@ -637,17 +702,17 @@ def calculate_performance_metrics_fast(config, limit=2000):
 
 | # | Maßnahme | Aufwand | Datei |
 |---|----------|---------|-------|
-| 1 | **Rate-Limiting auf Auth-Endpunkte** implementieren | 2h | `views.py`, `settings.py` |
-| 2 | **ALLOWED_HOSTS: Kein Wildcard** in DEBUG | 5min | `settings.py` |
-| 3 | **CSRF_COOKIE_HTTPONLY = True** setzen | 5min | `settings.py` |
+| 1 | **Rate-Limiting auf Auth-Endpunkte – Fixed in 2.4.1 (§2.1)** | 2h | `rate_limit.py`, `settings.py` |
+| 2 | **ALLOWED_HOSTS: Kein Wildcard – Fixed in 2.4.2 (§2.2)** | 5min | `settings.py` |
+| 3 | **CSRF_COOKIE_HTTPONLY = True – Fixed in 2.4.5 (§2.5)** | 5min | `settings.py` |
 | 4 | **Docker-Passwörter ohne Defaults setzen – Fixed in 2.4.11 (§2.12)** | 15min | `docker-compose.yml` |
 
 ### Kurzfristig umsetzen (P1 – 1–2 Wochen)
 
 | # | Maßnahme | Aufwand | Datei |
 |---|----------|---------|-------|
-| 5 | **CSP-Header** implementieren | 4h | `settings.py`, Middleware |
-| 6 | **Cache-Control für API-Endpunkte** setzen | 2h | `views.py` |
+| 5 | **CSP-Header – Fixed in 2.4.3 (§2.3)** | 4h | `settings.py`, Middleware |
+| 6 | **Cache-Control für API-Endpunkte – Fixed in 2.4.8 (§2.8)** | 2h | `views.py` |
 | 7 | **Error-Messages ohne Exception-Details – Fixed in 2.4.10 (§2.10)** | 1h | `views.py` |
 | 8 | **Indikator-Code deduplizieren – Fixed in 2.4.15 (§4.3)** | 3h | `indicators.py` (neu) |
 | 9 | **`__all__`-Exports für Trading-Modul – Fixed in 2.4.17 (§4.5)** | 30min | `trading/__init__.py` |
@@ -658,43 +723,44 @@ def calculate_performance_metrics_fast(config, limit=2000):
 |---|----------|---------|-------|
 | 10 | **db_restore_state async-fähig machen** | 2h | `trading_bot.py` |
 | 11 | **Indikator-Memoisierung** für Backtesting | 4h | `backtesting.py` |
-| 12 | **DB-Trim mit Batch-Delete** | 2h | `trading_bot.py` |
+| 12 | **DB-Trim mit Batch-Delete – Fixed in 2.4.14 (§4.2)** | 2h | `trading_bot.py` |
 | 13 | **Type-Hints für Views ergänzen – Fixed in 2.4.16 (§4.4)** | 3h | `views.py` |
+| 14 | **info_api-Kennzahlen per DB-Aggregation – Fixed in 2.4.18 (§4.6)** | 3h | `views.py` |
 
 ---
 
-## 6: Komplett-Checkliste
+## 6. Komplett-Checkliste
 
 ### Sicherheit
 
-- [ ] Rate-Limiting auf Login/Passphrase-Gate
-- [ ] ALLOWED_HOSTS ohne Wildcard
-- [x] CSRF_COOKIE_HTTPONLY = True
-- [ ] CSP-Header implementiert
+- [x] Rate-Limiting auf Login/Passphrase-Gate (ab 2.4.1, siehe §2.1; 5 POSTs / 15 min / IP / Prozess)
+- [x] ALLOWED_HOSTS ohne Wildcard (ab 2.4.2, siehe §2.2)
+- [x] CSRF_COOKIE_HTTPONLY = True (ab 2.4.5, siehe §2.5)
+- [x] CSP-Header implementiert (ab 2.4.3, siehe §2.3; Nonce für Template-Skripte, keine externen Domains)
 - [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](SEC-08-cache-control-api.md))
 - [x] Error-Messages ohne technische Details (ab 2.4.10; Diagnose-Log mit Staff-/Eigentümergrenze, siehe §2.10 und [SEC-10](SEC-10-information-disclosure.md))
 - [x] Docker-Passwörter ohne Defaults (ab 2.4.11; `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` als `${VAR:?...}`-Pflichtwerte, zufälliges lokales DB-Passwort im Setup, siehe §2.12 und [SEC-12](SEC-12-docker-default-passwords.md))
 - [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))
 - [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)
-- [ ] HSTS-Header für Produktion korrekt
 - [x] X-Content-Type-Options: nosniff – explizit ab 2.4.6, siehe §2.6
 - [x] Permissions-Policy für Kamera/Mikrofon/Geolokation (ab 2.4.9, siehe §2.9 und [SEC-09](SEC-09-permissions-policy.md))
+- [x] HSTS-Header für Produktion korrekt (kein Handlungsbedarf, siehe §2.11)
 
 ### Code-Qualität
 
 - [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](CODE-18-indicator-dedup.md))
 - [x] Type-Hints für Views (ab 2.4.16, siehe §4.4 und [CODE-19](CODE-19-view-type-hints.md))
 - [x] `__all__` für Trading-Modul (ab 2.4.17, siehe §4.5 und [CODE-20](CODE-20-module-exports.md))
+- [x] Bot-Start/Stop Race-Condition behoben (ab 2.4.12, siehe §3.1 und [BUG-12](BUG-12-race-condition-bot-start-stop.md))
+- [x] CSV-Export mit `io.StringIO`-Puffer (ab 2.4.13, siehe §3.3 und [BUG-14](BUG-14-csv-echo-true-stream.md))
 - [ ] db_restore_state async-fähig
-- [ ] Bot-Start/Stop Race-Condition behoben
 
 ### Performance
 
 - [ ] Indikator-Memoisierung für Backtesting
 - [x] DB-Trim mit Batch-Delete (ab 2.4.14, siehe §4.2 und [PERF-17](PERF-17-db-trim-batch-delete.md))
-- [ ] Aggregation auf DB-Ebene statt Python
-- [ ] Cache-Control Header
+- [x] Aggregation auf DB-Ebene statt Python (ab 2.4.18, siehe §4.6 und [PERF-21](PERF-21-info-api-db-aggregation.md))
 
 ---
 
-*Dieses Audit basiert auf der Code-Analyse vom 07. September 2026. Für kritische Schwachstellen wird eine erneute Prüfung nach Umsetzung der P0-Maßnahmen empfohlen.*
+*Dieses Audit basiert auf der Code-Analyse vom 07. September 2026. Für kritische Schwachstellen wird eine erneute Prüfung nach Umsetzung der P0-Maßnahmen empfohlen. Die Statuspflege der Abschnitte 2–6 erfolgt releaseweise; Dokumentationsstand zuletzt aktualisiert für 2.4.19 (08. September 2026).*

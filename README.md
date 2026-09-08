@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.18** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.19** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -31,6 +31,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **Eine Indikatorquelle für Bot und Backtest (ab 2.4.15):** NDA, DeltaDelta und Acceleration werden ausschließlich in `trading/indicators.py` berechnet; Backtesting, Bot, Celery-Tasks und die Ressourcen-Probe delegieren dorthin. Damit kann eine Formeländerung nicht mehr nur in einem der beiden Pfade landen. Zusätzlich abgesichert: ein Index unterhalb von 2 oder außerhalb der Preisreihe liefert einen `IndexError` statt eines stillschweigend falschen Werts. Bestehende Backtest-Ergebnisse und `DataLog`-Zeilen bleiben bitgenau reproduzierbar. Details: [CODE-18](docs/CODE-18-indicator-dedup.md).
 - **Statisch geprüfte Views (ab 2.4.16):** `trading/views.py` ist vollständig typannotiert und über einen `[tool.mypy]`-Block in `pyproject.toml` reproduzierbar prüfbar (mypy und django-stubs bleiben Entwicklungswerkzeuge außerhalb von `requirements.txt`). Alle ORM-Filter laufen über `_authenticated_user()`: Fällt bei einer künftigen Änderung ein `@login_required` weg, endet der Request mit 403 statt mit einem Filter auf `AnonymousUser`. Zusätzlich gehärtet: ein leeres Gate-Secret erzeugt keine Freigabe mehr, und defekte Equity-Punkte kippen die Reportausgabe nicht. Es wird keine behobene Schwachstelle behauptet – alle drei Pfade waren im ausgelieferten Stand nicht erreichbar. Details und Prüfgrenzen: [CODE-19](docs/CODE-19-view-type-hints.md).
 - **Explizite öffentliche Exporte (ab 2.4.17):** `trading/__init__.py` macht die öffentliche API über `__all__` und eine explizite Import-/Lazy-Load-Policy sichtbar. Ohne diese Festlegung exportierte `from trading import *` nach dem Laden interner Module versehentlich auch Django-Infrastruktur (`admin`, `middleware`, `passphrase` usw.). Import-sichere Module (`backtesting`, `indicators`, `market_data`, `market_scanner`, `resource_optimizer`, `symbols`) werden sofort gebunden; die Django-Module (`models`, `forms`, `views`, `tasks`, `trading_bot`, `worker_status`) werden per PEP-562-`__getattr__` erst beim Zugriff geladen. Ein naives `from . import models` in `__init__.py` bräche die Django-App-Population mit `AppRegistryNotReady` ab. Details und Prüfgrenzen: [CODE-20](docs/CODE-20-module-exports.md).
+- **Performance-Kennzahlen per DB-Aggregation (ab 2.4.18):** `info_api` berechnet die Kennzahlen (Trades, Win-/Loss-Statistik, Profit-Faktor, …) über `django.db.models.aggregate()` direkt im DBMS statt alle Logs des 2.000-Zeilen-Fensters nach Python zu laden. Die Skalarmathematik (Quotienten, Rundung) läuft bewusst in Python, damit das Ergebnis backend-unabhängig und bitgenau zur bisherigen Funktion bleibt. API-Antwort und Fensterbegrenzung sind unverändert. Details und Prüfgrenzen: [PERF-21](docs/PERF-21-info-api-db-aggregation.md).
 
 ## Dokumentation
 
@@ -48,4 +49,5 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [CODE-18: Gemeinsame Indikatorberechnung für Bot und Backtest](docs/CODE-18-indicator-dedup.md)
 - [CODE-19: Type-Hints und Docstrings der Views](docs/CODE-19-view-type-hints.md)
 - [CODE-20: Explizite Modul-Exports](docs/CODE-20-module-exports.md)
+- [PERF-21: info_api-Kennzahlen per DB-Aggregation](docs/PERF-21-info-api-db-aggregation.md)
 - [Changelog](docs/CHANGELOG.md) · [Aktuelle Version](VERSION)
