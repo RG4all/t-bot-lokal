@@ -10,7 +10,7 @@
   `arena/01a08207-t-bot-lokal`)
 - **Fix-Commit:** [`2ae72d9`](https://github.com/RG4all/t-bot-lokal/commit/2ae72d9007b2d525138b7bf14f4122d37a5680a6)
   – `refactor: add __all__ exports to trading module`
-- **Fix-PR:** `_FILLED_AFTER_PR_` (Ziel-Branch `tbot.local`)
+- **Fix-PR:** [#25 – refactor: add __all__ exports to trading module](https://github.com/RG4all/t-bot-lokal/pull/25) (Ziel-Branch `tbot.local`)
 - **Dokumentation des Releases:** [CHANGELOG 2.4.17](CHANGELOG.md#2417--2026-09-08)
 
 ## Befund und Root Cause
