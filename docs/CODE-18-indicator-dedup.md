@@ -6,6 +6,8 @@
 - **Einstufung:** MEDIUM – Code Quality (kein Sicherheitsbefund, keine ausnutzbare Schwachstelle)
 - **Geprüfter Ausgangsstand:** 2.4.14 / `8c7f799ac1bd43efe2753561edf5b7229a8e02ab`
 - **Fix-Commit:** [`e208ccc`](https://github.com/RG4all/t-bot-lokal/commit/e208ccc6720e0832b3ca47eb53b04a2fb4b2d809) – `refactor: extract indicator logic to shared module`
+- **Fix-PR:** [#23 – refactor: extract indicator logic to shared module](https://github.com/RG4all/t-bot-lokal/pull/23) (Ziel-Branch `tbot.local`)
+- **Dokumentation des Releases:** [CHANGELOG 2.4.15](CHANGELOG.md#2415--2026-09-08), [Handbuch §6.6](MANUAL.md), [Backtesting-Kapitel §2](backtesting.md)
 
 ## Befund und Root Cause
 
@@ -225,12 +227,16 @@ python -m pip check
 Prüfnachweisen; es wird kein versionierter GitHub-Actions-Anwendungstestworkflow
 eingeführt. Die Workflow-API führt nur die dynamische Integration
 **Dependency Graph** (`dynamic/dependabot/update-graph`) aus – sie ersetzt keine
-Anwendungstests. Nach dem Push wird der Stand der für den Session-Branch
-gemeldeten Runs und Checks geprüft und im PR angegeben; es werden keine Checks
-umgangen oder als erfolgreich erklärt.
+Anwendungstests. Nach dem Push wurde der Stand der Runs und Checks für den
+Session-Branch geprüft: für den HEAD-Commit des Docs-Commits sind **keine
+Check-Runs gemeldet** (`gh pr checks #23` → „no checks reported",
+`check-runs` = 0), weil kein Anwendungstest-Workflow existiert. Es wird kein
+erfolgreicher GitHub-CI-Lauf behauptet; alle Nachweise sind die oben
+dokumentierten lokalen Läufe.
 
-Auslieferung auf `arena/01a081b6-t-bot-lokal`; der PR richtet sich an
-`tbot.local`.
+Auslieferung auf `arena/01a081b6-t-bot-lokal`; [PR #23](https://github.com/RG4all/t-bot-lokal/pull/23)
+richtet sich an `tbot.local` und ist zum Zeitpunkt dieses Eintrags `OPEN` und
+`MERGEABLE`.
 
 ## Prüfgrenzen und Upgrade
 
