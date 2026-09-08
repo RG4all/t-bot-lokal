@@ -156,7 +156,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.14
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.15
 
 **Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
@@ -175,6 +175,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 **Nachprüfung 2.4.10:** Alle 11 CSRF-Cookie-Tests erneut grün; eine Testprozess-Mutation mit deaktiviertem `CSRF_COOKIE_HTTPONLY` lässt die Cookie-Prüfung erwartungsgemäß scheitern. Settings, Formular-Token-Login, Produktions-/Render-Flags sowie Cookie-/Token-/Origin-Negativtests bleiben unverändert wirksam. [Nachweis SEC-10](SEC-10-information-disclosure.md#sec-05-nachprüfung).
 
 **Nachprüfung 2.4.14:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen DB-Trim-Batch-Tests grün. Siehe [SEC-05-Nachprüfung im PERF-17-Nachweis](PERF-17-db-trim-batch-delete.md#sec-05-nachprüfung).
+
+**Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 30 neuen Indikator-Tests grün (279 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](CODE-18-indicator-dedup.md#sec-05-nachprüfung).
 
 ---
 
@@ -492,15 +494,17 @@ erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-b
 
 ---
 
-### 4.3 CODE-QUALITÄT – Duplizierte Indikator-Logik
+### 4.3 CODE-QUALITÄT – Duplizierte Indikator-Logik – Fixed in 2.4.15
 
 **Dateien:**
-- `trading/backtesting.py` (Zeilen 14–51)
-- `trading/trading_bot.py` (Zeilen 577–591)
+- `trading/backtesting.py` (historische Zeilen 14–51)
+- `trading/trading_bot.py` (historische Zeilen 577–591)
 
-Die Indikatorberechnung (NDA, DeltaDelta, Acceleration) ist in beiden Dateien fast identisch implementiert.
+Die Indikatorberechnung (NDA, DeltaDelta, Acceleration) war in beiden Dateien fast identisch implementiert, mit eigener Rundungs- und Indexbehandlung. **Umgesetzt in 2.4.15:** neues Modul `trading/indicators.py` ist die einzige Quelle der Arithmetik (`compute_indicator_values()` mit optionalem Rundungs-Hook, `calculate_trading_indicators()` für die quantisierte Backtest-Stufe, `build_indicator_rows()` für die Vorabberechnung, `EIGHT_PLACES` als gemeinsame Konstante). `backtesting.py`, `trading_bot.py`, `tasks.py` und `scripts/backtest_resource_probe.py` delegieren; `Backtesting.calculate_indicators` bleibt als dünner Kompatibilitäts-Wrapper. Beide Präzisionsstufen (Bot rechnet roh, Backtest quantisiert pro Zwischenstufe) bleiben bewusst erhalten – ein Deduplizierungs-Refactoring darf keine laufenden Schwellwertentscheidungen oder gespeicherten DataLog-Werte verschieben. Zusätzlich neu: Index-Guard `idx >= 2` und `idx < len(prices)`; vorher rechnete `idx=1` über die Listendefinition stillschweigend mit `prices[-1]`.
 
-**Lösungsvorschlag:**
+**Nachweis:** 30 Regressionstests in `trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung, Backtest-Reports byte-identisch. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md).
+
+Historischer Lösungsvorschlag (unvollständig – die Bot-Nebenwerte `current_da`/`prev_da`/`dva` und die Rundungsstufe fehlten):
 
 ```python
 # trading/indicators.py (neues Modul)
@@ -624,7 +628,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 | 5 | **CSP-Header** implementieren | 4h | `settings.py`, Middleware |
 | 6 | **Cache-Control für API-Endpunkte** setzen | 2h | `views.py` |
 | 7 | **Error-Messages ohne Exception-Details – Fixed in 2.4.10 (§2.10)** | 1h | `views.py` |
-| 8 | **Indikator-Code deduplizieren** | 3h | `indicators.py` (neu) |
+| 8 | **Indikator-Code deduplizieren – Fixed in 2.4.15 (§4.3)** | 3h | `indicators.py` (neu) |
 
 ### Mittelfristig umsetzen (P2 – 1–2 Monate)
 
@@ -656,7 +660,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 
 ### Code-Qualität
 
-- [ ] Indikator-Code dedupliziert
+- [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](CODE-18-indicator-dedup.md))
 - [ ] Type-Hints für Views
 - [ ] `__all__` für Trading-Modul
 - [ ] db_restore_state async-fähig

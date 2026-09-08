@@ -24,11 +24,10 @@ def worker(queue):
         pass
 
     from trading.backtesting import Backtesting
+    from trading.indicators import build_indicator_rows
 
     prices = [Decimal(100) + Decimal(index % 97) / Decimal(100) for index in range(5_000)]
-    indicators = [None, None] + [
-        Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
-    ]
+    indicators = build_indicator_rows(prices)
     started = time.perf_counter()
     best = Decimal("-Infinity")
     for index in range(100):

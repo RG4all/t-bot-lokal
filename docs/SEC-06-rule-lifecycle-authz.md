@@ -1,8 +1,8 @@
 # SEC-06 – X-Content-Type-Options: nosniff
 
 - **Finding:** `MissingContentTypeNosniff` (Prompt 6 / Security-Audit §2.6)
-- **Status:** **Fixed**
-- **Release:** **2.4.6** · **Nachprüfung:** 2026-09-07
+- **Status:** **Fixed** (behoben und in 2.4.15 zuletzt nachgeprüft)
+- **Release:** **2.4.6** · **Nachprüfung:** 2026-09-07, zuletzt 2026-09-08 (2.4.15)
 - **Ursprüngliche Einstufung:** MEDIUM – Security; nach Prüfung explizite Konfigurationshärtung, kein nachgewiesener fehlender Header im bisherigen Django-Standard-Stack.
 - **Fix-Commit:** [`a2e6c4bd18fbcf1649efa1af6ec1822501f93958`](https://github.com/RG4all/t-bot-lokal/commit/a2e6c4bd18fbcf1649efa1af6ec1822501f93958) – `fix(security): enable X-Content-Type-Options nosniff`
 
@@ -34,6 +34,8 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 `CSRF_COOKIE_HTTPONLY = True` ist weiterhin explizit und DEBUG-/Render-unabhängig gesetzt. Die eigenen Dashboard-Skripte lesen den CSRF-Token aus dem Formularfeld, nicht aus `document.cookie`. Der bisher entsprechend benannte Login-Test las allerdings den Cookie-Wert: Er verwendet jetzt tatsächlich den maskierten DOM-Token, einschließlich der vorgeschalteten Gate-Freigabe.
 
 Die jetzt **11 CSRF-Cookie-Tests** prüfen die expliziten Settings, serialisiertes `Set-Cookie` mit HttpOnly, die Secure-Flags aus real geladenen lokalen/Produktions-/Render-Settings, Token-Auslieferung und erfolgreichen Login. POSTs ohne Token, ohne passendes Cookie, mit dem Token eines anderen Clients oder mit einer fremden Origin werden bei erzwungener CSRF-Prüfung abgelehnt.
+
+**Nachprüfung 2.4.15:** Auslöser war das Indikator-Refactoring (Prompt 18 / Audit §4.3, [CODE-18](CODE-18-indicator-dedup.md)); die Einstellungen blieben unverändert. `CSRF_COOKIE_HTTPONLY = True` steht weiterhin explizit und DEBUG-/Render-unabhängig außerhalb des nicht-DEBUG-Blocks (`trading_bot_project/settings.py`), und alle 11 CSRF-Cookie-Tests bestehen zusammen mit den 30 neuen Indikator-Tests (279 Tests gesamt) in [PR #23](https://github.com/RG4all/t-bot-lokal/pull/23). SEC-05 bleibt **Fixed**; der hier beschriebene nosniff-Befund bleibt ebenfalls **Fixed** (Fix-Commit [`a2e6c4bd`](https://github.com/RG4all/t-bot-lokal/commit/a2e6c4bd18fbcf1649efa1af6ec1822501f93958), Release 2.4.6).
 
 **Wichtige Abgrenzung:** HttpOnly verhindert nur das direkte Lesen des Cookies. Der Formular-Token bleibt für Skripte derselben Origin im DOM sichtbar; XSS kann weiterhin authentifizierte Requests ausführen. Die frühere Zusicherung, das Token sei damit generell vor XSS-Exfiltration geschützt, wurde in Kommentaren, READMEs und Security-Dokumentation korrigiert. CSP, korrektes Escaping und die CSRF-/Origin-Prüfungen bleiben erforderlich.
 

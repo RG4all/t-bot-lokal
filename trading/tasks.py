@@ -14,6 +14,7 @@ from django.utils import timezone
 from kombu.exceptions import OperationalError as KombuOperationalError
 
 from .backtesting import Backtesting
+from .indicators import build_indicator_rows
 from .models import BacktestTask, Configuration, DataLog
 from .resource_optimizer import get_backtest_resource_profile
 
@@ -433,9 +434,7 @@ def run_backtest(self, config_id, params, symbols, task_id):
                 errors.append({"symbol": symbol, "error": "Mindestens drei Preispunkte benötigt."})
                 completed += combinations_per_symbol
                 continue
-            indicator_rows = [None, None] + [
-                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
-            ]
+            indicator_rows = build_indicator_rows(prices)
             for acc_threshold in ranges[0]:
                 for nda_threshold in ranges[1]:
                     for deltadelta_threshold in ranges[2]:
@@ -483,9 +482,7 @@ def run_backtest(self, config_id, params, symbols, task_id):
         for symbol, best in list(best_results.items()):
             historical = historical_by_symbol[symbol]
             prices = historical["prices"]
-            indicator_rows = [None, None] + [
-                Backtesting.calculate_indicators(prices, index) for index in range(2, len(prices))
-            ]
+            indicator_rows = build_indicator_rows(prices)
             thresholds = best["thresholds"]
             best_results[symbol] = _simulate_candidate(
                 config,

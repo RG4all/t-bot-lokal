@@ -23,6 +23,7 @@ from django.db import (
 )
 from django.db.utils import InterfaceError
 
+from .indicators import EIGHT_PLACES, compute_indicator_values
 from .market_data import (
     BinancePublicMarketData,
     BitMartPublicMarketData,
@@ -35,7 +36,8 @@ from .market_data import (
 from .models import Configuration, DataLog, ErrorLog, TradingLog
 
 logger = logging.getLogger("trading")
-_EIGHT_PLACES = Decimal("0.00000001")
+# EIGHT_PLACES (8 Nachkommastellen) kommt aus trading.indicators und ist die
+# einzige Rundungspräzision von Indikatoren, Ordergrößen und DataLog-Feldern.
 _MAX_DECIMAL = Decimal("999999999999.99999999")
 # Maximale Zeilenzahl je Lösch-Charge in db_trim_datalog: Hält jede einzelne
 # DELETE-Transaktion kurz, damit bei großen Tabellen keine langen
@@ -290,7 +292,7 @@ def db_restore_state(config_id):
 def _bounded(value):
     value = Decimal(value)
     return max(-_MAX_DECIMAL, min(_MAX_DECIMAL, value)).quantize(
-        _EIGHT_PLACES,
+        EIGHT_PLACES,
         rounding=ROUND_HALF_UP,
     )
 
@@ -616,14 +618,13 @@ class TradingBot(threading.Thread):
         prices = self.price_buffer[symbol]
         if len(prices) < 3:
             return
-        current, previous, older = prices[-1], prices[-2], prices[-3]
-        current_da = current - previous
-        nda = current_da / previous * 100 if previous else Decimal(0)
-        previous_da = previous - older
-        previous_nda = previous_da / previous * 100 if previous else Decimal(0)
-        dva = nda - previous_nda
-        deltadelta = (nda + previous_nda) / 2
-        acceleration = dva / previous_nda if previous_nda else Decimal(0)
+        # Zentrale Indikatorarithmetik aus trading/indicators.py – identische
+        # Formeln, Guards und Indexprüfung wie im Backtesting. Bewusst ohne
+        # rounding-Hook: Der Bot rechnet mit ungerundeten Rohwerten und rundet
+        # erst beim Schreiben (``_bounded``), damit bestehende Datenlogs und
+        # laufende Schwellwertentscheidungen unverändert bleiben.
+        values = compute_indicator_values(prices, len(prices) - 1)
+        current = values.current_price
         max_price = max(prices)
         min_price = min(prices)
         mvd = min_price / max_price if max_price else Decimal(0)
@@ -639,13 +640,13 @@ class TradingBot(threading.Thread):
                 price=_bounded(current),
                 max_price=_bounded(max_price),
                 min_price=_bounded(min_price),
-                current_da=_bounded(current_da),
-                nda=_bounded(nda),
-                prev_da=_bounded(previous_da),
-                prev_nda=_bounded(previous_nda),
-                dva=_bounded(dva),
-                deltadelta=_bounded(deltadelta),
-                div_DVA_prev_NDA=_bounded(acceleration),
+                current_da=_bounded(values.current_da),
+                nda=_bounded(values.nda),
+                prev_da=_bounded(values.previous_da),
+                prev_nda=_bounded(values.previous_nda),
+                dva=_bounded(values.dva),
+                deltadelta=_bounded(values.deltadelta),
+                div_DVA_prev_NDA=_bounded(values.acceleration),
                 mvd=_bounded(mvd),
             )
             if saved:
@@ -658,7 +659,13 @@ class TradingBot(threading.Thread):
                         symbol,
                         settings.MAX_DATA_LOGS_PER_SYMBOL,
                     )
-        await self.check_trading(symbol, current, nda, deltadelta, acceleration)
+        await self.check_trading(
+            symbol,
+            current,
+            values.nda,
+            values.deltadelta,
+            values.acceleration,
+        )
 
     def _global_loss_limit_reached(self):
         threshold = Decimal(str(self.config.sales_stop_threshold or 0))
@@ -715,7 +722,7 @@ class TradingBot(threading.Thread):
             if symbol in self.positions:
                 raise ValueError(f"Für {symbol} ist bereits eine Position offen")
             amount = (self.config.trade_amount / price).quantize(
-                _EIGHT_PLACES,
+                EIGHT_PLACES,
                 rounding=ROUND_HALF_UP,
             )
             cost = amount * price
