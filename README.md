@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.13** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.14** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -27,6 +27,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **Keine Standard-Passwörter im Docker-Setup (ab 2.4.11):** `docker-compose.yml` verlangt `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` als Pflichtwerte (`${VAR:?...}`). Fehlende oder leere Secrets brechen den Compose-Start mit klarem Fehler ab; ein öffentlich bekanntes DB-Standard-Passwort existiert nicht mehr. `scripts/setup_local.sh` erzeugt das lokale Datenbank-Passwort zufällig und privat in `.env.local` und bewahrt es beim Retuning. Details: [SEC-12](docs/SEC-12-docker-default-passwords.md).
 - **Thread-sicherer Bot-Start/Stop (ab 2.4.12):** `TradingBotManager` prüft den Laufzustand ohne verschachtelte Lock-Acquisition. Gleichzeitige Start- und Status-Aufrufe erzeugen keinen zweiten Trading-Thread für dieselbe Konfiguration. Details: [BUG-12](docs/BUG-12-race-condition-bot-start-stop.md).
 - **CSV-Kompatibilität (ab 2.4.13):** Der Trading-CSV-Export verwendet `io.StringIO` statt eines eigenen Echo-Adapters. Der synchrone Generator puffert jeweils nur eine CSV-Zeile und schließt den Puffer auch bei Abbruch oder Fehler; Format und Eigentümerprüfung bleiben unverändert. Details und ASGI-Prüfgrenzen: [BUG-14](docs/BUG-14-csv-echo-true-stream.md).
+- **DB-Trim in Batches (ab 2.4.14):** Das Aufräumen alter DataLog-Einträge (`db_trim_datalog`) löscht in 1000er-Schritten statt in einem einzelnen DELETE über alle Alt-Einträge. Jede Charge läuft in einer eigenen kurzen Transaktion, dadurch bleiben Datenbank-Locks auch bei 20.000+ Zeilen pro Symbol kurz. Details und Prüfgrenzen: [PERF-17](docs/PERF-17-db-trim-batch-delete.md).
 
 ## Dokumentation
 
@@ -40,4 +41,5 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [SEC-09: Permissions-Policy-Header](docs/SEC-09-permissions-policy.md)
 - [SEC-10: Sichere Fehlermeldungen und SEC-05-Nachprüfung](docs/SEC-10-information-disclosure.md)
 - [SEC-12: Keine Standard-Passwörter im Compose-Setup](docs/SEC-12-docker-default-passwords.md)
+- [PERF-17: Batch-Delete für den DataLog-Trim](docs/PERF-17-db-trim-batch-delete.md)
 - [Changelog](docs/CHANGELOG.md) · [Aktuelle Version](VERSION)

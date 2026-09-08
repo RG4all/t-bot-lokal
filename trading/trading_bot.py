@@ -37,6 +37,10 @@ from .models import Configuration, DataLog, ErrorLog, TradingLog
 logger = logging.getLogger("trading")
 _EIGHT_PLACES = Decimal("0.00000001")
 _MAX_DECIMAL = Decimal("999999999999.99999999")
+# Maximale Zeilenzahl je Lösch-Charge in db_trim_datalog: Hält jede einzelne
+# DELETE-Transaktion kurz, damit bei großen Tabellen keine langen
+# Datenbank-Locks entstehen.
+_DATALOG_TRIM_BATCH_SIZE = 1000
 _DB_RECOVERY_LOCK = threading.Lock()
 _DB_CIRCUIT_LOCK = threading.Lock()
 _DB_CIRCUIT_OPEN_UNTIL = 0.0
@@ -175,12 +179,46 @@ def db_create_datalog_safe(**kwargs):
 @sync_to_async(thread_sensitive=False, executor=_BOT_DB_EXECUTOR)
 @db_safe(suppress=True)
 def db_trim_datalog(config_id, symbol, max_rows):
+    """Löscht alte DataLog-Einträge in Batches, um Datenbank-Locks zu vermeiden.
+
+    Bei großen Tabellen (20.000+ Zeilen je Symbol) kann ein einzelner
+    DELETE-Befehl die Datenbank für andere Bots und Requests lange sperren.
+    Diese Funktion löscht deshalb in 1000er-Schritten: Jede Iteration liest
+    höchstens _DATALOG_TRIM_BATCH_SIZE betroffene IDs und löscht genau diese
+    in einer eigenen, kurzen Transaktion. So bleibt jede einzelne
+    DELETE-Operation klein und die Sperrdauer begrenzt.
+
+    Args:
+        config_id: ID der Trading-Konfiguration.
+        symbol: Handelspaar (z. B. "BTC/USDT").
+        max_rows: Maximale Anzahl zu behaltender Zeilen.
+    """
+    if max_rows < 1:
+        # Negatives max_rows würde beim Slicing unten eine Exception auslösen.
+        # Als No-op behandeln; Aufrufer nutzen ausschließlich
+        # settings.MAX_DATA_LOGS_PER_SYMBOL (Minimum 1.000).
+        return
     queryset = DataLog.objects.filter(configuration_id=config_id, symbol=symbol)
     cutoff_id = (
         queryset.order_by("-id").values_list("id", flat=True)[max_rows : max_rows + 1].first()
     )
-    if cutoff_id is not None:
-        queryset.filter(id__lte=cutoff_id).delete()
+    if cutoff_id is None:
+        return
+
+    # Django erlaubt kein LIMIT direkt auf .delete() (TypeError). Stattdessen
+    # wird je Durchgang nur der nächste 1000er-Block an IDs gelesen und über
+    # id__in gelöscht. transaction.atomic() je Block beendet die Transaktion
+    # nach jeder Charge; so entsteht keine Sperre über alle Alt-Einträge.
+    while True:
+        batch_ids = list(
+            queryset.filter(id__lte=cutoff_id)
+            .order_by("id")
+            .values_list("id", flat=True)[:_DATALOG_TRIM_BATCH_SIZE]
+        )
+        if not batch_ids:
+            break
+        with transaction.atomic():
+            DataLog.objects.filter(id__in=batch_ids).delete()
 
 
 @sync_to_async(thread_sensitive=False, executor=_BOT_DB_EXECUTOR)

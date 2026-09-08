@@ -156,7 +156,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 ---
 
-### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.10
+### 2.5 CSRF-Cookie ohne HttpOnly – Fixed in 2.4.5, zuletzt nachgeprüft in 2.4.14
 
 **Datei:** `trading_bot_project/settings.py` · **Ursprünglicher Fix:** [PR #13](https://github.com/RG4all/t-bot-lokal/pull/13)
 
@@ -173,6 +173,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 **Nachprüfung 2.4.9:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Permissions-Policy-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-09-Nachweis](SEC-09-permissions-policy.md#sec-05-nachprüfung).
 
 **Nachprüfung 2.4.10:** Alle 11 CSRF-Cookie-Tests erneut grün; eine Testprozess-Mutation mit deaktiviertem `CSRF_COOKIE_HTTPONLY` lässt die Cookie-Prüfung erwartungsgemäß scheitern. Settings, Formular-Token-Login, Produktions-/Render-Flags sowie Cookie-/Token-/Origin-Negativtests bleiben unverändert wirksam. [Nachweis SEC-10](SEC-10-information-disclosure.md#sec-05-nachprüfung).
+
+**Nachprüfung 2.4.14:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen DB-Trim-Batch-Tests grün. Siehe [SEC-05-Nachprüfung im PERF-17-Nachweis](PERF-17-db-trim-batch-delete.md#sec-05-nachprüfung).
 
 ---
 
@@ -433,9 +435,9 @@ def clear_indicator_cache(cls):
 
 ---
 
-### 4.2 PERFORMANCE – `db_trim_datalog` kann Datenbank-Lock verursachen
+### 4.2 PERFORMANCE – `db_trim_datalog` kann Datenbank-Lock verursachen – Fixed in 2.4.14
 
-**Datei:** `trading/trading_bot.py` (Zeilen 176–183)
+**Datei:** `trading/trading_bot.py` (historische Zeilen 176–183)
 
 ```python
 @db_safe(suppress=True)
@@ -472,6 +474,21 @@ def db_trim_datalog(config_id, symbol, max_rows):
             if deleted == 0:
                 break
 ```
+
+**Umgesetzt in 2.4.14 – Abweichung vom Lösungsvorschlag:** Die oben
+skizzierte Variante `queryset[:1000].delete()` ist mit Django 5.2.17 nicht
+ausführbar (`TypeError: Cannot use 'limit' or 'offset' with delete().`).
+`db_trim_datalog()` liest stattdessen je Durchgang nur die nächsten maximal
+1000 betroffenen IDs (`ORDER BY id LIMIT 1000`) und löscht genau diese in
+einer eigenen, sofort committeten Transaktion über `id__in`. Der Abbruch
+erfolgt, sobald keine Alt-Zeile mehr übrig ist. `max_rows < 1` wird als
+sicheres No-op behandelt. Behaltenslogik, Scoping und Aufrufrhythmus bleiben
+unverändert. **Nachweis:** 7 Regressionstests in
+`trading/tests/test_db_trim_datalog.py`; am Ausgangsstand rot (eine
+Transaktion über alle 2.500 Zeilen statt `[1000, 1000, 500]`;
+`ValueError` bei negativem `max_rows`), mit Fix grün. Insgesamt
+249 Django-/Python-Tests bestanden; SEC-05 mit allen 11 CSRF-Cookie-Tests
+erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md).
 
 ---
 
@@ -648,7 +665,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 ### Performance
 
 - [ ] Indikator-Memoisierung für Backtesting
-- [ ] DB-Trim mit Batch-Delete
+- [x] DB-Trim mit Batch-Delete (ab 2.4.14, siehe §4.2 und [PERF-17](PERF-17-db-trim-batch-delete.md))
 - [ ] Aggregation auf DB-Ebene statt Python
 - [ ] Cache-Control Header
 

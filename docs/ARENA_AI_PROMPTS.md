@@ -1121,7 +1121,26 @@ VALIDIERUNGSKRITERIEN:
 
 **Prompt-Titel:** `[DbTrimBatchDelete] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** MEDIUM – Performance  
-**Betroffene Dateien:** `trading/trading_bot.py` (Zeilen 176–183)
+**Betroffene Dateien:** `trading/trading_bot.py` (historische Zeilen 176–183)
+
+**Status: Fixed in 2.4.14.** `db_trim_datalog()` löscht alte DataLog-Einträge
+in **1000er-Schritten** statt in einem einzigen DELETE über alle Alt-Einträge.
+Je Durchgang liest die Funktion nur die nächsten maximal 1000 betroffenen IDs
+(`ORDER BY id LIMIT 1000`) und löscht genau diese in einer eigenen, sofort
+committeten Transaktion (`id__in`); ist nichts mehr übrig, bricht die Schleife
+ab. **Korrektur des historischen Vorschlags:** Die im Prompt gezeigte Variante
+`queryset[:BATCH_SIZE].delete()` ist mit Django 5.2.17 nicht ausführbar
+(`TypeError: Cannot use 'limit' or 'offset' with delete().`); die
+ID-Chargen-Variante erreicht dieselbe Batch-Wirkung über die unterstützte
+ORM-API. Zusätzlich ist `max_rows < 1` ein sicheres No-op statt einer
+`ValueError`-Exception. **7 Regressionstests** in
+`trading/tests/test_db_trim_datalog.py`, davon zwei am Ausgangsstand rot
+(eine Transaktion über alle 2.500 Zeilen statt `[1000, 1000, 500]`;
+`ValueError` bei negativem `max_rows`), insgesamt **249 Django-/Python-Tests**
+grün; SEC-05 mit allen 11 CSRF-Cookie-Tests erneut nachgeprüft.
+[Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md),
+[Audit §4.2](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den
+historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 

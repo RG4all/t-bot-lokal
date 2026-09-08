@@ -2,6 +2,27 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.14] – 2026-09-08
+
+### Performance
+
+- **DB-Trim als Batch-Delete (DbTrimBatchDelete, MEDIUM – Performance, Security-Audit §4.2):** `db_trim_datalog()` in `trading/trading_bot.py` löschte alle Alt-Einträge einer Konfiguration/Symbol-Kombination in **einem einzigen DELETE-Statement**. Bei 20.000+ Zeilen pro Symbol hielt diese eine lang laufende Schreibtransaktion die Datenbank für andere Bots und Requests gesperrt. Ab 2.4.14 löscht die Funktion in **1000er-Schritten**: Je Durchgang liest sie nur die nächsten maximal 1000 betroffenen IDs (`ORDER BY id LIMIT 1000`) und löscht genau diese in einer eigenen, sofort committeten Transaktion (`id__in`). Sobald keine Alt-Zeile mehr übrig ist, bricht die Schleife ab. Es entsteht keine Sperre mehr über sämtliche Alt-Einträge; Behaltenslogik, Symbol-/Konfigurations-Scoping, Aufrufrhythmus und `@db_safe`-Fehlerbehandlung bleiben unverändert.
+- **Korrektur des historischen Lösungsvorschlags:** Die in Prompt 17 und Audit §4.2 skizzierte Variante `queryset[:1000].delete()` ist mit Django 5.2.17 nicht ausführbar (Django lehnt `LIMIT` direkt auf `.delete()` mit `TypeError` ab). Die umgesetzte ID-Chargen-Variante erreicht dieselbe Batch-Wirkung über die unterstützte ORM-API. Zusätzlich behandelt die Funktion `max_rows < 1` als sicheres No-op statt einer `ValueError`-Exception beim Slicing.
+- Keine neue Abhängigkeit, keine Migration, keine Settings-Änderung; `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
+
+### Tests und Qualitätssicherung
+
+- **7 neue Regressionstests** in `trading/tests/test_db_trim_datalog.py`: Behaltenslogik (nur die neuesten `max_rows` Zeilen bleiben), Grenzfälle (genau/weniger als `max_rows`), Scoping auf Konfiguration+Symbol, Chargengrößen-Nachweis per Transaktions-Probe (`[1000, 1000, 500]` bei 2.500 Alt-Zeilen), Abbruch bei leeren Deletes und No-op bei ungültigem `max_rows`. **Rot → grün:** Am Ausgangsstand fand der Batch-Nachweis genau eine Transaktion über alle 2.500 Zeilen (`[2500]`), und negatives `max_rows` endete mit `ValueError: Negative indexing is not supported.`
+- **249 Django-/Python-Tests** (7 neue + 242 bestehende), **8/8 Shell-Testgruppen**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
+- **SEC-05-Nachprüfung:** Alle 11 CSRF-Cookie-Tests (`CSRF_COOKIE_HTTPONLY = True`) bestehen unverändert; SEC-05 bleibt Fixed.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](PERF-17-db-trim-batch-delete.md#ci-und-auslieferung) sind dokumentiert.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.14** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert.
+- Audit §4.2 und Prompt 17 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md) ergänzt.
+- Keine neuen Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf **2.4.14** prüfen; Datenbank-Historien werden ab dem nächsten regulären Trim-Zyklus batchweise gekürzt, ein manueller Eingriff ist nicht nötig.
+
 ## [2.4.13] – 2026-09-08
 
 ### Sicherheit und Bug-Fixes
