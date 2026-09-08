@@ -6,7 +6,7 @@ import re
 import threading
 from collections import Counter, defaultdict
 from decimal import Decimal
-from functools import lru_cache
+from functools import lru_cache, wraps
 from html import escape
 from io import BytesIO
 
@@ -63,6 +63,32 @@ _MANUAL_RENDER_LOCK = threading.Lock()
 _MANUAL_HTML = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
+
+
+def no_cache_json(view_func):
+    """Setzt Cache-Control- und Pragma-Header für API-Responses.
+
+    Die API-Endpunkte liefern benutzerbezogene Handels-, Portfolio- und
+    Marktdaten. Ohne explizite Cache-Header können Browser und zwischen-
+    geschaltete Proxies/CDNs diese Antworten zwischenspeichern und einem
+    anderen Nutzer desselben Clients ausliefern. ``no-store`` verbietet jede
+    Speicherung, ``no-cache`` erzwingt eine erneute Validierung und
+    ``must-revalidate, max-age=0`` verhindern veraltete Kopien; ``Pragma``
+    deckt zusätzlich ältere HTTP/1.0-Zwischenstufen ab.
+
+    Der Decorator wird bewusst als innerster Decorator direkt über der View
+    platziert, damit er jede von der View erzeugte Antwort erfasst –
+    einschließlich Fehlerantworten (z. B. 400/503), die ohne Header sonst
+    ebenfalls gecacht werden könnten.
+    """
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        response = view_func(request, *args, **kwargs)
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    return wrapped
 
 
 def _safe_next_url(request, candidate):
@@ -502,6 +528,7 @@ def _validated_start_time(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def symbol_suggestions_api(request):
     exchange = request.GET.get("exchange", "").strip().lower()
     market = request.GET.get("market", "").strip().lower()
@@ -528,6 +555,7 @@ def symbol_suggestions_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def market_opportunities_api(request):
     """Liefert geprüfte Top-Mover für die Konfigurationsvorlage.
 
@@ -587,6 +615,7 @@ def market_opportunities_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def server_resources_api(request):
     """Diagnose-Endpunkt für das erkannte CPU-/RAM-/Speicherprofil."""
     profile = get_backtest_resource_profile(
@@ -599,6 +628,7 @@ def server_resources_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def backtesting_estimate_api(request):
     """Berechnet eine Laufzeitschätzung ohne einen Backtest anzulegen."""
     profile = get_backtest_resource_profile()
@@ -626,6 +656,7 @@ def backtesting_estimate_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def data_logs_api(request):
     config = get_object_or_404(
         Configuration,
@@ -657,6 +688,7 @@ def data_logs_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def trades_api(request):
     config = get_object_or_404(
         Configuration,
@@ -686,6 +718,7 @@ def trades_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def info_api(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
     logs = _latest_rows(config.logs.all(), _MAX_LOG_ROWS)
@@ -776,6 +809,7 @@ def info_api(request, config_id):
 
 @login_required
 @require_GET
+@no_cache_json
 def bot_status_api(request):
     config_id = request.GET.get("config_id")
     if not config_id:
@@ -803,6 +837,7 @@ def bot_status_api(request):
 
 @login_required
 @require_GET
+@no_cache_json
 def logs_api(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
     paginator = Paginator(config.logs.all().order_by("-timestamp", "-id"), 100)
@@ -1210,6 +1245,7 @@ def _combination_count(params, symbol_count):
 
 @login_required
 @require_GET
+@no_cache_json
 def backtesting_status_api(request):
     profile = get_backtest_resource_profile(
         get_server_resources(refresh=request.GET.get("refresh") == "1")

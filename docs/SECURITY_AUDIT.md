@@ -168,6 +168,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 **Nachprüfung 2.4.6:** `trading/tests/test_csrf_cookie.py` enthält jetzt 11 Tests. Der erfolgreiche Login verwendet tatsächlich den maskierten Formular-Token. Produktions-/Render-Cookie-Flags, fehlende Tokens/Cookies, Tokens anderer Clients und fremde Origins sind geprüft. Eine Testprozess-Mutation mit `CSRF_COOKIE_HTTPONLY=False` wird erkannt. Siehe [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
 
+**Nachprüfung 2.4.8:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Cache-Control-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-08-Nachweis](SEC-08-cache-control-api.md#sec-05-nachprüfung).
+
 ---
 
 ### 2.6 X-Content-Type-Options: nosniff – Fixed in 2.4.6
@@ -200,13 +202,13 @@ Die Einstellung ist DEBUG-/Render-unabhängig. `SecurityMiddleware` bleibt an er
 
 ---
 
-### 2.8 MITTEL – Fehlende `Cache-Control`-Header für API-Endpunkte
+### 2.8 MITTEL – Fehlende `Cache-Control`-Header für API-Endpunkte – Fixed in 2.4.8
 
-**Datei:** `trading/views.py`
+**Datei:** `trading/views.py` · **Status:** Fixed
 
-API-Endpunkte wie `/api/info/`, `/api/bot/status/`, `/api/logs/` haben keine Cache-Header. Browser und Proxies können sensitive Handelsdaten cachecen.
+**Vorzustand:** API-Endpunkte wie `/api/info/`, `/api/bot/status/`, `/api/logs/`, `/api/data_logs/` und `/api/trades/` hatten keine Cache-Header. Browser und Proxies/CDNs konnten sensitive Handelsdaten zwischenspeichern und später unabhängig vom Server-Zustand erneut ausliefern.
 
-**Lösungsvorschlag:**
+**Lösungsvorschlag (umgesetzt):**
 
 ```python
 from django.views.decorators.cache import never_cache
@@ -218,7 +220,7 @@ def info_api(request, config_id):
     # ...
 ```
 
-Oder als Decorator-Sammlung:
+Oder als Decorator-Sammlung (im Projekt umgesetzt als `no_cache_json` in `trading/views.py`):
 
 ```python
 def no_cache_json(view_func):
@@ -230,6 +232,10 @@ def no_cache_json(view_func):
         return response
     return wrapped
 ```
+
+**Umgesetzt:** Der Decorator `no_cache_json` wird als innerster Decorator auf alle zehn API-Views angewendet (`info_api`, `bot_status_api`, `logs_api`, `data_logs_api`, `trades_api`, `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api`, `server_resources_api`). Dadurch erhalten auch von den Views erzeugte Fehlerantworten (z. B. 400/503) die Header. Von Django bzw. der Middleware erzeugte Antworten ohne View-Aufruf (z. B. 404 aus `get_object_or_404`, DB-503 aus `DatabaseAvailabilityMiddleware`) enthalten keine sensiblen Handelsdaten und sind von diesem Fix nicht betroffen; die Abgrenzung ist im [Nachweis](SEC-08-cache-control-api.md) dokumentiert.
+
+**Nachweis:** 9 Regressionstests in `trading/tests/test_cache_control.py`; Quellcode- und Header-Prüfungen vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](SEC-08-cache-control-api.md).
 
 ---
 
@@ -641,7 +647,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [ ] ALLOWED_HOSTS ohne Wildcard
 - [x] CSRF_COOKIE_HTTPONLY = True
 - [ ] CSP-Header implementiert
-- [ ] Cache-Control für API-Endpunkte
+- [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](SEC-08-cache-control-api.md))
 - [ ] Error-Messages ohne technische Details
 - [ ] Docker-Passwörter ohne Defaults
 - [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))

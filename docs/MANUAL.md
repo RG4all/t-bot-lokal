@@ -305,6 +305,8 @@ Die vorhandenen API-URLs und Nutzdatenformate bleiben in 2.4.4 unverändert. Ohn
 
 `POST /gate/`, `/login/`, `/register/` und `/admin/login/` teilen ein prozesslokales Limit von fünf POSTs je IP in 15 Minuten, auch für erfolgreiche POSTs. Der nächste POST liefert `429` mit `Retry-After: 900`. Hinter Proxys `RATE_LIMIT_TRUSTED_PROXIES` korrekt setzen; mehrere Web-Prozesse brauchen zusätzlich ein gemeinsames Limit. Siehe [Deployment-Anleitung](https://github.com/RG4all/t-bot-lokal/blob/tbot.local/docs/README.md).
 
+Alle JSON-API-Endpunkte unter `/api/…` senden seit 2.4.8 die Header `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache`. Browser und zwischengeschaltete Proxies/CDNs speichern die benutzerbezogenen Handels-, Portfolio-, Log- und Marktdaten damit nicht zwischen.
+
 ## 12. Fehler-Log und Betrieb
 
 Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Technische Details enthalten Exchange, Markt, Symbol und Retry-Informationen. Gelöste Einträge können als erledigt markiert werden.
@@ -364,4 +366,5 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 - Paper Trading simuliert Ausführungen – keine Garantie für reale Marktausführungen.
 - Alle bearbeitbaren Felder vor dem Bot-Start per Info-Hover (ⓘ) und Backtest prüfen.
 - Regelmäßige Backups der Datenbank durchführen.
+- Die JSON-API-Endpunkte liefern no-cache-Header (`Cache-Control`/`Pragma`), damit keine Handelsdaten zwischengespeichert werden; ein vorgeschalteter Reverse-Proxy/CDN muss dies bei Bedarf zusätzlich absichern.
 
