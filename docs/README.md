@@ -4,7 +4,7 @@ Django-/Channels-Anwendung für **Paper Trading**, Marktvisualisierung und param
 
 Binance-Kurse laufen über einen persistenten kombinierten WebSocket-Stream (kein REST-Polling/Request-Weight). BitMart Spot nutzt die aktuelle V3-Public-API; Bitunix Spot/Futures ist über öffentliche, defensiv gedrosselte Adapter integriert. Beim Speichern und Aktivieren werden alle Symbole live geprüft. Das Dashboard bietet paginierte Logs, PDF/HTML/CSV-Reports und einen doppelt bestätigten Kill-Switch.
 
-Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: **2.4.11** ([`VERSION`](../VERSION)). Security-Review mit Befunden und Prüfgrenzen: [`SECURITY_REVIEW_2.4.4.md`](SECURITY_REVIEW_2.4.4.md).
+Ausführliche Bedienung, Indikatorformeln und Betriebsanweisungen stehen in [`MANUAL.md`](MANUAL.md) und werden in der App unter `/help/` angezeigt. Das eigenständige, ausführliche Backtesting-Kapitel steht in [`backtesting.md`](backtesting.md). Die lokale Docker-Umgebung ist in [`LOCAL_DEVELOPMENT.md`](LOCAL_DEVELOPMENT.md) dokumentiert; das Review steht in [`LOCAL_SETUP_PEER_REVIEW.md`](LOCAL_SETUP_PEER_REVIEW.md). Die Backtesting-Machbarkeitsstudie mit Architekturdiagramm und Lastmessung steht in [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md); [`render.worker.example.yaml`](../render.worker.example.yaml) ist die optionale Worker-Vorlage. Versionshistorie: [`CHANGELOG.md`](CHANGELOG.md). Aktuelle Version: **2.4.12** ([`VERSION`](../VERSION)). Security-Review mit Befunden und Prüfgrenzen: [`SECURITY_REVIEW_2.4.4.md`](SECURITY_REVIEW_2.4.4.md).
 
 ## Docker Compose (empfohlen)
 
@@ -111,7 +111,7 @@ Das Setup speichert neue App-Secrets in `.env.local` statt sie zu loggen; besteh
 
 ## Qualitätssicherung
 
-Für Release 2.4.11 wurden die folgenden QA-Kommandos lokal ausgeführt. Im Repository ist kein GitHub-Actions-Anwendungstestworkflow versioniert; die Auslieferung erfolgt auf Basis ausdrücklich akzeptierter lokaler Prüfnachweise. Die Dependency-Graph-Integration allein ersetzt keine Anwendungstests. Testergebnisse, die genehmigte CI-Ausnahme und Prüfgrenzen stehen in den Nachweisen [SEC-10](SEC-10-information-disclosure.md) und [SEC-12](SEC-12-docker-default-passwords.md).
+Für Release 2.4.12 wurden die folgenden QA-Kommandos lokal ausgeführt. Im Repository ist kein GitHub-Actions-Anwendungstestworkflow versioniert; die Auslieferung erfolgt auf Basis ausdrücklich akzeptierter lokaler Prüfnachweise. Die Dependency-Graph-Integration allein ersetzt keine Anwendungstests. Testergebnisse, die genehmigte CI-Ausnahme und Prüfgrenzen stehen in den Nachweisen [SEC-10](SEC-10-information-disclosure.md), [SEC-12](SEC-12-docker-default-passwords.md) und [BUG-12](BUG-12-race-condition-bot-start-stop.md).
 
 ```bash
 # Shell-Skripte linten und Test-Suite ausfuehren
@@ -128,7 +128,7 @@ python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test --noinput
 # Gezielte Security-Regressionen einschließlich SEC-05 und SEC-10:
-python manage.py test trading.tests.test_content_type_nosniff trading.tests.test_csrf_cookie trading.tests.test_session_invalidate trading.tests.test_cache_control trading.tests.test_permissions_policy trading.tests.test_error_disclosure --noinput
+python manage.py test trading.tests.test_content_type_nosniff trading.tests.test_csrf_cookie trading.tests.test_session_invalidate trading.tests.test_cache_control trading.tests.test_permissions_policy trading.tests.test_error_disclosure trading.tests.test_bot_start_stop --noinput
 python manage.py collectstatic --noinput
 python -m pip check
 pip-audit -r requirements.txt   # wenn pip-audit installiert ist
@@ -174,6 +174,7 @@ pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 - **`Permissions-Policy` (ab 2.4.9):** Die Middleware `PermissionsPolicyMiddleware` (direkt nach der `SecurityMiddleware`) setzt `Permissions-Policy: camera=(), microphone=(), geolocation=()` aus der zentralen Einstellung `SECURE_PERMISSIONS_POLICY`. Kamera, Mikrofon und Geolokation sind damit für alle Origins deaktiviert – auch auf Fehler-, Redirect- und WhiteNoise-Antworten. Details: [SEC-09](SEC-09-permissions-policy.md).
 - **Fehlermeldungen (ab 2.4.10):** Bot-Aktionen, Marktdaten-/Worker-APIs, Konfigurationsformulare und Reports geben keine technischen Exception-Texte mehr aus. Diagnosen werden mit Traceback serverseitig geloggt. Im Fehler-Log sehen normale Konten generische Einträge mit Referenz; technische Details benötigen zusätzlich zur Eigentümerschaft `is_staff`. Bereits gespeicherte Fehler sind ebenfalls geschützt. Details: [SEC-10](SEC-10-information-disclosure.md).
 - **Keine Standard-Passwörter im Compose-Setup (ab 2.4.11):** `docker-compose.yml` interpoliert `SECRET_KEY`, `PASSPHRASE` und `POSTGRES_PASSWORD` ausschließlich als Pflichtwerte (`${VAR:?...}`); ohne gesetzte Secrets bricht der Start ab. Das lokale DB-Passwort erzeugt `scripts/setup_local.sh` zufällig und privat (`.env.local`, Modus 0600) und bewahrt es beim Retuning; der frühere öffentliche DB-Standard existiert nicht mehr. Details: [SEC-12](SEC-12-docker-default-passwords.md).
+- **Thread-sicherer Bot-Start/Stop (ab 2.4.12):** `TradingBotManager` trennt die lock-freie interne Laufzustandsprüfung von der öffentlichen API. `start_bot`/`stop_bot` erwerben den Manager-Lock nicht mehr verschachtelt; gleichzeitige Activate- und Status-Aufrufe starten keinen zweiten Thread für dieselbe Konfiguration. Details: [BUG-12](BUG-12-race-condition-bot-start-stop.md).
 - `ALLOWED_HOSTS` enthält keinen Wildcard-Eintrag – auch im DEBUG-Modus werden nur explizite lokale Hosts akzeptiert (Schutz gegen Host-Header-Injection).
 - Konfigurationen, Logs, Backtests, PDFs und WebSockets sind benutzerbezogen autorisiert. Gate-Freigaben sind HMAC-gebunden an die aktuelle Passphrase und den privaten Signierschlüssel; alte boolesche Gate-Cookies werden beim Upgrade abgelehnt. WebSockets prüfen bei Verbindungsaufbau sowohl Gate als auch Eigentümerschaft.
 - API-Schlüssel werden **niemals** in der Datenbank gespeichert. Sie werden beim Container-Start als Umgebungsvariablen (`EXCHANGE_API_KEY`, `EXCHANGE_SECRET_KEY`) injiziert und existieren nur im Arbeitsspeicher des laufenden Prozesses. Für Live-Handel Umgebungsvariablen in `docker-compose.yml` oder über Render Secrets setzen.

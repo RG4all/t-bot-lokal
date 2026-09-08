@@ -800,18 +800,35 @@ class TradingBotManager:
             if self.bots.get(config_id) is bot:
                 self.bots.pop(config_id, None)
 
+    def _is_running_unlocked(self, config_id):
+        """Interne Prüfung ob ein Bot läuft – ohne Lock-Acquisition.
+
+        Nur von Methoden aufrufen, die bereits ``self._lock`` halten.
+        Vermeidet verschachtelte Lock-Acquisition (Deadlock bei ``Lock``,
+        Code-Smell bei ``RLock``) und räumt beendete Threads atomar ab.
+        """
+        bot = self.bots.get(config_id)
+        if bot and bot.is_alive():
+            return True
+        if bot:
+            # Bot-Referenz entfernen wenn der Thread bereits beendet ist.
+            self.bots.pop(config_id, None)
+        return False
+
     def is_running(self, config_id):
+        """Öffentliche, thread-sichere Prüfung ob ein Bot läuft."""
         with self._lock:
-            bot = self.bots.get(config_id)
-            if bot and bot.is_alive():
-                return True
-            if bot:
-                self.bots.pop(config_id, None)
-            return False
+            return self._is_running_unlocked(config_id)
 
     def start_bot(self, config):
+        """Startet einen TradingBot für die gegebene Konfiguration.
+
+        Thread-sicher: Prüft unter dem Lock, ob bereits ein Bot läuft,
+        und startet sonst genau einen neuen Thread. Die Prüfung nutzt
+        ``_is_running_unlocked``, damit der Lock nicht erneut erworben wird.
+        """
         with self._lock:
-            if self.is_running(config.id):
+            if self._is_running_unlocked(config.id):
                 return self.bots[config.id]
             bot = TradingBot(config, on_exit=self._forget)
             self.bots[config.id] = bot
@@ -819,9 +836,17 @@ class TradingBotManager:
             return bot
 
     def stop_bot(self, config):
+        """Stoppt den TradingBot für die gegebene Konfiguration.
+
+        Thread-sicher: Tote Referenzen werden unter dem Lock verworfen;
+        ein lebender Bot wird außerhalb des Locks gestoppt, damit Join
+        den Manager nicht blockiert.
+        """
         config_id = config.id if hasattr(config, "id") else int(config)
+        bot = None
         with self._lock:
-            bot = self.bots.get(config_id)
+            if self._is_running_unlocked(config_id):
+                bot = self.bots.get(config_id)
         if bot:
             bot.stop()
             threading.Thread(

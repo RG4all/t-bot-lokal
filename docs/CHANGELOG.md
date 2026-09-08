@@ -2,6 +2,24 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.12] – 2026-09-08
+
+### Bug-Fixes
+
+- **Race Condition beim Bot-Start/Stop behoben:** `TradingBotManager.start_bot()` rief unter gehaltenem Manager-Lock die öffentliche Methode `is_running()` auf, die denselben Lock intern erneut erwarb. Mit `threading.RLock` entstand kein Deadlock, aber die verschachtelte Acquisition war fehleranfällig (echter Deadlock bei einem nicht-reentranten Lock) und unnötig. Neu ist `_is_running_unlocked()` als lock-freie interne Prüfung; `is_running()`, `start_bot()` und `stop_bot()` nutzen sie unter genau einem Lock. Tote Thread-Referenzen werden atomar entfernt, statt einen zweiten Paper-Bot für dieselbe Konfiguration zu starten.
+- Externe Aufrufer (Views, Status-API) bleiben bei der öffentlichen, lockenden `is_running()`-API. Keine neue Runtime-Abhängigkeit, keine Migration, keine API-Änderung.
+
+### Tests und Qualitätssicherung
+
+- Neu `trading/tests/test_bot_start_stop.py` (16 Tests) plus eine Quellcode-Prüfung in `TradingBotTests`: Lock-Trennung, Verschachtelungstiefe 1, Deadlock-Negativkontrolle mit `threading.Lock`, gleichzeitige Starts derselben und verschiedener Konfigurationen, Aufräumen beendeter Threads. **Rot → grün:** 7 Tests schlugen am Ausgangsstand fehl (fehlender Helper, `max_depth == 2`, Deadlock auf nicht-reentrantem Lock).
+- **227 Django-/Python-Tests** (17 neue + 210 bestehende), **8/8 Shell-Testgruppen**, Ruff, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` bestanden.
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.12** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
+- Audit §3.1 und Prompt 12 sind **Fixed**; [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md) ergänzt.
+- Keine neuen Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf 2.4.12 prüfen; laufende Bots verhalten sich für Aufrufer unverändert, doppelte Threads derselben Konfiguration entstehen nicht mehr durch verschachtelte Lock-Prüfung.
+
 ## [2.4.11] – 2026-09-08
 
 ### Sicherheit

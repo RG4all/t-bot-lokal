@@ -658,6 +658,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Bug  
 **Betroffene Dateien:** `trading/trading_bot.py` (Zeilen 810–817)
 
+**Status: Fixed in 2.4.12.** `TradingBotManager` besitzt `_is_running_unlocked()` ohne Lock-Acquisition. Die öffentliche `is_running()` umschließt sie mit `self._lock`. `start_bot()` und `stop_bot()` rufen die unlocked-Variante unter dem bereits gehaltenen Lock auf – keine verschachtelte Lock-Acquisition mehr. Views bleiben bei der öffentlichen API. **16 Regressionstests** in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf nicht-reentrantem `Lock`). [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md), [Audit §3.1](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```

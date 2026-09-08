@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.11 · Stand 8. September 2026**
+**Version 2.4.12 · Stand 8. September 2026**
 
 [TOC]
 
