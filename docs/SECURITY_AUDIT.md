@@ -178,6 +178,8 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 **Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 30 neuen Indikator-Tests grün (279 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](CODE-18-indicator-dedup.md#sec-05-nachprüfung).
 
+**Nachprüfung 2.4.16:** Unverändert gesetzt; die 11 CSRF-Cookie-Tests und 10 nosniff-Tests laufen zusammen mit den 30 neuen Type-Hints-Tests grün (309 Tests gesamt). Ein Smoke-Test mit geladenen Produktions-/Render-Settings bestätigt `HttpOnly`+`Secure` am CSRF-Cookie und `nosniff` auf allen geprüften Pfaden. Siehe [SEC-05-/SEC-06-Nachprüfung im CODE-19-Nachweis](CODE-19-view-type-hints.md#sec-05--und-sec-06-nachprüfung).
+
 ---
 
 ### 2.6 X-Content-Type-Options: nosniff – Fixed in 2.4.6
@@ -535,11 +537,13 @@ from .indicators import calculate_trading_indicators
 
 ---
 
-### 4.4 TECHNOLOGISCHE SCHULD – Fehlende Type-Hints in Views
+### 4.4 TECHNOLOGISCHE SCHULD – Fehlende Type-Hints in Views – Fixed in 2.4.16
 
 **Datei:** `trading/views.py`
 
-Einige Funktionen haben keine vollständigen Type-Hints:
+Der historische Befund nannte „einige Funktionen"; tatsächlich enthielt die
+Datei in 1.830 Zeilen und 65 Funktionen **keine einzige** Type-Annotation und
+bis auf sechs Ausnahmen keine Docstrings:
 
 ```python
 # Aktuell:
@@ -551,7 +555,23 @@ def _portfolio_snapshot(config: Configuration) -> dict[str, Any]:
     # ...
 ```
 
-**Lösungsvorschlag:** Schrittweise Type-Hints hinzufügen, beginnend mit den Views.
+**Umgesetzt in 2.4.16:** Alle 65 Top-Level-Funktionen sind vollständig
+annotiert (Parameter und Rückgabewert), alle 39 öffentlichen Views tragen einen
+Docstring. `no_cache_json` erhält `ParamSpec`/`TypeVar` und erhält damit die
+Signatur der zehn dekorierten API-Views. Die eigentliche Root Cause – dass kein
+statischer Prüfer die Datei analysieren konnte – ist mit einem
+`[tool.mypy]`-Block in `pyproject.toml` geschlossen (Ziel `trading/views.py`,
+`mypy_django_plugin`, `django_settings_module`); mypy und django-stubs bleiben
+bewusst Entwicklungswerkzeuge außerhalb von `requirements.txt`.
+
+Beim Annotieren wurden drei latente Randpfade sichtbar und gehärtet – keiner
+war im ausgelieferten Stand erreichbar, es wird keine behobene Schwachstelle
+behauptet: 26 ORM-Filter liefen über das untypisierte `request.user`
+(`User | AnonymousUser`) und nutzen jetzt `_authenticated_user()` als zweite
+Schicht neben `@login_required`; das Passphrase-Gate weist ein leeres Secret
+explizit ab (`constant_time_compare("", "")` ist `True`); `_equity_svg`
+überspringt Punkte ohne `equity`-Wert, statt über einen `TypeError` zu laufen.
+Details, Negativkontrolle und Prüfgrenzen: [CODE-19](CODE-19-view-type-hints.md).
 
 ---
 
@@ -637,7 +657,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 | 9 | **db_restore_state async-fähig machen** | 2h | `trading_bot.py` |
 | 10 | **Indikator-Memoisierung** für Backtesting | 4h | `backtesting.py` |
 | 11 | **DB-Trim mit Batch-Delete** | 2h | `trading_bot.py` |
-| 12 | **Type-Hints für Views** ergänzen | 3h | `views.py` |
+| 12 | **Type-Hints für Views ergänzen – Fixed in 2.4.16 (§4.4)** | 3h | `views.py` |
 
 ---
 
@@ -661,7 +681,7 @@ def calculate_performance_metrics_fast(config, limit=2000):
 ### Code-Qualität
 
 - [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](CODE-18-indicator-dedup.md))
-- [ ] Type-Hints für Views
+- [x] Type-Hints für Views (ab 2.4.16, siehe §4.4 und [CODE-19](CODE-19-view-type-hints.md))
 - [ ] `__all__` für Trading-Modul
 - [ ] db_restore_state async-fähig
 - [ ] Bot-Start/Stop Race-Condition behoben

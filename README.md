@@ -2,7 +2,7 @@
 
 Django-/Channels-Anwendung für Krypto-**Paper Trading**, Marktdaten und Backtests. Orders werden simuliert, nicht an eine Börse gesendet.
 
-Aktuelle Version: **2.4.15** ([`VERSION`](VERSION)).
+Aktuelle Version: **2.4.16** ([`VERSION`](VERSION)).
 
 ## Lokal starten
 
@@ -19,7 +19,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - Für mehrere Prozesse und stabile Sessions beide Werte explizit setzen. Eine Passphrase-Rotation macht alte Gate-Freigaben ungültig; der Gate ersetzt nicht den Benutzer-Login.
 - Das lokale Compose-Profil läuft mit `DEBUG=True` und standardmäßig ohne Gate. Es ist **kein Produktionsprofil**; vor Team-/Netzwerkzugriff den Gate einschalten und private Secrets konfigurieren.
 - **HTTP-Header (ab 2.4.6 explizit):** `SECURE_CONTENT_TYPE_NOSNIFF = True` setzt `X-Content-Type-Options: nosniff` unabhängig von DEBUG/Render. Die vorhandene `SecurityMiddleware` erfasst auch Fehlerantworten, Downloads und durch WhiteNoise ausgelieferte statische Dateien. Der Fix verlässt sich nicht mehr nur auf den Django-Default.
-- **Cookies (ab 2.4.5, zuletzt in 2.4.15 nachgeprüft):** Session- und CSRF-Cookie werden mit `HttpOnly` gesetzt und sind nicht über `document.cookie` lesbar. Das CSRF-Token wird über `{% csrf_token %}` als verstecktes Formularfeld ausgegeben und bleibt dort für Skripte derselben Origin zugänglich. `HttpOnly` ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz.
+- **Cookies (ab 2.4.5, zuletzt in 2.4.16 nachgeprüft):** Session- und CSRF-Cookie werden mit `HttpOnly` gesetzt und sind nicht über `document.cookie` lesbar. Das CSRF-Token wird über `{% csrf_token %}` als verstecktes Formularfeld ausgegeben und bleibt dort für Skripte derselben Origin zugänglich. `HttpOnly` ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz.
 - **Session-Lebensdauer und Logout-Invalidierung (ab 2.4.7):** Die Session-Cookie-Lebensdauer ist auf 8 Stunden beschränkt und läuft ab, wenn der Browser geschlossen wird (`SESSION_EXPIRE_AT_BROWSER_CLOSE = True`). POST `/logout/` ruft `request.session.flush()` auf, sodass alle Session-Daten unmittelbar ungültig werden und der Session-Key rotiert. Details: [SEC-07](docs/SEC-07-session-lifetime-invalidation.md).
 - **Cache-Control für API-Endpunkte (ab 2.4.8):** Alle JSON-API-Endpunkte (`/api/...`) setzen `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache`. Browser und Proxies/CDNs speichern damit keine benutzerbezogenen Handels-, Portfolio-, Log- oder Marktdaten zwischen. Details: [SEC-08](docs/SEC-08-cache-control-api.md).
 - **Permissions-Policy (ab 2.4.9):** Die Middleware `PermissionsPolicyMiddleware` setzt `Permissions-Policy: camera=(), microphone=(), geolocation=()` aus `SECURE_PERMISSIONS_POLICY` – damit sind Kamera, Mikrofon und Geolokation für alle Origins deaktiviert, auch auf Fehler- und WhiteNoise-Antworten. Das Projekt benötigt diese APIs nicht. Details: [SEC-09](docs/SEC-09-permissions-policy.md).
@@ -29,6 +29,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - **CSV-Kompatibilität (ab 2.4.13):** Der Trading-CSV-Export verwendet `io.StringIO` statt eines eigenen Echo-Adapters. Der synchrone Generator puffert jeweils nur eine CSV-Zeile und schließt den Puffer auch bei Abbruch oder Fehler; Format und Eigentümerprüfung bleiben unverändert. Details und ASGI-Prüfgrenzen: [BUG-14](docs/BUG-14-csv-echo-true-stream.md).
 - **DB-Trim in Batches (ab 2.4.14):** Das Aufräumen alter DataLog-Einträge (`db_trim_datalog`) löscht in 1000er-Schritten statt in einem einzelnen DELETE über alle Alt-Einträge. Jede Charge läuft in einer eigenen kurzen Transaktion, dadurch bleiben Datenbank-Locks auch bei 20.000+ Zeilen pro Symbol kurz. Details und Prüfgrenzen: [PERF-17](docs/PERF-17-db-trim-batch-delete.md).
 - **Eine Indikatorquelle für Bot und Backtest (ab 2.4.15):** NDA, DeltaDelta und Acceleration werden ausschließlich in `trading/indicators.py` berechnet; Backtesting, Bot, Celery-Tasks und die Ressourcen-Probe delegieren dorthin. Damit kann eine Formeländerung nicht mehr nur in einem der beiden Pfade landen. Zusätzlich abgesichert: ein Index unterhalb von 2 oder außerhalb der Preisreihe liefert einen `IndexError` statt eines stillschweigend falschen Werts. Bestehende Backtest-Ergebnisse und `DataLog`-Zeilen bleiben bitgenau reproduzierbar. Details: [CODE-18](docs/CODE-18-indicator-dedup.md).
+- **Statisch geprüfte Views (ab 2.4.16):** `trading/views.py` ist vollständig typannotiert und über einen `[tool.mypy]`-Block in `pyproject.toml` reproduzierbar prüfbar (mypy und django-stubs bleiben Entwicklungswerkzeuge außerhalb von `requirements.txt`). Alle ORM-Filter laufen über `_authenticated_user()`: Fällt bei einer künftigen Änderung ein `@login_required` weg, endet der Request mit 403 statt mit einem Filter auf `AnonymousUser`. Zusätzlich gehärtet: ein leeres Gate-Secret erzeugt keine Freigabe mehr, und defekte Equity-Punkte kippen die Reportausgabe nicht. Es wird keine behobene Schwachstelle behauptet – alle drei Pfade waren im ausgelieferten Stand nicht erreichbar. Details und Prüfgrenzen: [CODE-19](docs/CODE-19-view-type-hints.md).
 
 ## Dokumentation
 
@@ -36,7 +37,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [Lokales Docker-Setup](docs/LOCAL_DEVELOPMENT.md) · [FAQ und Secret-Rotation](docs/FAQ.md)
 - [Benutzerhandbuch und API-Endpunkte](docs/MANUAL.md) · [Backtesting](docs/backtesting.md)
 - [Security-Review 2.4.4, Befunde und Prüfgrenzen](docs/SECURITY_REVIEW_2.4.4.md)
-- [SEC-06: nosniff-Fix und SEC-05-Nachprüfung](docs/SEC-06-rule-lifecycle-authz.md)
+- [SEC-06: nosniff-Fix sowie SEC-05-/SEC-06-Nachprüfung](docs/SEC-06-rule-lifecycle-authz.md)
 - [SEC-07: Session-Lifetime- und Logout-Invalidierung](docs/SEC-07-session-lifetime-invalidation.md)
 - [SEC-08: Cache-Control-Header für API-Endpunkte](docs/SEC-08-cache-control-api.md)
 - [SEC-09: Permissions-Policy-Header](docs/SEC-09-permissions-policy.md)
@@ -44,4 +45,5 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - [SEC-12: Keine Standard-Passwörter im Compose-Setup](docs/SEC-12-docker-default-passwords.md)
 - [PERF-17: Batch-Delete für den DataLog-Trim](docs/PERF-17-db-trim-batch-delete.md)
 - [CODE-18: Gemeinsame Indikatorberechnung für Bot und Backtest](docs/CODE-18-indicator-dedup.md)
+- [CODE-19: Type-Hints und Docstrings der Views](docs/CODE-19-view-type-hints.md)
 - [Changelog](docs/CHANGELOG.md) · [Aktuelle Version](VERSION)
