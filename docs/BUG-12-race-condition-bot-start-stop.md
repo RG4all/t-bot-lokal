@@ -5,7 +5,7 @@
 - **Release:** **2.4.12** · **Datum:** 2026-09-08
 - **Einstufung:** MEDIUM – Bug (Nebenläufigkeit / Integrität des Paper-Bots)
 - **Geprüfter Ausgangsstand:** 2.4.11 / `3e6ea9cd68c78d3306558c5bc55b6f698aa24818`
-- **Fix-Commit:** siehe zugehörigen PR-Commit `fix(bot): resolve race condition in bot start/stop`
+- **Fix-Commit:** [`5b32b4f` – `fix(bot): resolve race condition in bot start/stop`](https://github.com/RG4all/t-bot-lokal/commit/5b32b4f)
 
 ## Befund und Root Cause
 
