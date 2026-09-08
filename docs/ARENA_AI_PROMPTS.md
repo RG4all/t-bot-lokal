@@ -1,6 +1,6 @@
 # Arena.ai Agent Prompts – t-bot-lokal Security Audit
 
-Generiert am: 07. September 2026  
+Generiert am: 07. September 2026 · Statusstand: 08. September 2026 (Release 2.4.19)  
 Basiert auf: SECURITY_AUDIT.md  
 Jeder Prompt ist eigenständig und PR-ready.
 
@@ -11,6 +11,8 @@ Jeder Prompt ist eigenständig und PR-ready.
 **Prompt-Titel:** `[NoRateLimiting] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading/views.py` (Zeilen 250–306), `trading/middleware.py`
+
+**Status: Fixed in 2.4.1.** Die eigene Middleware `RateLimitMiddleware` in `trading/rate_limit.py` begrenzt Auth-POSTs auf `/login/`, `/gate/`, `/register/` und `/admin/login/` auf **5 Versuche pro IP und 15 Minuten pro Web-Prozess** – inklusive erfolgreicher POSTs (atomare Reservierung unter `threading.Lock`, begrenzter Speicher für 10.000 IPs). Bei Überschreitung antwortet sie mit HTTP 429 und `Retry-After`. Forwarded-Header werden nur über die explizite Allowlist `RATE_LIMIT_TRUSTED_PROXIES` (CIDR-Netze) vertraut; ohne Allowlist zählt `REMOTE_ADDR`. Registriert ist sie in `MIDDLEWARE` (`trading.rate_limit.RateLimitMiddleware`). **11 Regressionstests** in `trading/tests/test_rate_limit.py` (Limit, Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs, Integration). Hinweis: Der historische Vorschlag platzierte die Middleware in `trading/middleware.py`; umgesetzt wurde ein eigenes Modul mit Proxy-Allowlist. Siehe [Changelog 2.4.1](CHANGELOG.md#241--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -128,6 +130,8 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 61, 71–72)
 
+**Status: Fixed in 2.4.2.** Der DEBUG-Pfad `ALLOWED_HOSTS.append("*")` ist entfernt; es gilt eine explizite Liste lokaler Hosts (`localhost`, `127.0.0.1`, `tbot.local`, `[::1]`), ergänzt um `RENDER_EXTERNAL_HOSTNAME` auf Render sowie optional `DJANGO_ALLOWED_HOSTS`. Ein Quellcode-Scan stellt sicher, dass `"*"` nirgends (auch nicht bedingt) ergänzt wird. **6 Regressionstests** in `trading/tests/test_settings.py` prüfen das Fehlen des Wildcards, die vorhandenen lokalen Hosts und den Source-Scan. Siehe [Changelog 2.4.2](CHANGELOG.md#242--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+
 ### Der vollständige Arena.ai Agenten-Prompt
 
 ```
@@ -180,6 +184,8 @@ VALIDIERUNGSKRITERIEN:
 **Prompt-Titel:** `[NoCSPHeader] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`, `requirements.txt`
+
+**Status: Fixed in 2.4.3.** `django-csp==3.8` ist in `requirements.txt`; die App `csp` und `csp.middleware.CSPMiddleware` sind in `settings.py` registriert (nach der `SecurityMiddleware`). Die neun CSP-Direktiven sind strikt auf lokale Ressourcen ausgerichtet; Skripte kommen nur von `'self'` – ohne `unsafe-inline`, dafür mit frischer Request-Nonce (`CSP_INCLUDE_NONCE_IN = ("script-src",)`) für markierte Template-Skripte. Externe Domains (auch CDNs) sind nicht erlaubt – das weicht bewusst vom historischen Vorschlag ab, der `https://cdn.plot.ly` in `CSP_SCRIPT_SRC` vorsah; alle Assets liegen lokal unter `/static/`. **12 Regressionstests** in `trading/tests/test_csp.py` prüfen Einstellungen, präsente CSP-Header und das Fehlen externer Domains. Siehe [Changelog 2.4.3](CHANGELOG.md#243--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -1693,7 +1699,7 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "perf(views): optimize info_api with DB aggregation"
 ```
 
-**Status: Fixed in 2.4.18.** `info_api` berechnet die Performance-Kennzahlen seit 2.4.18 über `_calculate_metrics_from_db()` direkt im DBMS (`aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern) statt aller Logs in Python. Die Skalarmathematik läuft bewusst in Python, weil eine reine `Sum(...) / Count(...)`-Division auf PostgreSQL als Ganzzahldivision falsche Werte liefern würde; das Ergebnis bleibt so backend-unabhängig und bitgenau zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`) und API-Antwort sind unverändert. Details, Testnachweis (Rot→Grün) und Prüfgrenzen: [PERF-21](PERF-21-info-api-db-aggregation.md); Release-Nachweis: [CHANGELOG.md](CHANGELOG.md#242418--2026-09-08).
+**Status: Fixed in 2.4.18.** `info_api` berechnet die Performance-Kennzahlen seit 2.4.18 über `_calculate_metrics_from_db()` direkt im DBMS (`aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern) statt aller Logs in Python. Die Skalarmathematik läuft bewusst in Python, weil eine reine `Sum(...) / Count(...)`-Division auf PostgreSQL als Ganzzahldivision falsche Werte liefern würde; das Ergebnis bleibt so backend-unabhängig und bitgenau zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`) und API-Antwort sind unverändert. Details, Testnachweis (Rot→Grün) und Prüfgrenzen: [PERF-21](PERF-21-info-api-db-aggregation.md); Release-Nachweis: [CHANGELOG.md](CHANGELOG.md#2418--2026-09-08).
 
 ---
 
@@ -1701,23 +1707,23 @@ VALIDIERUNGSKRITERIEN:
 
 | # | Prompt-Titel | Severity | Kategorie | Aufwand |
 |---|--------------|----------|-----------|---------|
-| 1 | NoRateLimiting | HIGH | Security | 2h |
-| 2 | AllowedHostsWildcard | HIGH | Security | 30min |
-| 3 | NoCSPHeader | HIGH | Security | 3h |
-| 4 | HardcodedPassphrase | MEDIUM | Security | 30min |
-| 5 | MissingCSRFCookieHttpOnly | MEDIUM | Security | 5min |
-| 6 | MissingContentTypeNosniff | MEDIUM | Security | 5min |
-| 7 | SessionInvalidateMissing | MEDIUM | Security | 1h |
-| 8 | MissingCacheControlAPI | MEDIUM | Security | 2h |
-| 9 | MissingPermissionsPolicy | LOW | Security | 30min |
-| 10 | InformationDisclosureErrors | LOW | Security | 30min |
-| 11 | DockerDefaultPasswords | LOW | Security | 15min |
-| 12 | RaceConditionBotStartStop | MEDIUM | Bug | 2h |
+| 1 | NoRateLimiting | HIGH | Security | 2h ✅ 2.4.1 |
+| 2 | AllowedHostsWildcard | HIGH | Security | 30min ✅ 2.4.2 |
+| 3 | NoCSPHeader | HIGH | Security | 3h ✅ 2.4.3 |
+| 4 | HardcodedPassphrase | MEDIUM | Security | 30min ✅ 2.4.4 |
+| 5 | MissingCSRFCookieHttpOnly | MEDIUM | Security | 5min ✅ 2.4.5 |
+| 6 | MissingContentTypeNosniff | MEDIUM | Security | 5min ✅ 2.4.6 |
+| 7 | SessionInvalidateMissing | MEDIUM | Security | 1h ✅ 2.4.7 |
+| 8 | MissingCacheControlAPI | MEDIUM | Security | 2h ✅ 2.4.8 |
+| 9 | MissingPermissionsPolicy | LOW | Security | 30min ✅ 2.4.9 |
+| 10 | InformationDisclosureErrors | LOW | Security | 30min ✅ 2.4.10 |
+| 11 | DockerDefaultPasswords | LOW | Security | 15min ✅ 2.4.11 |
+| 12 | RaceConditionBotStartStop | MEDIUM | Bug | 2h ✅ 2.4.12 |
 | 13 | DbRestoreStateSync | MEDIUM | Bug | 2h |
-| 14 | CsvEchoNotTrueStream | LOW | Bug | 30min |
+| 14 | CsvEchoNotTrueStream | LOW | Bug | 30min ✅ 2.4.13 |
 | 15 | ConfigIdValidation | LOW | Bug | 15min |
 | 16 | IndicatorMemoization | MEDIUM | Performance | 3h |
-| 17 | DbTrimBatchDelete | MEDIUM | Performance | 2h |
+| 17 | DbTrimBatchDelete | MEDIUM | Performance | 2h ✅ 2.4.14 |
 | 18 | DuplicatedIndicatorLogic | MEDIUM | Code Quality | 3h ✅ 2.4.15 |
 | 19 | MissingTypeHintsViews | LOW | Tech Debt | 2h ✅ 2.4.16 |
 | 20 | MissingAllExports | LOW | Tech Debt | 30min ✅ 2.4.17 |

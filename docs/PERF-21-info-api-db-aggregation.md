@@ -112,7 +112,7 @@ ist über den ast-basierten Type-Hint-Test (`test_view_type_hints`) erfüllt, de
 versioniert. Für dieses Release wurde die Auslieferung mit erfolgreichen lokalen
 Prüfnachweisen ausdrücklich freigegeben. Die Dependency-Graph-Integration allein
 ersetzt keine Anwendungstests. Testergebnisse, Negativkontrolle und Prüfgrenzen:
-siehe oben und [CHANGELOG.md](CHANGELOG.md#242418--2026-09-08).
+siehe oben und [CHANGELOG.md](CHANGELOG.md#2418--2026-09-08).
 
 **Prüfgrenze:** Die Equity-/Kassenkurve lädt weiterhin die einzelnen Zeilen des
 Fensters (sie lässt sich nicht sinnvoll als reine SQL-Aggregation bilden); die

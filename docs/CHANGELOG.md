@@ -2,6 +2,17 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.19] – 2026-09-08
+
+### Dokumentation und Konsistenz
+
+- **Reines Dokumentations-Release:** Der Code-Stand ist unverändert zu 2.4.18 (330 Django-/Python-Tests). Zentrale `VERSION` auf **2.4.19** erhöht; Root-/docs-README, Handbuch, lokale Versionsangabe und der Konfigurationsstand aktualisiert. `/health/` meldet ab diesem Release **2.4.19**.
+- **Audit-Status in `SECURITY_AUDIT.md` nachgezogen:** Die Abschnitte §2.1 (Rate-Limiting), §2.2 (ALLOWED_HOSTS-Wildcard) und §2.3 (CSP) waren als offene Befunde formuliert, obwohl die Umsetzungen bereits in **2.4.1–2.4.3** ausgeliefert wurden – die Audit-Datei entstand am selben Tag wie diese Fixes und wurde seither nur für jüngere Releases gepflegt. Sie tragen jetzt denselben Statusaufbau wie die übrigen Abschnitte („Fixed in X.Y.Z“ mit Umgesetzt-/Nachweis-Block, historischer Befund bleibt nachvollziehbar). Ebenfalls ergänzt: **§4.6 „Fixed in 2.4.18“** mit Verweis auf [PERF-21](PERF-21-info-api-db-aggregation.md) und [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26) – PR #26 hatte den Changelog, aber nicht die Audit-Datei aktualisiert. Kopfzeile §2.5 nennt jetzt korrekt die letzte Nachprüfung in 2.4.16 (der Absatz dazu stand bereits im Text).
+- **Empfehlungs- und Checklisten-Status in `SECURITY_AUDIT.md` vervollständigt:** §5-Tabelle markiert die inzwischen umgesetzten Maßnahmen 1–3, 5, 6 und 12 mit Release-Bezug und ergänzt Zeile 14 für §4.6; die Komplett-Checkliste (§6) hakt Rate-Limiting, ALLOWED_HOSTS, CSP, Race-Condition, CSV-Export, HSTS-Produktionskonfiguration und DB-Aggregation ab (inkl. Doppeleintrag Cache-Control bereinigt).
+- **Prompt-Status in `ARENA_AI_PROMPTS.md` ergänzt:** Die Prompts 1–3 erhalten Statusblöcke (Fixed in 2.4.1/2.4.2/2.4.3 mit Verweisen auf [Changelog](CHANGELOG.md), Testdateien und Umsetzungsabweichungen); die Zusammenfassungstabelle markiert alle umgesetzten Prompts 1–12, 14, 17–21 einheitlich mit ✅-Release. Der fehlerhafte Changelog-Anker `#242418--2026-09-08` (Prompts-Datei und PERF-21-Nachweis) ist zu `#2418--2026-09-08` korrigiert.
+- **READMEs vervollständigt:** Root-`README.md` und `docs/README.md` enthalten jetzt den fehlenden Versions-Bullet für 2.4.18 (info_api-Kennzahlen per DB-Aggregation, [PERF-21](PERF-21-info-api-db-aggregation.md)); das Root-README verlinkt das PERF-21-Finding in der Dokumentationsliste, `docs/README.md` nimmt die neuen Regressionstest-Module `test_module_exports` (2.4.17) und `test_info_api_metrics` (2.4.18) in den gezielten Testbefehl auf.
+- Keine Code-, Settings-, Modell- oder Migrationsänderung, keine neuen Umgebungsvariablen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig; nach dem Deploy `/health/` auf **2.4.19** prüfen. Auslieferung über [PR #27](https://github.com/RG4all/t-bot-lokal/pull/27).
+
 ## [2.4.18] – 2026-09-08
 
 ### Wartung und Code-Qualität
