@@ -7,6 +7,7 @@
   Härtungen sind unten getrennt ausgewiesen und keine nachgewiesenen Exploits)
 - **Geprüfter Ausgangsstand:** 2.4.15 / `3c6eec2898ac0246ecd5a3ef5402c7765c14d47f`
 - **Fix-Commit:** [`8089c34`](https://github.com/RG4all/t-bot-lokal/commit/8089c34a0d70d68784a2cf7570b61c67277f3739) – `refactor(views): add type hints and docstrings`
+- **Fix-PR:** [#24 – refactor(views): add type hints and docstrings](https://github.com/RG4all/t-bot-lokal/pull/24) (Ziel-Branch `tbot.local`)
 - **Dokumentation des Releases:** [CHANGELOG 2.4.16](CHANGELOG.md#2416--2026-09-08)
 
 ## Befund und Root Cause
@@ -236,11 +237,14 @@ Die einzige dynamische Integration ist **Dependency Graph**
 **ersetzt keine Anwendungstests**.
 
 Es wird **kein erfolgreicher GitHub-CI-Lauf behauptet.** Alle Nachweise sind die
-oben dokumentierten lokalen Läufe. Der Stand der Check-Runs wurde nach dem Push
-geprüft und ist im PR vermerkt.
+oben dokumentierten lokalen Läufe. Nach dem Push wurde der Stand geprüft: für
+den HEAD-Commit sind **0 Check-Runs** gemeldet (`gh pr checks #24` → „no checks
+reported", `check-runs` = 0, `gh run list --branch` leer), weil kein
+Anwendungstest-Workflow existiert.
 
-Auslieferung auf `arena/01a081dc-t-bot-lokal`; der PR richtet sich an
-`tbot.local`.
+Auslieferung auf `arena/01a081dc-t-bot-lokal`;
+[PR #24](https://github.com/RG4all/t-bot-lokal/pull/24) richtet sich an
+`tbot.local` und ist zum Zeitpunkt dieses Eintrags `OPEN` und `MERGEABLE`.
 
 ## Prüfgrenzen und Upgrade
 
