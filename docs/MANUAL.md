@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.12 · Stand 8. September 2026**
+**Version 2.4.13 · Stand 8. September 2026**
 
 [TOC]
 
@@ -240,7 +240,7 @@ Im Dashboard stehen drei Exportformate bereit:
 
 - **PDF**: Druckbarer Gesamtbericht mit Konfiguration, Cash, Equity, offenen Positionen, Kennzahlen, Trading-Log und eingebetteten Diagrammen.
 - **HTML**: Eigenständige Reportdatei für Offline-Betrachtung im Browser.
-- **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation.
+- **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation. Die zwölf Spalten und die chronologische Reihenfolge (Zeitstempel, dann ID) bleiben unverändert. Ab 2.4.13 erzeugt ein wiederverwendeter `io.StringIO`-Zeilenpuffer das CSV; Sonderzeichen und eingebettete Zeilenumbrüche werden weiterhin durch `csv.writer` maskiert. [Technische Details und Streaming-Prüfgrenzen](BUG-14-csv-echo-true-stream.md).
 
 Dateinamenschema: `username_exchange_config-id_YYYYMMDD_HHMMSS.ext` (z. B. `anna_binance_5_20260820_184501.pdf`).
 

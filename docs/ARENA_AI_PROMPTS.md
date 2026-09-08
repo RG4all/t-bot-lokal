@@ -873,7 +873,9 @@ VALIDIERUNGSKRITERIEN:
 
 **Prompt-Titel:** `[CsvEchoNotTrueStream] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** LOW – Bug  
-**Betroffene Dateien:** `trading/views.py` (Zeilen 1136–1138)
+**Betroffene Dateien:** `trading/views.py` (`generate_report_csv`; historische Zeilen 1136–1138)
+
+**Status: Fixed in 2.4.13.** `_CsvEcho` ist entfernt; der CSV-Generator verwendet einen wiederverwendeten `io.StringIO(newline="")`-Puffer mit `getvalue()`, `seek(0)` und `truncate(0)`. Ein Context-Manager gibt ihn auch bei Fehler oder Stream-Abbruch frei. Format, BOM, Datenbank-Batching und Zugriffsregeln bleiben unverändert. **15 Regressionstests**, fünf davon am Ausgangsstand rot, insgesamt **242 Django-/Python-Tests** grün. Einordnung: Das Echo-Muster war für `csv.writer` gültig; der Wechsel ist ein Kompatibilitäts-Refactoring, keine Behebung des separaten synchronen Iterator-Pufferns unter ASGI. [Finding mit Fix-Commit und Prüfgrenzen](BUG-14-csv-echo-true-stream.md), [Audit §3.3](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 

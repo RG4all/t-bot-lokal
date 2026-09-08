@@ -364,19 +364,17 @@ async def _restore_state(self):
 
 ---
 
-### 3.3 NIEDRIG – `_CsvEcho`-Klasse wird nicht als True-Stream erkannt
+### 3.3 NIEDRIG – CSV-Export mit Standard-Textpuffer – Fixed in 2.4.13
 
-**Datei:** `trading/views.py` (Zeilen 1136–1138)
+**Datei:** `trading/views.py` (`generate_report_csv`) · **Finding:** `CsvEchoNotTrueStream` · **Status:** Fixed
 
-```python
-class _CsvEcho:
-    def write(self, value):
-        return value
-```
+**Einordnung:** Der geprüfte Stand 2.4.12 nutzte `_CsvEcho.write()`, das den geschriebenen Text zurückgab, und reichte den Rückgabewert von `writerow()` direkt an den Response-Generator weiter. Das Echo-Muster ist mit `csv.writer` zulässig und erzeugte bereits gültiges CSV; eine ausnutzbare Sicherheitslücke oder ein allgemeiner Streaming-Defekt ist damit nicht nachgewiesen. Der Befund wird als LOW-Kompatibilitäts-Refactoring behoben.
 
-**Problem:** `csv.writer` erwartet ein `StringIO`-ähnliches Objekt mit `write()`-Methode. Die `_CsvEcho`-Klasse funktioniert, aber der `StreamingHttpResponse` gibt Zeilen als Strings zurück, die im Browser gerendert werden. Das ist korrekt implementiert, aber die `_CsvEcho`-Klasse könnte `io.StringIO`-Schnittstelle verletzen.
+**Fix:** `_CsvEcho` ist entfernt. Ein erst beim Lesen geöffneter `io.StringIO(newline="")`-Puffer wird im Generator wiederverwendet, vor jeder Datenzeile mit `seek(0)`/`truncate(0)` geleert und mit `getvalue()` ausgelesen. Der Context-Manager schließt ihn bei regulärem Ende, Fehler oder Schließen der Response. UTF-8-BOM, Spalten, Sortierung, `iterator(chunk_size=1000)`, Download-Header und Eigentümerprüfung bleiben unverändert.
 
-**Keine kritische Auswirkung** – funktioniert in der Praxis.
+**Nachweis:** 15 neue Regressionstests in `trading/tests/test_report_csv.py`; fünf davon am Ausgangsstand rot (sieben fehlgeschlagene Assertions), nach dem Fix grün. Insgesamt 242 Django-/Python-Tests bestanden. Gezielte Negativkontrollen erkennen fehlendes Zurücksetzen, Kürzen und Schließen des Puffers. [Finding mit Fix-Commit, CI-Freigabe und Prüfgrenzen](BUG-14-csv-echo-true-stream.md).
+
+**Streaming-Grenze:** Der Generator bleibt synchron. Unter Django/ASGI kann er weiterhin vollständig konsumiert werden; dieses Refactoring ist kein End-to-End-True-Streaming-Fix für Daphne oder vorgeschaltete Proxies.
 
 ---
 
