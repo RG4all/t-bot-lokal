@@ -660,7 +660,9 @@ class ViewSecurityTests(TestCase):
             message="Fremder Fehler",
         )
         response = self.client.get(reverse("error_log"))
-        self.assertContains(response, "Eigener Fehler")
+        self.assertEqual(list(response.context["errors"]), [own_error])
+        self.assertContains(response, f"Referenz #{own_error.id}")
+        self.assertNotContains(response, "Eigener Fehler")
         self.assertNotContains(response, "Fremder Fehler")
         response = self.client.post(reverse("error_log_resolve", args=[own_error.id]))
         self.assertRedirects(response, reverse("error_log"))

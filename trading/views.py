@@ -17,6 +17,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import Sum
 from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -63,6 +64,35 @@ _MANUAL_RENDER_LOCK = threading.Lock()
 _MANUAL_HTML = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
+
+# Exception-Texte sind nicht vertrauenswürdig und können interne Details enthalten.
+# Flash-/HTTP-Antworten verwenden feste Meldungen; Diagnosen bleiben in den Logs.
+_BOT_START_ERROR = "Bot konnte nicht gestartet werden. Siehe Fehler-Log für Details."
+_SELL_ERROR = "Verkauf fehlgeschlagen. Siehe Fehler-Log für Details."
+_KILL_SWITCH_ERROR = "Kill-Switch fehlgeschlagen. Siehe Fehler-Log für Details."
+_SCANNER_ERROR = "Marktscanner vorübergehend nicht verfügbar. Bitte später erneut versuchen."
+_REPORT_ERROR = "Report konnte nicht erstellt werden. Bitte später erneut versuchen."
+
+
+def _record_view_error(*, configuration, source, exception, severity, details):
+    """Ergänzt das Diagnose-Log, ohne die sichere Fehlerantwort zu gefährden.
+
+    Der Aufrufer loggt den ursprünglichen Fehler zuerst mit logger.exception.
+    Ein DB-Ausfall beim zusätzlichen Persistieren darf ihn nicht verdecken.
+    Der Savepoint schützt auch Aufrufer innerhalb einer bestehenden Transaktion.
+    """
+    try:
+        with transaction.atomic():
+            ErrorLog.objects.create(
+                configuration=configuration,
+                severity=severity,
+                source=source,
+                exception_type=type(exception).__name__,
+                message=str(exception)[:4000],
+                details=details,
+            )
+    except (DatabaseError, InterfaceError):
+        logger.exception("Fehler-Log für Konfiguration %s nicht speicherbar", configuration.id)
 
 
 def no_cache_json(view_func):
@@ -387,38 +417,36 @@ def config_activate(request, config_id):
     try:
         validate_exchange_symbols(config.exchange, config.market, _symbols(config))
     except (SymbolValidationError, MarketDataError, ValueError) as exc:
-        logger.warning("Konfigurationsprüfung für %s fehlgeschlagen: %s", config.id, exc)
-        ErrorLog.objects.create(
+        logger.exception("Konfigurationsprüfung für %s fehlgeschlagen", config.id)
+        _record_view_error(
             configuration=config,
             severity="warning",
             source="views.config_activate.validation",
-            exception_type=type(exc).__name__,
-            message=str(exc)[:4000],
+            exception=exc,
             details={
                 "exchange": config.exchange,
                 "market": config.market,
                 "symbols": _symbols(config),
             },
         )
-        messages.error(request, f"Bot nicht gestartet: {exc}")
+        messages.error(request, _BOT_START_ERROR)
         return redirect("config_list")
     try:
         bot_manager.start_bot(config)
     except Exception as exc:
         logger.exception("Bot-Start für Konfiguration %s fehlgeschlagen", config.id)
-        ErrorLog.objects.create(
+        _record_view_error(
             configuration=config,
             severity="critical",
             source="views.config_activate",
-            exception_type=type(exc).__name__,
-            message=str(exc)[:4000],
+            exception=exc,
             details={
                 "exchange": config.exchange,
                 "market": config.market,
                 "symbols": _symbols(config),
             },
         )
-        messages.error(request, f"Bot konnte nicht gestartet werden: {exc}")
+        messages.error(request, _BOT_START_ERROR)
     else:
         if not config.is_running:
             config.is_running = True
@@ -539,8 +567,15 @@ def symbol_suggestions_api(request):
         return JsonResponse({"error": "Ungültige Exchange oder Marktart"}, status=400)
     try:
         symbols = get_available_symbols(exchange, market)
-    except MarketDataError as exc:
-        return JsonResponse({"error": str(exc), "suggestions": []}, status=503)
+    except MarketDataError:
+        logger.exception("Symbolkatalog für %s/%s nicht verfügbar", exchange, market)
+        return JsonResponse(
+            {
+                "error": "Symbolvorschläge vorübergehend nicht verfügbar. Bitte später erneut versuchen.",
+                "suggestions": [],
+            },
+            status=503,
+        )
     suggestions = [symbol for symbol in symbols if not query or query in symbol][:20]
     return JsonResponse(
         {
@@ -587,11 +622,12 @@ def market_opportunities_api(request):
                 refresh=request.GET.get("refresh") == "1",
                 **filters,
             )
-        except MarketScannerFilterError as exc:
-            return JsonResponse({"error": str(exc)}, status=400)
-        except MarketScannerError as exc:
-            logger.info("Marktscanner nicht verfügbar: %s", exc)
-            return JsonResponse({"error": str(exc)}, status=503)
+        except MarketScannerFilterError:
+            logger.exception("Ungültige Marktscanner-Parameter")
+            return JsonResponse({"error": "Ungültige Scanner-Parameter."}, status=400)
+        except MarketScannerError:
+            logger.exception("Marktscanner nicht verfügbar")
+            return JsonResponse({"error": _SCANNER_ERROR}, status=503)
         if not payload.get("exchanges"):
             payload["error"] = "Keine Exchange lieferte einen belastbaren Scanner-Snapshot."
             return JsonResponse(payload, status=503)
@@ -605,11 +641,14 @@ def market_opportunities_api(request):
             refresh=request.GET.get("refresh") == "1",
             **filters,
         )
-    except MarketScannerFilterError as exc:
-        return JsonResponse({"error": str(exc), "gainers": [], "losers": []}, status=400)
-    except MarketScannerError as exc:
-        logger.info("Marktscanner nicht verfügbar für %s/%s: %s", exchange, market, exc)
-        return JsonResponse({"error": str(exc), "gainers": [], "losers": []}, status=503)
+    except MarketScannerFilterError:
+        logger.exception("Ungültige Marktscanner-Parameter für %s/%s", exchange, market)
+        return JsonResponse(
+            {"error": "Ungültige Scanner-Parameter.", "gainers": [], "losers": []}, status=400
+        )
+    except MarketScannerError:
+        logger.exception("Marktscanner nicht verfügbar für %s/%s", exchange, market)
+        return JsonResponse({"error": _SCANNER_ERROR, "gainers": [], "losers": []}, status=503)
     return JsonResponse(payload)
 
 
@@ -820,17 +859,19 @@ def bot_status_api(request):
             bot_manager.start_bot(config)
         except Exception as exc:
             logger.exception("Automatischer Neustart für %s fehlgeschlagen", config.id)
-            ErrorLog.objects.create(
+            _record_view_error(
                 configuration=config,
                 severity="critical",
                 source="views.bot_status_api",
-                exception_type=type(exc).__name__,
-                message=str(exc)[:4000],
+                exception=exc,
                 details={"exchange": config.exchange, "market": config.market},
             )
             config.is_running = False
             config.save(update_fields=["is_running"])
-    status = bot_manager.status(config.id)
+    status = dict(bot_manager.status(config.id))
+    # last_error enthält interne Diagnosen, keine freigegebene Benutzer-Meldung.
+    if status.get("last_error"):
+        status["last_error"] = "Bot-Fehler aufgetreten. Siehe Fehler-Log für Details."
     status["is_running_flag"] = config.is_running
     return JsonResponse(status)
 
@@ -895,21 +936,18 @@ def manual_sell_view(request, config_id):
     try:
         bot_manager.manual_sell(config.id, symbol)
         return JsonResponse({"status": "ok"})
-    except ValueError as exc:
-        return JsonResponse({"status": "error", "message": str(exc)}, status=400)
     except Exception as exc:
         logger.exception("Manueller Verkauf für %s/%s fehlgeschlagen", config.id, symbol)
-        ErrorLog.objects.create(
+        _record_view_error(
             configuration=config,
-            severity="critical",
+            severity="warning" if isinstance(exc, ValueError) else "critical",
             source="views.manual_sell",
-            exception_type=type(exc).__name__,
-            message=str(exc)[:4000],
+            exception=exc,
             details={"symbol": symbol, "exchange": config.exchange},
         )
         return JsonResponse(
-            {"status": "error", "message": "Verkauf fehlgeschlagen."},
-            status=500,
+            {"status": "error", "message": _SELL_ERROR},
+            status=400 if isinstance(exc, ValueError) else 500,
         )
 
 
@@ -924,21 +962,18 @@ def kill_switch_view(request, config_id):
         )
     try:
         result = bot_manager.kill_switch(config.id)
-    except ValueError as exc:
-        return JsonResponse({"status": "error", "message": str(exc)}, status=400)
     except Exception as exc:
         logger.exception("Kill-Switch für Konfiguration %s fehlgeschlagen", config.id)
-        ErrorLog.objects.create(
+        _record_view_error(
             configuration=config,
-            severity="critical",
+            severity="warning" if isinstance(exc, ValueError) else "critical",
             source="views.kill_switch",
-            exception_type=type(exc).__name__,
-            message=str(exc)[:4000],
+            exception=exc,
             details={"exchange": config.exchange, "symbols": _symbols(config)},
         )
         return JsonResponse(
-            {"status": "error", "message": "Kill-Switch fehlgeschlagen. Siehe Fehler-Log."},
-            status=500,
+            {"status": "error", "message": _KILL_SWITCH_ERROR},
+            status=400 if isinstance(exc, ValueError) else 500,
         )
     status = "ok" if not result["errors"] else "partial"
     return JsonResponse({"status": status, **result})
@@ -1009,14 +1044,16 @@ def _figure_to_base64(figure, pyplot):
 def _pdf_response(request, template, context, filename, disposition="attachment"):
     try:
         from weasyprint import HTML
-    except (ImportError, OSError) as exc:
-        logger.exception("PDF-Engine ist nicht verfügbar")
-        return HttpResponse(f"PDF-Engine nicht verfügbar: {exc}", status=503)
-    html_string = render_to_string(template, context, request=request)
-    pdf = HTML(
-        string=html_string,
-        base_url=request.build_absolute_uri("/"),
-    ).write_pdf()
+
+        html_string = render_to_string(template, context, request=request)
+        pdf = HTML(
+            string=html_string,
+            base_url=request.build_absolute_uri("/"),
+        ).write_pdf()
+    except Exception:
+        # Auch native Bibliotheks- und Renderfehler können lokale Pfade enthalten.
+        logger.exception("PDF-Report konnte nicht erstellt werden")
+        return HttpResponse(_REPORT_ERROR, status=503, content_type="text/plain; charset=utf-8")
     response = HttpResponse(pdf, content_type="application/pdf")
     response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
     return response
@@ -1154,9 +1191,9 @@ def generate_report(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
     try:
         context = _build_report_context(config)
-    except RuntimeError as exc:
-        logger.exception("Trading-Report konnte nicht erstellt werden")
-        return HttpResponse(str(exc), status=503)
+    except Exception:
+        logger.exception("Trading-Report für Konfiguration %s konnte nicht erstellt werden", config.id)
+        return HttpResponse(_REPORT_ERROR, status=503, content_type="text/plain; charset=utf-8")
     return _pdf_response(
         request,
         "trading/report.html",
@@ -1171,10 +1208,10 @@ def generate_report_html(request, config_id):
     config = get_object_or_404(Configuration, id=config_id, user=request.user)
     try:
         context = _build_report_context(config)
-    except RuntimeError as exc:
-        logger.exception("HTML-Report konnte nicht erstellt werden")
-        return HttpResponse(str(exc), status=503)
-    html = render_to_string("trading/report.html", context, request=request)
+        html = render_to_string("trading/report.html", context, request=request)
+    except Exception:
+        logger.exception("HTML-Report für Konfiguration %s konnte nicht erstellt werden", config.id)
+        return HttpResponse(_REPORT_ERROR, status=503, content_type="text/plain; charset=utf-8")
     response = HttpResponse(html, content_type="text/html; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{_report_filename(config, "html")}"'
     return response

@@ -66,8 +66,14 @@
       <td class="text-nowrap">{{ error.timestamp|date:"d.m.Y H:i:s" }}</td>
       <td>{{ error.configuration.name|default:"–" }}{% if error.configuration_id %}<br><small>#{{ error.configuration_id }}</small>{% endif %}</td>
       <td><span class="badge {% if error.severity == 'critical' %}bg-danger{% elif error.severity == 'warning' %}bg-warning text-dark{% elif error.severity == 'info' %}bg-info text-dark{% else %}bg-secondary{% endif %}">{{ error.get_severity_display }}</span></td>
+      {# Logdaten enthalten ungefilterte Diagnosen, auch aus älteren Releases. #}
+      {% if request.user.is_staff %}
       <td><code>{{ error.source }}</code>{% if error.exception_type %}<br><small>{{ error.exception_type }}</small>{% endif %}</td>
       <td style="min-width:24rem; white-space:pre-wrap; word-break:break-word;">{{ error.message }}{% if error.details %}<details class="mt-1"><summary>Technische Details</summary><pre class="small bg-light border rounded p-2 mt-1">{{ error.details }}</pre></details>{% endif %}</td>
+      {% else %}
+      <td>Referenz #{{ error.id }}</td>
+      <td>Ein Fehler ist aufgetreten. Bitte bei anhaltenden Problemen den Betreiber mit dieser Referenz kontaktieren.</td>
+      {% endif %}
       <td>
         <form method="post" action="{% url 'error_log_resolve' error.id %}">
           {% csrf_token %}

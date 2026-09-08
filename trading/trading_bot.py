@@ -770,7 +770,9 @@ class TradingBot(threading.Thread):
                     await self.execute_trade(symbol, "sell")
                     sold.append(symbol)
                 except Exception as exc:
-                    errors[symbol] = str(exc)
+                    # Das errors-Dict geht an die API; Details gehören nur ins Log.
+                    logger.exception("Kill-Switch-Verkauf für %s/%s fehlgeschlagen", self.config_id, symbol)
+                    errors[symbol] = "Verkauf fehlgeschlagen. Siehe Fehler-Log für Details."
                     await self._persist_error(
                         f"kill-switch:{symbol}",
                         "trading_bot.kill_switch",

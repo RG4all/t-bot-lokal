@@ -186,7 +186,8 @@
             </div>
             {% endfor %}
             {% else %}
-            <div class="alert {% if task.status == 'failed' %}alert-danger{% else %}alert-secondary{% endif %}">{{ task.result.error|default:"Keine Ergebnisse verfügbar." }}</div>
+            {# Gespeicherte Task-Fehler (auch vor 2.4.10) können technische Diagnosen enthalten. #}
+            <div class="alert {% if task.status == 'failed' %}alert-danger{% else %}alert-secondary{% endif %}">{% if task.status == 'failed' %}Backtest fehlgeschlagen. Bitte später erneut versuchen.{% elif task.status == 'cancelled' %}Backtest wurde abgebrochen.{% else %}Keine Ergebnisse verfügbar.{% endif %}</div>
             {% endif %}
         </div>
     </div>

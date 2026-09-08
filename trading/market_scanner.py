@@ -862,8 +862,10 @@ def scan_all_market_opportunities(*, market="spot", refresh=False, **filters):
             # The same invalid user input applies to every exchange and must
             # be reported as HTTP 400 by the API rather than five outages.
             raise
-        except MarketScannerError as exc:
-            errors[exchange_id] = str(exc)
+        except MarketScannerError:
+            # Auch Teilergebnisse werden direkt als API-Payload ausgeliefert.
+            logger.exception("Marktscanner nicht verfügbar für %s/%s", exchange_id, market)
+            errors[exchange_id] = "Marktscanner vorübergehend nicht verfügbar."
     first = next(iter(results.values()), {})
     return {
         "market": market,
