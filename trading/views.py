@@ -24,7 +24,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, transaction
-from django.db.models import Model, QuerySet, Sum
+from django.db.models import Count, Max, Min, Model, Q, QuerySet, Sum
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -377,6 +377,74 @@ def calculate_performance_metrics(logs: list[TradingLog]) -> dict[str, float]:
         "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else 0,
         "max_win": round(max(sell_profits), 4) if sell_profits else 0,
         "max_loss": round(min(sell_profits), 4) if sell_profits else 0,
+    }
+
+
+def _calculate_metrics_from_db(config: Configuration, limit: int = _MAX_LOG_ROWS) -> dict[str, float]:
+    """Berechnet die Performance-Kennzahlen direkt in der Datenbank.
+
+    ``calculate_performance_metrics`` materialisiert sämtliche Log-Zeilen in
+    Python und durchläuft sie dort spaltenweise (mehrere Listen aus bis zu
+    ``_MAX_LOG_ROWS`` Gleitkommawerten). Bei großen Konfigurationen belastet
+    das den Web-Prozess unnötig. Diese Funktion überträgt das Zählen und
+    Summieren an das DBMS: Statt Tausender Zeilen werden nur wenige
+    Aggregatwerte übertragen und im Speicher gehalten.
+
+    Die anschließende Skalarmathematik (Quotienten, Rundung) erfolgt bewusst
+    in Python und nicht als ``Sum(...) / Count(...)``-Ausdruck im ORM. Eine
+    reine DB-Division wird auf PostgreSQL als Ganzzahldivision ausgeführt und
+    liefert damit verkehrte Werte; zudem bliebe das Ergebnis sonst nicht
+    backend-unabhängig (SQLite in der Testumgebung, PostgreSQL in Produktion).
+    So bleibt das Ergebnis bitgenau zu ``calculate_performance_metrics``.
+
+    Args:
+        config: Trading-Konfiguration, deren Logs ausgewertet werden.
+        limit: Maximale Anzahl der jüngsten Logs, die in das Fenster
+            einbezogen werden; begrenzt wie ``calculate_performance_metrics``
+            das betrachtete Historienfenster auf die neuesten ``limit`` Zeilen.
+
+    Returns:
+        Dictionary mit ``win_rate``, ``avg_profit``, ``total_wins``,
+        ``total_losses``, ``avg_win``, ``avg_loss``, ``risk_reward``,
+        ``profit_factor``, ``max_win`` und ``max_loss`` – dieselben Schlüssel
+        und Werte wie ``calculate_performance_metrics``.
+    """
+    # Fenster der jüngsten ``limit`` Logs. ``aggregate()`` wertet das
+    # angewandte LIMIT aus, sodass ausschließlich dieser Ausschnitt zählt und
+    # nicht die gesamte Historie der Konfiguration.
+    window = config.logs.all().order_by("-timestamp", "-id")[:limit]
+    aggregates = window.aggregate(
+        wins=Count("id", filter=Q(action="sell", pl_nominal__gt=0)),
+        losses=Count("id", filter=Q(action="sell", pl_nominal__lte=0)),
+        total_pl=Sum("pl_nominal", filter=Q(action="sell")),
+        gross_profit=Sum("pl_nominal", filter=Q(action="sell", pl_nominal__gt=0)),
+        gross_loss=Sum("pl_nominal", filter=Q(action="sell", pl_nominal__lte=0)),
+        max_win=Max("pl_nominal", filter=Q(action="sell")),
+        min_loss=Min("pl_nominal", filter=Q(action="sell")),
+    )
+
+    wins = aggregates["wins"] or 0
+    losses = aggregates["losses"] or 0
+    total_sells = wins + losses
+    total_pl = aggregates["total_pl"] or Decimal(0)
+    gross_profit = aggregates["gross_profit"] or Decimal(0)
+    gross_loss = aggregates["gross_loss"] or Decimal(0)
+    max_win = aggregates["max_win"] or Decimal(0)
+    min_loss = aggregates["min_loss"] or Decimal(0)
+
+    average_win = gross_profit / wins if wins else Decimal(0)
+    average_loss = gross_loss / losses if losses else Decimal(0)
+    return {
+        "win_rate": round(wins / total_sells * 100, 2) if total_sells else 0,
+        "avg_profit": round(float(total_pl) / total_sells, 4) if total_sells else 0,
+        "total_wins": wins,
+        "total_losses": losses,
+        "avg_win": round(float(average_win), 4),
+        "avg_loss": round(float(average_loss), 4),
+        "risk_reward": round(float(average_win) / abs(float(average_loss)), 2) if average_loss else 0,
+        "profit_factor": round(float(gross_profit) / abs(float(gross_loss)), 2) if gross_loss else 0,
+        "max_win": round(float(max_win), 4),
+        "max_loss": round(float(min_loss), 4),
     }
 
 
@@ -993,7 +1061,11 @@ def info_api(request: HttpRequest, config_id: int) -> JsonResponse:
     config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     logs = _latest_rows(config.logs.all(), _MAX_LOG_ROWS)
     portfolio = _portfolio_snapshot(config)
-    metrics = calculate_performance_metrics(logs)
+    # Performance-Kennzahlen per DB-Aggregation statt alle Logs in Python zu
+    # durchlaufen – entlastet den Web-Prozess bei großen Konfigurationen
+    # (siehe ``_calculate_metrics_from_db``). Die Equity-/Kassenkurve benötigt
+    # weiterhin die einzelnen Zeilen.
+    metrics = _calculate_metrics_from_db(config, _MAX_LOG_ROWS)
 
     window_realized = sum(
         (log.pl_nominal for log in logs if log.action == "sell"),

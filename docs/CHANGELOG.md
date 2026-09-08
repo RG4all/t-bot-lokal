@@ -2,6 +2,28 @@
 
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [2.4.18] – 2026-09-08
+
+### Wartung und Code-Qualität
+
+- **info_api-Kennzahlen per DB-Aggregation (InfoApiMemoryOptimization, MEDIUM – Performance, Security-Audit §4.6):** `info_api` in `trading/views.py` lud bis zu `_MAX_LOG_ROWS` (2.000) `TradingLog`-Zeilen in den Speicher und durchlief sie in `calculate_performance_metrics()` spaltenweise in Python, um die Performance-Kennzahlen zu ermitteln. Bei großen Konfigurationen ist das ein unnötiger RAM- und CPU-Aufwand im Web-Prozess. Neu berechnet `_calculate_metrics_from_db(config, limit=_MAX_LOG_ROWS)` die Zähler und Summen über `django.db.models.aggregate()` direkt im DBMS; `info_api` ruft diese Funktion statt `calculate_performance_metrics()` auf. Die Equity-/Kassenkurve benötigt weiterhin die einzelnen Zeilen, allein die Kennzahlen werden nicht mehr in Python über alle Logs materialisiert.
+- **Root Cause geschlossen, nicht nur die Symptombehebung der Prompt-Vorlage:** Die im Prompt skizzierte Variante `avg_profit=Sum("pl_nominal") / Count("id")` ist im gepinnten Django 5.2.17 **fachlich falsch** – PostgreSQL führt diese Division als Ganzzahldivision aus und liefert verkehrte Kennzahlen; zudem wäre das Ergebnis nicht backend-unabhängig (SQLite in der Testumgebung teilt dagegen im Gleitkomma). Die umgesetzte Funktion aggregiert nur Zähler, Summen, `Max` und `Min` auf der Datenbank und führt die Skalarmathematik (Quotienten, Rundung) bewusst in Python, sodass das Ergebnis bitgenau zu `calculate_performance_metrics()` bleibt und auf beiden Datenbanken identisch ist.
+- **Fensterbegrenzung erhalten:** `aggregate()` wertet das angewandte `[:limit]`-Slice aus, sodass ausschließlich die jüngsten `_MAX_LOG_ROWS` Logs zählen – exakt das Fenster, das `info_api` bisher über `_latest_rows()` an `calculate_performance_metrics()` übergab. Die API liefert damit weiterhin dieselben Daten wie vor dem Fix. `calculate_performance_metrics()` bleibt als dokumentierte, listenbasierte Hilfsfunktion erhalten (sie ist weiterhin Teil des im Type-Hint-Vertrag aus Prompt 19 verankerten öffentlichen Hilfsfunktions-Sets) und wird durch `info_api` nicht mehr verwendet.
+- Keine neue Laufzeit-Abhängigkeit, kein neues Architekturmuster, keine Settings-, Model- oder Migrationsänderung, keine geänderte URL, Response oder API-Form. Es wird **keine behobene Sicherheitslücke behauptet** – der Befund ist eine Performance-/Ressourcen-Schwäche (Speicher- und CPU-Last im Web-Prozess), kein Exploit.
+
+### Tests und Qualitätssicherung
+
+- **10 neue Regressionstests** in `trading/tests/test_info_api_metrics.py` (alle über den echten Middleware-Stack mit deaktiviertem Passphrase-Gate, analog zu `test_cache_control`): Verhaltensgleichheit der DB-Aggregation mit `calculate_performance_metrics()` über dasselbe Fenster (leere Historie, nur Käufe, nur Gewinn-Verkäufe, nur Verlust-Verkäufe, gemischt); Fensterbegrenzung – mit 2.600 Logs (600 alte Gewinne, 2.000 neue Verluste) liefert die Aggregation `win_rate == 0` und nicht die Gesamthistorie; `limit`-Parameter wird respektiert; `info_api` liefert dieselben Kennzahlen wie vor dem Fix (inkl. verschachteltem `metrics`-Objekt).
+- **Angriffs- und Randvektoren (Rot→Grün):** Ein echter Negativtest patcht `calculate_performance_metrics` auf einen Abbruch; vor dem Fix lieferte `info_api` dadurch HTTP 500, nach dem Fix ignoriert `info_api` den Patch und liefert HTTP 200 – das beweist, dass die Metrik nicht mehr über den Python-Pfad berechnet wird. Division-durch-Null-Vektoren sind abgedeckt: nur Gewinne bzw. nur Verluste ergeben `risk_reward == 0` und `profit_factor == 0` ohne Exception, die Antwort enthält keine `None`-Werte.
+- **330 Django-/Python-Tests** (10 neue + 320 bestehende) bestanden; Systemcheck, Migrationsprüfung (`makemigrations --check`), `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright`/mypy nicht ausgeführt (Node nicht eingerichtet, django-stubs nicht in `requirements.txt`), das Kriterium der statischen Prüfung ist über den ast-basierten Type-Hint-Test (`test_view_type_hints`) erfüllt, der `calculate_performance_metrics` weiterhin mit der verankerten Signatur prüft.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](PERF-21-info-api-db-aggregation.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26).
+
+### Dokumentation und Upgrade
+
+- Zentrale `VERSION` auf **2.4.18** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält weiterhin keine separate Paketversion.
+- Audit §4.6 und Prompt 21 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](PERF-21-info-api-db-aggregation.md) ergänzt. [ARENA_AI_PROMPTS.md](ARENA_AI_PROMPTS.md) trägt den Status für Prompt 21.
+- Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.18** prüfen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig.
+
 ## [2.4.17] – 2026-09-08
 
 ### Wartung und Code-Qualität
