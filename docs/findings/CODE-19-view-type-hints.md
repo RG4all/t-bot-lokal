@@ -8,7 +8,7 @@
 - **Geprüfter Ausgangsstand:** 2.4.15 / `3c6eec2898ac0246ecd5a3ef5402c7765c14d47f`
 - **Fix-Commit:** [`8089c34`](https://github.com/RG4all/t-bot-lokal/commit/8089c34a0d70d68784a2cf7570b61c67277f3739) – `refactor(views): add type hints and docstrings`
 - **Fix-PR:** [#24 – refactor(views): add type hints and docstrings](https://github.com/RG4all/t-bot-lokal/pull/24) (Ziel-Branch `tbot.local`)
-- **Dokumentation des Releases:** [CHANGELOG 2.4.16](CHANGELOG.md#2416--2026-09-08)
+- **Dokumentation des Releases:** [CHANGELOG 2.4.16](../CHANGELOG.md)
 
 ## Befund und Root Cause
 

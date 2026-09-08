@@ -16,7 +16,7 @@ Die Quellcode-Tests reproduzieren den Vorzustand (rot ohne
 ``_is_running_unlocked``). Die Laufzeittests decken den Integritätspfad ab:
 doppelte Paper-Bots derselben Konfiguration.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 12 und SECURITY_AUDIT.md Abschnitt 3.1.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 12 und docs/archive/SECURITY_AUDIT_2026-09-07.md Abschnitt 3.1.
 """
 
 from __future__ import annotations

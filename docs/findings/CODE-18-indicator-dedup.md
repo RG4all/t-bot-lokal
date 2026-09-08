@@ -7,7 +7,7 @@
 - **Geprüfter Ausgangsstand:** 2.4.14 / `8c7f799ac1bd43efe2753561edf5b7229a8e02ab`
 - **Fix-Commit:** [`e208ccc`](https://github.com/RG4all/t-bot-lokal/commit/e208ccc6720e0832b3ca47eb53b04a2fb4b2d809) – `refactor: extract indicator logic to shared module`
 - **Fix-PR:** [#23 – refactor: extract indicator logic to shared module](https://github.com/RG4all/t-bot-lokal/pull/23) (Ziel-Branch `tbot.local`)
-- **Dokumentation des Releases:** [CHANGELOG 2.4.15](CHANGELOG.md#2415--2026-09-08), [Handbuch §6.6](MANUAL.md), [Backtesting-Kapitel §2](backtesting.md)
+- **Dokumentation des Releases:** [CHANGELOG 2.4.15](../CHANGELOG.md), [Handbuch §6.6](../manual/MANUAL.md), [Backtesting-Kapitel §2](../manual/BACKTESTING.md)
 
 ## Befund und Root Cause
 
@@ -203,7 +203,7 @@ unverändert – zusammen mit den 30 neuen Indikator-Tests in einem Lauf. SEC-05
 bleibt **Fixed** (ursprünglich 2.4.5, zuletzt in 2.4.14 nachgeprüft, erneut in
 2.4.15). Das Refactoring berührt keine Header-, Cookie- oder
 Autorisierungspfade; geändert sind ausschließlich Berechnungs- und
-Vorabberechnungslogik. Nachweis: [SEC-06-Dokument](SEC-06-rule-lifecycle-authz.md).
+Vorabberechnungslogik. Nachweis: [SEC-06-Dokument](SEC-06-content-type-nosniff.md).
 
 ## Lokale Validierung
 

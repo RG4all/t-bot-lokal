@@ -50,12 +50,12 @@ Dabei bedeuten `P0`, `P1` und `P2` der aktuelle, der vorherige und der davor
 liegende Preis.
 
 Seit **2.4.15** werden diese Formeln ausschließlich in
-[`trading/indicators.py`](../trading/indicators.py) berechnet – von
+[`trading/indicators.py`](../../trading/indicators.py) berechnet – von
 Backtesting und Live-Bot gemeinsam. Der Backtest quantisiert dabei jede
 Zwischenstufe auf 8 Nachkommastellen (`ROUND_HALF_UP`), der Bot rechnet
 ungerundet und rundet erst beim Speichern; die Unterschiede liegen in der
 letzten Kommastelle und sind dokumentiert
-([CODE-18](CODE-18-indicator-dedup.md), [Handbuch §6.6](MANUAL.md#66-einheitliche-berechnung-im-code-ab-2415)).
+([CODE-18](../findings/CODE-18-indicator-dedup.md), [Handbuch §6.6](MANUAL.md#66-einheitliche-berechnung-im-code-ab-2415)).
 
 ### NDA
 

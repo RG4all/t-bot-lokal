@@ -6,7 +6,7 @@
 
 ---
 
-> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.6 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
+> **Historischer Scan, nicht der aktuelle Freigabestatus.** Mehrere nachfolgende Aussagen beziehen sich auf Code vor 2.4.1–2.4.6 oder auf falsch eingeordnete Django-Defaults. Die ursprünglichen Befunde bleiben nachvollziehbar; die aktuelle, kontextbezogene Bewertung des Passphrase-Fixes und der mitgeprüften Pfade steht im [Security-Review 2.4.4](../security/SECURITY_REVIEW_2.4.4.md). Daraus folgt keine vollständige Neubewertung aller historischen Performance-/Architekturvorschläge.
 >
 > **Statuspflege:** Jeder Befund der Abschnitte 2–6 trägt releaseweise seinen Umsetzungsstand („Fixed in X.Y.Z“) in der Abschnittsüberschrift sowie im Abschnittstext; der Stand ist zuletzt für **2.4.19** (08. September 2026) aktualisiert. Die historischen Beschreibungen und Lösungsvorschläge bleiben als Ausgangsbefund erhalten.
 
@@ -50,7 +50,7 @@ Allowlist zählt `REMOTE_ADDR`. Registrierung in `MIDDLEWARE` nach
 
 **Nachweis:** 11 Regressionstests in `trading/tests/test_rate_limit.py` (Limit,
 Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs,
-Integrationstest). Release-Dokumentation: [Changelog 2.4.1](CHANGELOG.md#241--2026-09-07).
+Integrationstest). Release-Dokumentation: [Changelog 2.4.1](../CHANGELOG.md).
 
 *Historischer Befund (vor 2.4.1):* Das Passphrase-Gate, Login und Registrierung hatten keinerlei Brute-Force-Schutz. Ein Angreifer konnte beliebig viele Passwort-/Passphrase-Versuche starten.
 
@@ -120,7 +120,7 @@ bedingt ergänzt wird.
 
 **Nachweis:** 6 Regressionstests in `trading/tests/test_settings.py` (kein Wildcard,
 lokale Hosts vorhanden, Source-Scan gegen `append("*")`). Release-Dokumentation:
-[Changelog 2.4.2](CHANGELOG.md#242--2026-09-07).
+[Changelog 2.4.2](../CHANGELOG.md).
 
 *Historischer Befund (vor 2.4.2):*
 
@@ -159,7 +159,7 @@ von CDNs geladen, sondern aus `/static/`.
 
 **Nachweis:** 12 Regressionstests in `trading/tests/test_csp.py` (Einstellungen,
 präsente CSP-Header, keine externen Domains). Release-Dokumentation:
-[Changelog 2.4.3](CHANGELOG.md#243--2026-09-07).
+[Changelog 2.4.3](../CHANGELOG.md).
 
 *Historischer Befund (vor 2.4.3):* Es wurde weder `django-csp` noch ein manueller CSP-Header konfiguriert. Die Anwendung lädt externe Skripte (Plotly, Bootstrap) und rendert Markdown zu HTML (`mark_safe`), was bei fehlendem CSP zu XSS-Vektoren führt.
 
@@ -194,7 +194,7 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 **Umgesetzt:** `secrets.token_urlsafe(32)` und Passphrase-WARNING nur bei lokalem `DEBUG=True` ohne Render. Bei `DEBUG=False` bzw. auf Render starten fehlende/leere Secrets oder ein deaktivierter Gate nicht. Signierschlüssel sind auch lokal privat; Compose und Installer verwenden keine öffentlichen App-Defaults mehr. Alte Gate-Cookies werden durch HMAC-gebundene Freigaben ungültig. Konfigurierte Secrets erscheinen nicht im Log.
 
-**Priorität:** Hoch für die kombinierbaren Gate-/Signierschlüssel-Fehlkonfigurationen; kein automatischer Zugriff auf fremde Nutzerobjekte, deren Autorisierung zusätzlich gilt. Testnachweise, verbleibende Deployment-Anforderungen und False Positives stehen im [Nachreview](SECURITY_REVIEW_2.4.4.md).
+**Priorität:** Hoch für die kombinierbaren Gate-/Signierschlüssel-Fehlkonfigurationen; kein automatischer Zugriff auf fremde Nutzerobjekte, deren Autorisierung zusätzlich gilt. Testnachweise, verbleibende Deployment-Anforderungen und False Positives stehen im [Nachreview](../security/SECURITY_REVIEW_2.4.4.md).
 
 ---
 
@@ -208,19 +208,19 @@ CSP_FRAME_ANCESTORS = ("'self'",)
 
 **Korrektur der Risikobeschreibung:** HttpOnly verhindert nur den direkten Zugriff auf das Cookie. Skripte derselben Origin können weiterhin das DOM-Token lesen und authentifizierte Requests ausführen; der Fix ist zusätzliche Cookie-Härtung, kein allgemeiner XSS-Schutz oder Ersatz für CSP/CSRF-Prüfungen.
 
-**Nachprüfung 2.4.6:** `trading/tests/test_csrf_cookie.py` enthält jetzt 11 Tests. Der erfolgreiche Login verwendet tatsächlich den maskierten Formular-Token. Produktions-/Render-Cookie-Flags, fehlende Tokens/Cookies, Tokens anderer Clients und fremde Origins sind geprüft. Eine Testprozess-Mutation mit `CSRF_COOKIE_HTTPONLY=False` wird erkannt. Siehe [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.6:** `trading/tests/test_csrf_cookie.py` enthält jetzt 11 Tests. Der erfolgreiche Login verwendet tatsächlich den maskierten Formular-Token. Produktions-/Render-Cookie-Flags, fehlende Tokens/Cookies, Tokens anderer Clients und fremde Origins sind geprüft. Eine Testprozess-Mutation mit `CSRF_COOKIE_HTTPONLY=False` wird erkannt. Siehe [Nachweis](../findings/SEC-06-content-type-nosniff.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.8:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Cache-Control-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-08-Nachweis](SEC-08-cache-control-api.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.8:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Cache-Control-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-08-Nachweis](../findings/SEC-08-cache-control-api.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.9:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Permissions-Policy-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-09-Nachweis](SEC-09-permissions-policy.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.9:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen Permissions-Policy-Tests grün. Siehe [SEC-05-Nachprüfung im SEC-09-Nachweis](../findings/SEC-09-permissions-policy.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.10:** Alle 11 CSRF-Cookie-Tests erneut grün; eine Testprozess-Mutation mit deaktiviertem `CSRF_COOKIE_HTTPONLY` lässt die Cookie-Prüfung erwartungsgemäß scheitern. Settings, Formular-Token-Login, Produktions-/Render-Flags sowie Cookie-/Token-/Origin-Negativtests bleiben unverändert wirksam. [Nachweis SEC-10](SEC-10-information-disclosure.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.10:** Alle 11 CSRF-Cookie-Tests erneut grün; eine Testprozess-Mutation mit deaktiviertem `CSRF_COOKIE_HTTPONLY` lässt die Cookie-Prüfung erwartungsgemäß scheitern. Settings, Formular-Token-Login, Produktions-/Render-Flags sowie Cookie-/Token-/Origin-Negativtests bleiben unverändert wirksam. [Nachweis SEC-10](../findings/SEC-10-information-disclosure.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.14:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen DB-Trim-Batch-Tests grün. Siehe [SEC-05-Nachprüfung im PERF-17-Nachweis](PERF-17-db-trim-batch-delete.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.14:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert und DEBUG-/Render-unabhängig aktiv; alle 11 CSRF-Cookie-Tests laufen zusammen mit den neuen DB-Trim-Batch-Tests grün. Siehe [SEC-05-Nachprüfung im PERF-17-Nachweis](../findings/PERF-17-db-trim-batch-delete.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 30 neuen Indikator-Tests grün (279 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](CODE-18-indicator-dedup.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.15:** `CSRF_COOKIE_HTTPONLY = True` bleibt unverändert gesetzt; die 11 CSRF-Cookie-Tests laufen zusammen mit den 30 neuen Indikator-Tests grün (279 Tests gesamt). Siehe [SEC-05-Nachprüfung im CODE-18-Nachweis](../findings/CODE-18-indicator-dedup.md#sec-05-nachprüfung).
 
-**Nachprüfung 2.4.16:** Unverändert gesetzt; die 11 CSRF-Cookie-Tests und 10 nosniff-Tests laufen zusammen mit den 30 neuen Type-Hints-Tests grün (309 Tests gesamt). Ein Smoke-Test mit geladenen Produktions-/Render-Settings bestätigt `HttpOnly`+`Secure` am CSRF-Cookie und `nosniff` auf allen geprüften Pfaden. Siehe [SEC-05-/SEC-06-Nachprüfung im CODE-19-Nachweis](CODE-19-view-type-hints.md#sec-05--und-sec-06-nachprüfung).
+**Nachprüfung 2.4.16:** Unverändert gesetzt; die 11 CSRF-Cookie-Tests und 10 nosniff-Tests laufen zusammen mit den 30 neuen Type-Hints-Tests grün (309 Tests gesamt). Ein Smoke-Test mit geladenen Produktions-/Render-Settings bestätigt `HttpOnly`+`Secure` am CSRF-Cookie und `nosniff` auf allen geprüften Pfaden. Siehe [SEC-05-/SEC-06-Nachprüfung im CODE-19-Nachweis](../findings/CODE-19-view-type-hints.md#sec-05--und-sec-06-nachprüfung).
 
 ---
 
@@ -238,7 +238,7 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 
 Die Einstellung ist DEBUG-/Render-unabhängig. `SecurityMiddleware` bleibt an erster Stelle, sodass auch Fehler, Redirects, Downloads und WhiteNoise-Antworten erfasst werden. `X_FRAME_OPTIONS` bleibt unverändert beim vorhandenen Django-Default `DENY`; zusätzliche Middleware ist nicht erforderlich.
 
-**Nachweis:** 10 Regressionstests in `trading/tests/test_content_type_nosniff.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. Eine bewusste Deaktivierung im Testprozess lässt die Header-Prüfungen scheitern. [Finding mit Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](SEC-06-rule-lifecycle-authz.md).
+**Nachweis:** 10 Regressionstests in `trading/tests/test_content_type_nosniff.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. Eine bewusste Deaktivierung im Testprozess lässt die Header-Prüfungen scheitern. [Finding mit Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](../findings/SEC-06-content-type-nosniff.md).
 
 ---
 
@@ -250,7 +250,7 @@ Die Einstellung ist DEBUG-/Render-unabhängig. `SecurityMiddleware` bleibt an er
 
 **Verbleibende Abgrenzung:** Signierte Cookies enthalten weiterhin die Benutzer-ID in Base64; das ist bei diesem Backend keine Schwachstelle (der Inhalt ist signiert, nicht verschlüsselt, aber nicht manipulierbar). Eine Session-Rotation bei Passwort-Änderung (`update_session_auth_hash`) ist als zusätzliche Härtung sinnvoll, erfordert aber eine Passwort-Änderungs-View, die im Projekt derzeit nicht vorhanden ist und ist nicht Teil dieses Fixes.
 
-**Nachweis:** 11 Regressionstests in `trading/tests/test_session_invalidate.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Commit, Prüfgrenzen](SEC-07-session-lifetime-invalidation.md).
+**Nachweis:** 11 Regressionstests in `trading/tests/test_session_invalidate.py`; Settings-Matrix vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Commit, Prüfgrenzen](../findings/SEC-07-session-lifetime-invalidation.md).
 
 ---
 
@@ -285,9 +285,9 @@ def no_cache_json(view_func):
     return wrapped
 ```
 
-**Umgesetzt:** Der Decorator `no_cache_json` wird als innerster Decorator auf alle zehn API-Views angewendet (`info_api`, `bot_status_api`, `logs_api`, `data_logs_api`, `trades_api`, `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api`, `server_resources_api`). Dadurch erhalten auch von den Views erzeugte Fehlerantworten (z. B. 400/503) die Header. Von Django bzw. der Middleware erzeugte Antworten ohne View-Aufruf (z. B. 404 aus `get_object_or_404`, DB-503 aus `DatabaseAvailabilityMiddleware`) enthalten keine sensiblen Handelsdaten und sind von diesem Fix nicht betroffen; die Abgrenzung ist im [Nachweis](SEC-08-cache-control-api.md) dokumentiert.
+**Umgesetzt:** Der Decorator `no_cache_json` wird als innerster Decorator auf alle zehn API-Views angewendet (`info_api`, `bot_status_api`, `logs_api`, `data_logs_api`, `trades_api`, `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api`, `server_resources_api`). Dadurch erhalten auch von den Views erzeugte Fehlerantworten (z. B. 400/503) die Header. Von Django bzw. der Middleware erzeugte Antworten ohne View-Aufruf (z. B. 404 aus `get_object_or_404`, DB-503 aus `DatabaseAvailabilityMiddleware`) enthalten keine sensiblen Handelsdaten und sind von diesem Fix nicht betroffen; die Abgrenzung ist im [Nachweis](../findings/SEC-08-cache-control-api.md) dokumentiert.
 
-**Nachweis:** 9 Regressionstests in `trading/tests/test_cache_control.py`; Quellcode- und Header-Prüfungen vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](SEC-08-cache-control-api.md).
+**Nachweis:** 9 Regressionstests in `trading/tests/test_cache_control.py`; Quellcode- und Header-Prüfungen vor dem Fix rot, nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](../findings/SEC-08-cache-control-api.md).
 
 ---
 
@@ -304,9 +304,9 @@ def no_cache_json(view_func):
 SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 ```
 
-**Umgesetzt:** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation für alle Origins. Da Django selbst keinen Permissions-Policy-Header erzeugt, setzt die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (registriert direkt nach der `SecurityMiddleware`) den Header aus dieser Einstellung auf jeder Antwort – auch auf Fehler-, Redirect- und WhiteNoise-Antworten. Ein leerer Policy-Wert lässt Antworten unverändert. Der 301-SSL-Redirect entsteht direkt in der äußersten `SecurityMiddleware` und führt selbst keine Browser-APIs aus; die Abgrenzung ist im [Nachweis](SEC-09-permissions-policy.md) dokumentiert.
+**Umgesetzt:** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation für alle Origins. Da Django selbst keinen Permissions-Policy-Header erzeugt, setzt die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (registriert direkt nach der `SecurityMiddleware`) den Header aus dieser Einstellung auf jeder Antwort – auch auf Fehler-, Redirect- und WhiteNoise-Antworten. Ein leerer Policy-Wert lässt Antworten unverändert. Der 301-SSL-Redirect entsteht direkt in der äußersten `SecurityMiddleware` und führt selbst keine Browser-APIs aus; die Abgrenzung ist im [Nachweis](../findings/SEC-09-permissions-policy.md) dokumentiert.
 
-**Nachweis:** 11 Regressionstests in `trading/tests/test_permissions_policy.py`; Settings-Matrix und Header-Prüfungen vor dem Fix rot (17 fehlgeschlagene Assertions), nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](SEC-09-permissions-policy.md).
+**Nachweis:** 11 Regressionstests in `trading/tests/test_permissions_policy.py`; Settings-Matrix und Header-Prüfungen vor dem Fix rot (17 fehlgeschlagene Assertions), nach dem Fix grün. [Finding mit Fix-Nachweis und SEC-05-Nachprüfung](../findings/SEC-09-permissions-policy.md).
 
 ---
 
@@ -318,7 +318,7 @@ SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 
 **Umgesetzt:** Feste, kontextbezogene Benutzer-Meldungen statt technischer Exception-Texte; `logger.exception` erhält Diagnose und Traceback. Das gilt auch für Teilfehler, Bot-Status und gespeicherte Backtest-Fehler. Das Fehler-Log zeigt technische Inhalte nur noch Staff-Konten innerhalb der bestehenden Eigentümergrenze; normale Konten behalten generische Einträge mit Referenz. DB-Fehler beim zusätzlichen Persistieren eines Log-Eintrags verdecken nicht die ursprüngliche sichere Antwort. Keine neue Runtime-Abhängigkeit oder Migration.
 
-**Nachweis:** 25 neue Regressionstests, am Ausgangsstand rot, nach dem Fix grün; 210 Tests insgesamt bestanden. [Finding, Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](SEC-10-information-disclosure.md).
+**Nachweis:** 25 neue Regressionstests, am Ausgangsstand rot, nach dem Fix grün; 210 Tests insgesamt bestanden. [Finding, Fix-Commit, Prüfgrenzen und SEC-05-Nachprüfung](../findings/SEC-10-information-disclosure.md).
 
 ---
 
@@ -358,7 +358,7 @@ PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in .env}
 
 **Umgesetzt (2.4.11):** `PASSPHRASE` (und `SECRET_KEY`) waren bereits seit 2.4.4 Pflichtwerte; ab 2.4.11 gilt dies auch für `POSTGRES_PASSWORD` – sowohl im `postgres`-Service als auch in der daraus gebauten `DATABASE_URL`. Fehlende oder leere Secrets brechen die Compose-Interpolation ab; öffentliche Defaults existieren in keiner ausgelieferten Konfigurations-/Skriptdatei mehr. `scripts/setup_local.sh` erzeugt das lokale DB-Passwort zufällig in `.env.local` und warnt beim Wiedererkennen des früher öffentlichen Werts vor fehlender Rotation.
 
-**Nachweis:** Neue Shell-Testgruppe `tests/test_compose_security.sh` (25 Assertions) und erweiterte `tests/test_setup_local.sh`, vor dem Fix rot, danach grün. [Finding, Fix-Commit und Prüfgrenzen](SEC-12-docker-default-passwords.md).
+**Nachweis:** Neue Shell-Testgruppe `tests/test_compose_security.sh` (25 Assertions) und erweiterte `tests/test_setup_local.sh`, vor dem Fix rot, danach grün. [Finding, Fix-Commit und Prüfgrenzen](../findings/SEC-12-docker-default-passwords.md).
 
 ---
 
@@ -372,7 +372,7 @@ PASSPHRASE: ${PASSPHRASE:?Set PASSPHRASE in .env}
 
 **Umgesetzt:** Interne Methode `_is_running_unlocked()` prüft und räumt beendete Threads ohne Lock-Acquisition. `is_running()` umschließt sie mit dem Lock für externe Aufrufer. `start_bot()` und `stop_bot()` rufen die unlocked-Variante unter dem bereits gehaltenen Lock auf. Views bleiben bei der öffentlichen API.
 
-**Nachweis:** 16 Regressionstests in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf `threading.Lock`). [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md).
+**Nachweis:** 16 Regressionstests in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf `threading.Lock`). [Finding mit Fix-Commit](../findings/BUG-12-race-condition-bot-start-stop.md).
 
 ---
 
@@ -420,7 +420,7 @@ async def _restore_state(self):
 
 **Fix:** `_CsvEcho` ist entfernt. Ein erst beim Lesen geöffneter `io.StringIO(newline="")`-Puffer wird im Generator wiederverwendet, vor jeder Datenzeile mit `seek(0)`/`truncate(0)` geleert und mit `getvalue()` ausgelesen. Der Context-Manager schließt ihn bei regulärem Ende, Fehler oder Schließen der Response. UTF-8-BOM, Spalten, Sortierung, `iterator(chunk_size=1000)`, Download-Header und Eigentümerprüfung bleiben unverändert.
 
-**Nachweis:** 15 neue Regressionstests in `trading/tests/test_report_csv.py`; fünf davon am Ausgangsstand rot (sieben fehlgeschlagene Assertions), nach dem Fix grün. Insgesamt 242 Django-/Python-Tests bestanden. Gezielte Negativkontrollen erkennen fehlendes Zurücksetzen, Kürzen und Schließen des Puffers. [Finding mit Fix-Commit, CI-Freigabe und Prüfgrenzen](BUG-14-csv-echo-true-stream.md).
+**Nachweis:** 15 neue Regressionstests in `trading/tests/test_report_csv.py`; fünf davon am Ausgangsstand rot (sieben fehlgeschlagene Assertions), nach dem Fix grün. Insgesamt 242 Django-/Python-Tests bestanden. Gezielte Negativkontrollen erkennen fehlendes Zurücksetzen, Kürzen und Schließen des Puffers. [Finding mit Fix-Commit, CI-Freigabe und Prüfgrenzen](../findings/BUG-14-csv-echo-true-stream.md).
 
 **Streaming-Grenze:** Der Generator bleibt synchron. Unter Django/ASGI kann er weiterhin vollständig konsumiert werden; dieses Refactoring ist kein End-to-End-True-Streaming-Fix für Daphne oder vorgeschaltete Proxies.
 
@@ -534,7 +534,7 @@ unverändert. **Nachweis:** 7 Regressionstests in
 Transaktion über alle 2.500 Zeilen statt `[1000, 1000, 500]`;
 `ValueError` bei negativem `max_rows`), mit Fix grün. Insgesamt
 249 Django-/Python-Tests bestanden; SEC-05 mit allen 11 CSRF-Cookie-Tests
-erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md).
+erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](../findings/PERF-17-db-trim-batch-delete.md).
 
 ---
 
@@ -546,7 +546,7 @@ erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-b
 
 Die Indikatorberechnung (NDA, DeltaDelta, Acceleration) war in beiden Dateien fast identisch implementiert, mit eigener Rundungs- und Indexbehandlung. **Umgesetzt in 2.4.15:** neues Modul `trading/indicators.py` ist die einzige Quelle der Arithmetik (`compute_indicator_values()` mit optionalem Rundungs-Hook, `calculate_trading_indicators()` für die quantisierte Backtest-Stufe, `build_indicator_rows()` für die Vorabberechnung, `EIGHT_PLACES` als gemeinsame Konstante). `backtesting.py`, `trading_bot.py`, `tasks.py` und `scripts/backtest_resource_probe.py` delegieren; `Backtesting.calculate_indicators` bleibt als dünner Kompatibilitäts-Wrapper. Beide Präzisionsstufen (Bot rechnet roh, Backtest quantisiert pro Zwischenstufe) bleiben bewusst erhalten – ein Deduplizierungs-Refactoring darf keine laufenden Schwellwertentscheidungen oder gespeicherten DataLog-Werte verschieben. Zusätzlich neu: Index-Guard `idx >= 2` und `idx < len(prices)`; vorher rechnete `idx=1` über die Listendefinition stillschweigend mit `prices[-1]`.
 
-**Nachweis:** 30 Regressionstests in `trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung, Backtest-Reports byte-identisch. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md).
+**Nachweis:** 30 Regressionstests in `trading/tests/test_indicators.py`, 16.693 deterministische Alt-/Neu-Vergleichsfälle ohne Abweichung, Backtest-Reports byte-identisch. [Finding mit Fix-Commit und Prüfgrenzen](../findings/CODE-18-indicator-dedup.md).
 
 Historischer Lösungsvorschlag (unvollständig – die Bot-Nebenwerte `current_da`/`prev_da`/`dva` und die Rundungsstufe fehlten):
 
@@ -613,7 +613,7 @@ behauptet: 26 ORM-Filter liefen über das untypisierte `request.user`
 Schicht neben `@login_required`; das Passphrase-Gate weist ein leeres Secret
 explizit ab (`constant_time_compare("", "")` ist `True`); `_equity_svg`
 überspringt Punkte ohne `equity`-Wert, statt über einen `TypeError` zu laufen.
-Details, Negativkontrolle und Prüfgrenzen: [CODE-19](CODE-19-view-type-hints.md).
+Details, Negativkontrolle und Prüfgrenzen: [CODE-19](../findings/CODE-19-view-type-hints.md).
 
 ---
 
@@ -637,14 +637,14 @@ App-Registry geladen wird und die Django-Module dann mit
 `AppRegistryNotReady` abbrechen. Stattdessen werden import-sichere Module
 direkt gebunden und Django-gebundene Module per modul-Level-`__getattr__`
 (PEP 562) erst beim Zugriff geladen. Details, Negativkontrolle und Prüfgrenzen:
-[CODE-20](CODE-20-module-exports.md).
+[CODE-20](../findings/CODE-20-module-exports.md).
 
 ---
 
 ### 4.6 PERFORMANCE – `info_api` lädt alle Logs in den Speicher – Fixed in 2.4.18
 
 **Datei:** `trading/views.py` · **Status:** Fixed (siehe
-[PERF-21](PERF-21-info-api-db-aggregation.md))
+[PERF-21](../findings/PERF-21-info-api-db-aggregation.md))
 
 **Umgesetzt in 2.4.18:** `info_api` berechnet die Performance-Kennzahlen über die
 neue `_calculate_metrics_from_db(config, limit=_MAX_LOG_ROWS)` direkt im DBMS –
@@ -664,7 +664,7 @@ insgesamt 330 Django-/Python-Tests grün. Fix-Commit
 [`c7ee446`](https://github.com/RG4all/t-bot-lokal/commit/c7ee446) –
 `perf(views): optimize info_api with DB aggregation`, Auslieferung über
 [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26). Release-Dokumentation:
-[Changelog 2.4.18](CHANGELOG.md#2418--2026-09-08).
+[Changelog 2.4.18](../CHANGELOG.md).
 
 *Historischer Befund (vor 2.4.18):*
 
@@ -737,29 +737,29 @@ def calculate_performance_metrics_fast(config, limit=2000):
 - [x] ALLOWED_HOSTS ohne Wildcard (ab 2.4.2, siehe §2.2)
 - [x] CSRF_COOKIE_HTTPONLY = True (ab 2.4.5, siehe §2.5)
 - [x] CSP-Header implementiert (ab 2.4.3, siehe §2.3; Nonce für Template-Skripte, keine externen Domains)
-- [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](SEC-08-cache-control-api.md))
-- [x] Error-Messages ohne technische Details (ab 2.4.10; Diagnose-Log mit Staff-/Eigentümergrenze, siehe §2.10 und [SEC-10](SEC-10-information-disclosure.md))
-- [x] Docker-Passwörter ohne Defaults (ab 2.4.11; `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` als `${VAR:?...}`-Pflichtwerte, zufälliges lokales DB-Passwort im Setup, siehe §2.12 und [SEC-12](SEC-12-docker-default-passwords.md))
-- [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](SEC-07-session-lifetime-invalidation.md))
+- [x] Cache-Control für API-Endpunkte (ab 2.4.8, siehe §2.8 und [SEC-08](../findings/SEC-08-cache-control-api.md))
+- [x] Error-Messages ohne technische Details (ab 2.4.10; Diagnose-Log mit Staff-/Eigentümergrenze, siehe §2.10 und [SEC-10](../findings/SEC-10-information-disclosure.md))
+- [x] Docker-Passwörter ohne Defaults (ab 2.4.11; `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` als `${VAR:?...}`-Pflichtwerte, zufälliges lokales DB-Passwort im Setup, siehe §2.12 und [SEC-12](../findings/SEC-12-docker-default-passwords.md))
+- [x] Session-Lifetime auf 8 Stunden reduziert + SESSION_EXPIRE_AT_BROWSER_CLOSE + request.session.flush() bei Logout (ab 2.4.7, siehe §2.7 und [SEC-07](../findings/SEC-07-session-lifetime-invalidation.md))
 - [ ] Session-Rotation bei Passwort-Änderung (erfordert Passwort-Änderungs-View)
 - [x] X-Content-Type-Options: nosniff – explizit ab 2.4.6, siehe §2.6
-- [x] Permissions-Policy für Kamera/Mikrofon/Geolokation (ab 2.4.9, siehe §2.9 und [SEC-09](SEC-09-permissions-policy.md))
+- [x] Permissions-Policy für Kamera/Mikrofon/Geolokation (ab 2.4.9, siehe §2.9 und [SEC-09](../findings/SEC-09-permissions-policy.md))
 - [x] HSTS-Header für Produktion korrekt (kein Handlungsbedarf, siehe §2.11)
 
 ### Code-Qualität
 
-- [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](CODE-18-indicator-dedup.md))
-- [x] Type-Hints für Views (ab 2.4.16, siehe §4.4 und [CODE-19](CODE-19-view-type-hints.md))
-- [x] `__all__` für Trading-Modul (ab 2.4.17, siehe §4.5 und [CODE-20](CODE-20-module-exports.md))
-- [x] Bot-Start/Stop Race-Condition behoben (ab 2.4.12, siehe §3.1 und [BUG-12](BUG-12-race-condition-bot-start-stop.md))
-- [x] CSV-Export mit `io.StringIO`-Puffer (ab 2.4.13, siehe §3.3 und [BUG-14](BUG-14-csv-echo-true-stream.md))
+- [x] Indikator-Code dedupliziert (ab 2.4.15, siehe §4.3 und [CODE-18](../findings/CODE-18-indicator-dedup.md))
+- [x] Type-Hints für Views (ab 2.4.16, siehe §4.4 und [CODE-19](../findings/CODE-19-view-type-hints.md))
+- [x] `__all__` für Trading-Modul (ab 2.4.17, siehe §4.5 und [CODE-20](../findings/CODE-20-module-exports.md))
+- [x] Bot-Start/Stop Race-Condition behoben (ab 2.4.12, siehe §3.1 und [BUG-12](../findings/BUG-12-race-condition-bot-start-stop.md))
+- [x] CSV-Export mit `io.StringIO`-Puffer (ab 2.4.13, siehe §3.3 und [BUG-14](../findings/BUG-14-csv-echo-true-stream.md))
 - [ ] db_restore_state async-fähig
 
 ### Performance
 
 - [ ] Indikator-Memoisierung für Backtesting
-- [x] DB-Trim mit Batch-Delete (ab 2.4.14, siehe §4.2 und [PERF-17](PERF-17-db-trim-batch-delete.md))
-- [x] Aggregation auf DB-Ebene statt Python (ab 2.4.18, siehe §4.6 und [PERF-21](PERF-21-info-api-db-aggregation.md))
+- [x] DB-Trim mit Batch-Delete (ab 2.4.14, siehe §4.2 und [PERF-17](../findings/PERF-17-db-trim-batch-delete.md))
+- [x] Aggregation auf DB-Ebene statt Python (ab 2.4.18, siehe §4.6 und [PERF-21](../findings/PERF-21-info-api-db-aggregation.md))
 
 ---
 

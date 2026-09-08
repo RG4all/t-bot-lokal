@@ -1,6 +1,6 @@
 # Lokale Entwicklungsumgebung
 
-Aktuelle Version: [`VERSION`](../VERSION) · [Security-Review und Upgrade](SECURITY_REVIEW_2.4.4.md)
+Aktuelle Version: [`VERSION`](../../VERSION) · [Security-Review und Upgrade](../security/SECURITY_REVIEW_2.4.4.md)
 
 ## 1. Voraussetzungen und automatische Installation
 
@@ -236,7 +236,7 @@ Akzeptanz:
 - 100 Kandidaten × 5.000 Preispunkte
 - Eltern-Heartbeat ungefähr 20 ms und ohne große Ausreißer
 
-Vollständige Studie: [`BACKTESTING_STUDY.md`](BACKTESTING_STUDY.md).
+Vollständige Studie: [`BACKTESTING_STUDY.md`](../adr/ADR-0001-backtesting-worker-isolation.md).
 
 ## 8. Optionaler Scheduler
 
@@ -273,7 +273,7 @@ docker compose down -v              # lokale Daten vollständig löschen
 
 ### Blueprint deployen
 
-[`render.yaml`](../render.yaml) definiert einen Docker-Web-Service und PostgreSQL in Frankfurt. Der Container installiert die für PDF-Reports benötigten Systembibliotheken, wartet beim Start mit DNS-/Connection-Backoff auf PostgreSQL, führt Migrationen aus und startet Daphne auf `$PORT`.
+[`render.yaml`](../../render.yaml) definiert einen Docker-Web-Service und PostgreSQL in Frankfurt. Der Container installiert die für PDF-Reports benötigten Systembibliotheken, wartet beim Start mit DNS-/Connection-Backoff auf PostgreSQL, führt Migrationen aus und startet Daphne auf `$PORT`.
 
 1. Den geprüften PR in den Integrationsbranch `tbot.local` übernehmen; beide Render-Vorlagen referenzieren diesen Branch.
 2. In Render **New → Blueprint** wählen und dieses Repository verbinden.
@@ -298,14 +298,14 @@ Render Free besitzt keinen isolierten Background-Worker. Deshalb bleibt `BACKTES
 
 1. Redis/Render Key Value bereitstellen.
 2. Web und Worker dieselbe `REDIS_URL` geben.
-3. Bezahlten Worker anhand [`render.worker.example.yaml`](../render.worker.example.yaml) erstellen.
+3. Bezahlten Worker anhand [`render.worker.example.yaml`](../../render.worker.example.yaml) erstellen.
 4. Worker-Queue `backtest`, Concurrency 1 und Memory-Child-Limit prüfen.
 5. Optional Beat als separaten Service erstellen.
 6. Erst kleinen Test ausführen und `/api/backtesting/status/` beobachten.
 
 ## 12. Qualitätssicherung
 
-Die folgenden Kommandos dienen der lokalen Nachprüfung vor jedem Release; Docker-Smoke-Tests, `mypy` und `pip-audit` sind zusätzliche, umgebungsabhängige Prüfungen. Release-Prüfnachweise stehen im [CHANGELOG](CHANGELOG.md).
+Die folgenden Kommandos dienen der lokalen Nachprüfung vor jedem Release; Docker-Smoke-Tests, `mypy` und `pip-audit` sind zusätzliche, umgebungsabhängige Prüfungen. Release-Prüfnachweise stehen im [CHANGELOG](../CHANGELOG.md).
 
 ```bash
 # Shell-Skripte linten und Test-Suite ausfuehren

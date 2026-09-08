@@ -6,7 +6,7 @@
 - **Ursprüngliche Einstufung:** MEDIUM – Security; nach Prüfung explizite Konfigurationshärtung, kein nachgewiesener fehlender Header im bisherigen Django-Standard-Stack.
 - **Fix-Commit:** [`a2e6c4bd18fbcf1649efa1af6ec1822501f93958`](https://github.com/RG4all/t-bot-lokal/commit/a2e6c4bd18fbcf1649efa1af6ec1822501f93958) – `fix(security): enable X-Content-Type-Options nosniff`
 
-**Zuordnung des Dateinamens:** Diese im Auftrag genannte Datei war im Ausgangsstand nicht vorhanden. Der Vorlagenname `rule-lifecycle-authz` passt nicht zum Finding in Prompt 6. Dieses Dokument verfolgt ausdrücklich den nosniff-Fix und die verlangte SEC-05-Nachprüfung; es erklärt keinen separaten Regel-Lifecycle-/Autorisierungsbefund für behoben. Die ursprünglichen Befunde stehen in [`SECURITY_AUDIT.md`](SECURITY_AUDIT.md) §2.5/§2.6 und [`ARENA_AI_PROMPTS.md`](ARENA_AI_PROMPTS.md) Prompt 5/6.
+**Zuordnung des Dateinamens:** Diese im Auftrag genannte Datei war im Ausgangsstand nicht vorhanden. Der Vorlagenname `rule-lifecycle-authz` passt nicht zum Finding in Prompt 6. Dieses Dokument verfolgt ausdrücklich den nosniff-Fix und die verlangte SEC-05-Nachprüfung; es erklärt keinen separaten Regel-Lifecycle-/Autorisierungsbefund für behoben. Die ursprünglichen Befunde stehen in [`SECURITY_AUDIT.md`](../archive/SECURITY_AUDIT_2026-09-07.md) §2.5/§2.6 und [`ARENA_AI_PROMPTS.md`](../archive/ARENA_AI_PROMPTS_2026-09-07.md) Prompt 5/6.
 
 ## Befund und Root Cause
 

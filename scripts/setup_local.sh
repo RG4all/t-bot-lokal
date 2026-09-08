@@ -154,7 +154,7 @@ write_env_local() {
   # Defaults: docker-compose.yml verlangt POSTGRES_PASSWORD seit 2.4.11 als
   # Pflichtwert (${POSTGRES_PASSWORD:?...}). Bestehende Werte bleiben beim
   # Retuning erhalten; ein einmal initialisiertes Postgres-Volume akzeptiert
-  # nur das Passwort aus dem ersten Lauf (siehe docs/FAQ.md Abschnitt 5).
+  # nur das Passwort aus dem ersten Lauf (siehe docs/operations/FAQ.md Abschnitt 5).
   [[ -z "${pg_password}" ]]  && pg_password="$(random_secret)"
   [[ -z "${web_port}" ]]     && web_port="8369"
 
@@ -167,7 +167,7 @@ write_env_local() {
     warn "POSTGRES_PASSWORD entspricht dem frueher oeffentlichen Standard-Passwort."
     warn "Rotation empfohlen: 1) POSTGRES_PASSWORD-Zeile in ${ENV_LOCAL} leeren,"
     warn "2) dieses Skript erneut ausfuehren, 3) 'scripts/setup_local.sh --reset-db --yes'"
-    warn "(loescht die lokale Datenbank, siehe docs/FAQ.md Abschnitt 5)."
+    warn "(loescht die lokale Datenbank, siehe docs/operations/FAQ.md Abschnitt 5)."
   fi
 
   info "Schreibe ${ENV_LOCAL} (Mode 0600, Secrets werden beibehalten)..."

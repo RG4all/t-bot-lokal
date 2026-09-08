@@ -9,7 +9,7 @@
 
 ## Nachprüfung 2.4.4 – 2026-09-07
 
-Der ursprüngliche Review bleibt als Historie erhalten. Die Nachprüfung korrigiert öffentliche App-Defaults, den im Basis-Image deaktivierten Gate und das Überschreiben einer aktivierten Gate-Konfiguration beim Retuning. Secrets-Dateien werden vor dem Schreiben geschützt. Aktuelle Befunde, Grenzen und Testprotokoll: [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md).
+Der ursprüngliche Review bleibt als Historie erhalten. Die Nachprüfung korrigiert öffentliche App-Defaults, den im Basis-Image deaktivierten Gate und das Überschreiben einer aktivierten Gate-Konfiguration beim Retuning. Secrets-Dateien werden vor dem Schreiben geschützt. Aktuelle Befunde, Grenzen und Testprotokoll: [Security-Review 2.4.4](../security/SECURITY_REVIEW_2.4.4.md).
 
 ## 1. Checkliste Sicherheit
 

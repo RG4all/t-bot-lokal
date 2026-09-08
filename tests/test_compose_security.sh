@@ -7,7 +7,7 @@
 #     ueber die ${VAR:?...}-Interpolation (bricht ohne Env-Datei ab)
 #   * keine ${VAR:-default}-Fallbacks fuer Secrets in docker-compose.yml
 #   * die frueheren oeffentlichen Defaults erscheinen in keiner
-#     ausgelieferten Konfigurations-/Skriptdatei (Findings-Dokumente in docs/
+#     ausgelieferten Konfigurations-/Skriptdatei (Findings-Dokumente in docs/findings
 #     zitieren sie bewusst als historischen Befund)
 #   * Env-Beispiele enthalten keine benutzbaren Secret-Werte, sondern leere
 #     Platzhalter mit Erzeugungshinweis
