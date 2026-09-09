@@ -108,7 +108,11 @@
       addCell(row, item.direction);
       addCell(row, item.symbol);
       addCell(row, percent(item.change_24h));
-      addCell(row, item.volume_spike ? `ja (${item.volume_ratio}×)` : "nein");
+      addCell(
+        row,
+        item.volume_spike === true ? `ja (${item.volume_ratio}×)`
+          : item.volume_spike === null ? "nicht ermittelt" : "nein"
+      );
       addCell(row, ratio(item.liquidity_ratio));
       addCell(row, ratio(item.orderbook_depth_ratio));
       addCell(row, item.fundamental_reason || "geprüft");
@@ -129,9 +133,25 @@
     use.disabled = candidates.length === 0;
     warning.textContent = payload.risk_warning || "Volatile Märkte sind riskant. Stop-Loss verwenden.";
     warning.classList.remove("d-none");
+    let exclusionHint = "";
+    if (!candidates.length) {
+      // Transparenz: Die nächsten Ausschlüsse erklären, warum der Scan leer
+      // ist (z. B. Orderbuch-Tiefe unter Mindestwert bei Bitunix Spot).
+      const snapshots = payload.exchanges
+        ? Object.values(payload.exchanges)
+        : [payload];
+      const samples = snapshots
+        .flatMap(snapshot => snapshot.excluded_sample || [])
+        .slice(0, 3);
+      if (samples.length) {
+        exclusionHint = " Nächste Ausschlüsse: " + samples
+          .map(item => `${item.symbol} – ${item.reasons?.[0] || "Filter nicht erfüllt"}`)
+          .join(" · ");
+      }
+    }
     message.textContent = candidates.length
       ? `${candidates.length} qualifizierte Märkte gefunden (${payload.generated_at || "aktuell"}).`
-      : "Keine Märkte erfüllen derzeit alle konservativen Filter. Es werden keine Symbole automatisch ergänzt.";
+      : "Keine Märkte erfüllen derzeit alle konservativen Filter. Es werden keine Symbole automatisch ergänzt." + exclusionHint;
     message.className = `small mt-3 ${candidates.length ? "text-success" : "text-warning"}`;
   }
   async function scan(allExchanges = false) {

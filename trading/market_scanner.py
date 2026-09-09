@@ -69,10 +69,28 @@ _FORCE_MIN_INTERVAL_SECONDS = 20.0
 _FORCE_THROTTLE_MAX_ENTRIES = 16
 _LAST_FORCED: OrderedDict[tuple, float] = OrderedDict()
 _FORCE_THROTTLE_LOCK = threading.Lock()
+# Absolute Orderbuch-Tiefe (Quote-Währung, z. B. USDT) innerhalb von ±2 %
+# des Mittelkurses. Nur erforderlich, wenn die Exchange kein 24h-Quotevolumen
+# liefert (Bitunix Spot): Dort ist das relative Volumen-Maß nicht prüfbar,
+# und die Orderbuch-Tiefe ist das konservativste Liquiditätsmaß, das die
+# Börse tatsächlich veröffentlicht. Es wird nichts geschätzt oder ergänzt.
+MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE = 100_000.0
 
 
 class MarketScannerError(MarketDataError):
-    """Markt-Scanner konnte keinen belastbaren Snapshot erstellen."""
+    """Markt-Scanner konnte keinen belastbaren Snapshot erstellen.
+
+    ``user_message`` ist optional eine menschenlesbare, serverseitig
+    formulierte Beschreibung, die auch ohne Staff-Rechte an die API-Antwort
+    und das Frontend darf. Sie ist bewusst App-Prosa (keine Exception-Texte,
+    keine Serverdetails): Nur die hier explizit gesetzten Meldungen werden
+    ausgeliefert, der Generic-Fallback bleibt die fixe
+    ``_SCANNER_ERROR``-Konstante (SEC-10).
+    """
+
+    def __init__(self, message, user_message=None):
+        self.user_message = user_message
+        super().__init__(message)
 
 
 class MarketScannerFilterError(MarketScannerError):
@@ -430,7 +448,13 @@ class _BitunixScannerExchange:
 def _market_scanner_exchange(exchange_id, market_type):
     if exchange_id == "bitmart":
         if market_type != "spot":
-            raise MarketScannerError("BitMart bietet im t-bot nur Spot-Marktdaten")
+            raise MarketScannerError(
+                "BitMart bietet im t-bot nur Spot-Marktdaten",
+                user_message=(
+                    "BitMart wird im t-bot nur für Spot-Marktdaten unterstützt. "
+                    "Bitte die Marktart auf Spot stellen oder eine andere Exchange wählen."
+                ),
+            )
         return _BitMartScannerExchange()
     if exchange_id == "bitunix":
         return _BitunixScannerExchange(market_type)
@@ -586,6 +610,18 @@ def _orderbook_depth(exchange, symbol, ticker):
     return {"quote": depth, "mid": mid}, None
 
 
+def _safe_depth_reason(depth_error):
+    """Orderbuch-Fehlergründe sind Ausschlusstexte und damit auch für
+    Nicht-Staff-Nutzer sichtbar (``excluded_sample``). Der Fehlerpfad
+    ``_orderbook_depth`` setzt dabei den rohen Exception-Text an; für die
+    Anzeige wird er durch eine fixe, informative Zeile ersetzt (SEC-10).
+    Die übrigen Gründe sind bereits app-eigene Formulierungen.
+    """
+    if depth_error.startswith("Orderbuch nicht verfügbar"):
+        return "Orderbuch konnte nicht geladen oder nicht ausgewertet werden"
+    return depth_error
+
+
 def _normalise_ticker(symbol, ticker, market):
     change = _nested_number(ticker, keys=("percentage", "change24h", "priceChangePercent"))
     last = _nested_number(ticker, keys=("last", "close", "lastPrice"))
@@ -638,7 +674,13 @@ def _scan_uncached(
             and (market_type == "futures" or ":" not in str(symbol).split("/")[-1])
         }
         if not market_rows:
-            raise MarketScannerError(f"Keine {market_type}-Stablecoin-Märkte bei {exchange_id}")
+            raise MarketScannerError(
+                f"Keine {market_type}-Stablecoin-Märkte bei {exchange_id}",
+                user_message=(
+                    f"Bei {exchange_id} wurden derzeit keine handelbaren "
+                    f"{market_type}-Märkte mit Stablecoin-Quote gefunden."
+                ),
+            )
 
         # Binance kann alle 24h-Ticker kompakt ohne ``symbols=[...]`` liefern.
         # Genau dieser Request vermeidet die URL-Längenfehler bei großen
@@ -670,7 +712,13 @@ def _scan_uncached(
             if row["change_24h"] is not None:
                 normalised.append(row)
         if not normalised:
-            raise MarketScannerError("Die Exchange lieferte keine auswertbaren 24h-Kursdaten")
+            raise MarketScannerError(
+                "Die Exchange lieferte keine auswertbaren 24h-Kursdaten",
+                user_message=(
+                    "Die Exchange lieferte keine auswertbaren 24h-Kursdaten. "
+                    "Bitte in einigen Minuten erneut versuchen."
+                ),
+            )
 
         market_caps = _coingecko_market_caps({row["base"] for row in normalised})
         for row in normalised:
@@ -692,58 +740,73 @@ def _scan_uncached(
         for row in candidates:
             reasons = []
             daily_volume = row["quote_volume_24h"]
-            volume_ratio = (
-                daily_volume / volume_reference
-                if daily_volume is not None and daily_volume > 0 and volume_reference
-                else None
-            )
-            volume_spike = bool(
-                volume_ratio is not None and volume_ratio >= volume_spike_multiple
-            )
-            if daily_volume is None or daily_volume <= 0:
-                reasons.append("24h-Quotevolumen fehlt oder ist nicht positiv")
-            elif not volume_spike:
-                reasons.append(
-                    f"Volumen-Ausreißer unter {volume_spike_multiple:g}× Median"
+            volume_known = daily_volume is not None and daily_volume > 0
+            volume_ratio = None
+            volume_spike = None
+            liquidity_ratio = None
+            depth_quote = None
+            depth_ratio = None
+            if volume_known:
+                volume_ratio = (
+                    daily_volume / volume_reference if volume_reference else None
                 )
+                volume_spike = bool(
+                    volume_ratio is not None and volume_ratio >= volume_spike_multiple
+                )
+                if not volume_spike:
+                    reasons.append(
+                        f"Volumen-Ausreißer unter {volume_spike_multiple:g}× Median"
+                    )
+                market_cap = row["market_cap"]
+                liquidity_ratio = (
+                    daily_volume / market_cap
+                    if market_cap and market_cap > 0
+                    else None
+                )
+                if liquidity_ratio is None or liquidity_ratio < min_volume_market_cap_ratio:
+                    reasons.append(
+                        "Volumen/Marktkapitalisierung unter "
+                        f"{min_volume_market_cap_ratio * 100:g} % oder unbekannt"
+                    )
+                depth, depth_error = _orderbook_depth(exchange, row["symbol"], row["ticker"])
+                depth_quote = depth["quote"] if depth else None
+                depth_ratio = depth_quote / daily_volume if depth_quote else None
+                if depth_error:
+                    reasons.append(_safe_depth_reason(depth_error))
+                elif depth_ratio is None or depth_ratio < min_orderbook_depth_ratio:
+                    reasons.append(
+                        "Orderbuch-Tiefe unter "
+                        f"{min_orderbook_depth_ratio * 100:g} % des Tagesvolumens"
+                    )
+            else:
+                # BUG-26: Exchanges ohne 24h-Volumen (Bitunix Spot) lieferten
+                # früher *keinerlei* qualifizierte Märkte, weil jedes Volumen-
+                # kriterium mit „fehlend“ scheiterte. Der Liquiditätstest wird
+                # dann am absoluten Orderbuch-Tiefen-Boden gemessen (echte,
+                # veröffentlichte Börse-Daten statt Schätzungen); Volumen-
+                # Ausreißer und Volumen/Marktkapitalisierungs-Quote bleiben
+                # „nicht ermittelt“ (null) statt still zu scheitern.
+                market_cap = row["market_cap"]
+                depth, depth_error = _orderbook_depth(exchange, row["symbol"], row["ticker"])
+                depth_quote = depth["quote"] if depth else None
+                if depth_error:
+                    reasons.append(_safe_depth_reason(depth_error))
+                elif depth_quote is None:
+                    reasons.append(
+                        "Orderbuch-Tiefe nicht bestimmbar "
+                        "(24h-Volumen wird von der Exchange nicht geliefert)"
+                    )
+                elif depth_quote < MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE:
+                    reasons.append(
+                        f"Orderbuch-Tiefe {depth_quote:,.0f} USDT unter dem "
+                        f"absoluten Mindestwert {MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE:,.0f} "
+                        "USDT (24h-Volumen wird von der Exchange nicht geliefert)"
+                    )
             fundamental_ok, fundamental_reason = _utility_check(
                 row["symbol"], row["ticker"], row["market"]
             )
             if not fundamental_ok:
                 reasons.append(fundamental_reason)
-            market_cap = row["market_cap"]
-            liquidity_ratio = (
-                daily_volume / market_cap
-                if daily_volume is not None
-                and daily_volume > 0
-                and market_cap
-                and market_cap > 0
-                else None
-            )
-            if liquidity_ratio is None or liquidity_ratio < min_volume_market_cap_ratio:
-                reasons.append(
-                    "Volumen/Marktkapitalisierung unter "
-                    f"{min_volume_market_cap_ratio * 100:g} % oder unbekannt"
-                )
-            if daily_volume is not None and daily_volume > 0:
-                depth, depth_error = _orderbook_depth(exchange, row["symbol"], row["ticker"])
-            else:
-                depth, depth_error = (
-                    None,
-                    "Orderbuch-Tiefe kann ohne positives 24h-Volumen nicht bewertet werden",
-                )
-            depth_quote = depth["quote"] if depth else None
-            depth_ratio = (
-                depth_quote / daily_volume
-                if depth_quote and daily_volume is not None and daily_volume > 0
-                else None
-            )
-            if depth_ratio is None or depth_ratio < min_orderbook_depth_ratio:
-                reasons.append(
-                    depth_error
-                    or "Orderbuch-Tiefe unter "
-                    f"{min_orderbook_depth_ratio * 100:g} % des Tagesvolumens"
-                )
             eligible = not reasons
             rows.append(
                 {
@@ -775,6 +838,21 @@ def _scan_uncached(
         losers = [row for row in rows if row["eligible"] and row["change_24h"] < 0]
         gainers.sort(key=lambda row: row["change_24h"], reverse=True)
         losers.sort(key=lambda row: row["change_24h"])
+        # Transparenz: Die nächsten Ausschlüsse (Symbol + Hauptgründe) zeigen
+        # dem Nutzer im Frontend, *warum* ein Scan leer ist – statt einer
+        # undurchsichtigen „keine Märkte“-Meldung.
+        excluded_sample = [
+            {
+                "symbol": row["symbol"],
+                "change_24h": row["change_24h"],
+                "reasons": row["exclusion_reasons"][:2],
+            }
+            for row in sorted(
+                (row for row in rows if not row["eligible"]),
+                key=lambda row: abs(row["change_24h"]),
+                reverse=True,
+            )[:5]
+        ]
         return {
             "exchange": exchange_id,
             "market": market_type,
@@ -784,10 +862,12 @@ def _scan_uncached(
                 "minimum_volume_to_market_cap": min_volume_market_cap_ratio,
                 "minimum_orderbook_depth_ratio": min_orderbook_depth_ratio,
                 "volume_spike_multiple": volume_spike_multiple,
+                "min_absolute_orderbook_depth_quote": MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE,
             },
             "gainers": gainers[:limit],
             "losers": losers[:limit],
             "rows": rows,
+            "excluded_sample": excluded_sample,
             "risk_warning": (
                 "Volatile Märkte können in kurzer Zeit starke Verluste verursachen. "
                 "Nur etablierte, liquide Märkte auswählen und immer eine passende "
@@ -925,10 +1005,13 @@ def scan_all_market_opportunities(*, market="spot", refresh=False, **filters):
             # The same invalid user input applies to every exchange and must
             # be reported as HTTP 400 by the API rather than five outages.
             raise
-        except MarketScannerError:
+        except MarketScannerError as exc:
             # Auch Teilergebnisse werden direkt als API-Payload ausgeliefert.
+            # Nur die serverseitig formulierte user_message (App-Prosa, keine
+            # Exception-Details) ist für die Antwort freigegeben; andernfalls
+            # bleibt die fixe Fallback-Zeile (SEC-10).
             logger.exception("Marktscanner nicht verfügbar für %s/%s", exchange_id, market)
-            errors[exchange_id] = "Marktscanner vorübergehend nicht verfügbar."
+            errors[exchange_id] = exc.user_message or "Marktscanner vorübergehend nicht verfügbar."
     first = next(iter(results.values()), {})
     return {
         "market": market,

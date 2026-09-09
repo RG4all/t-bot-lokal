@@ -395,8 +395,18 @@ class ScannerTests(SimpleTestCase):
         self.assertIsNone(values["base_volume"])
         self.assertIsNone(values["quote_volume"])
 
-    def test_missing_bitunix_spot_volume_returns_explicitly_excluded_rows(self):
+    def test_missing_volume_falls_back_to_absolute_orderbook_depth_floor(self):
+        """BUG-26: Ohne 24h-Volumen (Bitunix Spot) misst der Liquiditätstest
+        die Orderbuch-Tiefe am absoluten Boden statt jede Zeile still
+        auszuschließen – so kann der Scan endlich qualifizierte Märkte liefern.
+        """
+        from trading.market_scanner import MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE
+
         class FakeExchange:
+            def __init__(self, depth_quote):
+                self.depth_quote = depth_quote
+                self.book_calls = 0
+
             def load_markets(self):
                 return {"BTC/USDT": {"active": True, "spot": True}}
 
@@ -412,23 +422,56 @@ class ScannerTests(SimpleTestCase):
                 }
 
             def fetch_order_book(self, _symbol, limit=20):
-                raise AssertionError("Fehlendes Tagesvolumen muss vor dem Orderbuch ausschließen")
+                self.book_calls += 1
+                amount = self.depth_quote / 119
+                return {
+                    "bids": [[119, amount]],
+                    "asks": [[121, 0.000000001]],
+                }
 
             def close(self):
                 pass
 
-        exchange = FakeExchange()
-        with patch("trading.market_scanner._market_scanner_exchange", return_value=exchange):
-            result = scan_market_opportunities("bitunix", "spot", refresh=True)
-        self.assertEqual(exchange.asserted_symbols, ["BTC/USDT"])
-        self.assertEqual(result["gainers"], [])
-        self.assertEqual(len(result["rows"]), 1)
-        self.assertFalse(result["rows"][0]["eligible"])
-        self.assertTrue(
-            any(
-                "24h-Quotevolumen fehlt" in reason
-                for reason in result["rows"][0]["exclusion_reasons"]
-            )
+        import trading.market_scanner as scanner_module
+
+        for depth_quote, eligible in (
+            (MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE * 2, True),
+            (MIN_ABSOLUTE_ORDERBOOK_DEPTH_QUOTE / 10, False),
+        ):
+            with self.subTest(eligible=eligible):
+                # Refresh-Drossel und Scan-Cache zwischen den Teilausführungen
+                # zurücksetzen, damit jeder Fall den Exchange aufruft.
+                scanner_module._reset_process_state_for_tests()
+                exchange = FakeExchange(depth_quote)
+                with patch(
+                    "trading.market_scanner._market_scanner_exchange",
+                    return_value=exchange,
+                ):
+                    result = scan_market_opportunities(
+                        "bitunix", "spot", refresh=True
+                    )
+                self.assertEqual(exchange.asserted_symbols, ["BTC/USDT"])
+                self.assertEqual(exchange.book_calls, 1)
+                row = result["rows"][0]
+                self.assertEqual(row["eligible"], eligible)
+                # Ohne Volumen bleiben die Volumen-Kriterien „nicht ermittelt“.
+                self.assertIsNone(row["volume_spike"])
+                self.assertIsNone(row["volume_ratio"])
+                if eligible:
+                    self.assertTrue(result["gainers"])
+                    self.assertFalse(row["exclusion_reasons"])
+                else:
+                    self.assertEqual(result["gainers"], [])
+                    self.assertTrue(
+                        any(
+                            "absoluten Mindestwert" in reason
+                            and "24h-Volumen wird von der Exchange nicht geliefert" in reason
+                            for reason in row["exclusion_reasons"]
+                        )
+                    )
+        self.assertIn(
+            "min_absolute_orderbook_depth_quote",
+            result["filters"],
         )
 
     def test_orderbook_depth_requires_two_sides_and_ignores_far_levels(self):

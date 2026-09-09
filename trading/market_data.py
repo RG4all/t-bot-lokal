@@ -342,10 +342,18 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 compact = item
                 active = True
             else:
+                # Dokumentierte Form: {"base": "BTC", "quote": "USDT", "isOpen": 1};
+                # symbol/symbolName bleiben als defensive Variante erhalten.
                 compact = item.get("symbol") or item.get("symbolName") or (
                     f"{item.get('base', '')}{item.get('quote', '')}"
                 ) or item.get("id")
-                status = str(item.get("symbolStatus", item.get("isOpen", "OPEN"))).upper()
+                status_raw = item.get("symbolStatus", item.get("isOpen"))
+                # Fail-closed: Fehlt das Statusfeld, ist der Pair-Status
+                # unbekannt – solche Einträge zählen nicht als handelbar.
+                # (Die Alternative "aktiv annehmen" würde ungültige Symbole
+                # durch die Validierung lassen und erst im Live-Betrieb
+                # fehlschlagen.)
+                status = str(status_raw).upper() if status_raw is not None else ""
                 active = status in {"OPEN", "1", "TRUE"}
             if compact and active:
                 symbols.add(str(compact).replace("_", "").replace("/", "").upper())
@@ -362,6 +370,7 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
         invalid = [symbol for symbol in symbols if _compact_symbol(symbol) not in available]
         if invalid:
             raise SymbolValidationError("Bitunix", invalid)
+        return []
 
     def fetch_tickers(self, symbols):
         self.validate_symbols(symbols)
@@ -384,7 +393,13 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 if original and last is not None:
                     prices[original] = {"last": last}
         else:
-            for compact, original in compact_to_original.items():
+            # Die Spot-API kennt keinen Batch-Endpunkt; je Symbol wird
+            # einzeln abgefragt. Zwischenraum hält die Request-Rate
+            # sicher unter dem dokumentierten Limit (10 Requests/Sek/IP),
+            # damit der Bot sich bei 20 Symbolen nicht selbst rate-limitet.
+            for index, (compact, original) in enumerate(compact_to_original.items()):
+                if index:
+                    time.sleep(0.11)
                 payload = self._json(
                     f"{self.spot_base}/market/last_price",
                     params={"symbol": compact},
