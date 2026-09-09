@@ -30,6 +30,7 @@ from .market_data import (
     BitMartPublicMarketData,
     BitunixPublicMarketData,
     MarketDataConnectionError,
+    MarketDataTimeoutError,
     RateLimitError,
     SymbolValidationError,
     WebSocketReconnectError,
@@ -272,6 +273,24 @@ def db_flush_tradinglogs_safe(payloads):
         return False
 
 
+def _error_message_text(message, exception_type=""):
+    """Liefert niemals eine leere Fehlermeldung.
+
+    ``asyncio.TimeoutError`` und einige andere Ausnahmen haben keinen
+    Meldungstext (``str(exc) == ""``). Ein ErrorLog-Eintrag mit leerer
+    Meldung ist für die Diagnose wertlos und erscheint im Fehler-Log als
+    unlesbarer Eintrag – stattdessen benennt der Fallback mindestens den
+    Exception-Typ.
+    """
+    text = str(message)
+    if not text.strip():
+        return (
+            f"{exception_type or 'Ausnahme'} ohne Meldungstext; die genaue "
+            "Ursache ist nur im Server-Log (Traceback) dokumentiert."
+        )
+    return text
+
+
 @sync_to_async(thread_sensitive=False, executor=_BOT_DB_EXECUTOR)
 @db_safe(suppress=True)
 def db_log_error(
@@ -288,7 +307,7 @@ def db_log_error(
             severity=severity,
             source=source[:100],
             exception_type=exception_type[:200],
-            message=str(message)[:4000],
+            message=_error_message_text(message, exception_type)[:4000],
             details=details or {},
         )
     except (InterfaceError, OperationalError):
@@ -434,7 +453,7 @@ class TradingBot(threading.Thread):
             self.loop.run_until_complete(self.main_loop())
         except Exception as exc:
             logger.exception("Bot %s wurde unerwartet beendet", self.config_id)
-            self.last_error = str(exc)
+            self.last_error = _error_message_text(exc, type(exc).__name__)
             self.last_error_at = time.time()
         finally:
             try:
@@ -460,7 +479,9 @@ class TradingBot(threading.Thread):
 
     async def _persist_error(self, key, source, error, severity="error", details=None):
         now = time.time()
-        text = str(error)
+        # Niemals leer: Ausnahmen ohne Text (z. B. TimeoutError) würden
+        # sonst als identische, unlesbare Einträge dedupliziert.
+        text = _error_message_text(error, type(error).__name__)
         previous_time, previous_text = self._persisted_errors.get(key, (0, None))
         # Identische Dauerfehler (z. B. eine regional blockierte Exchange)
         # höchstens alle 15 Minuten persistieren, damit die DB nicht vollläuft.
@@ -525,7 +546,10 @@ class TradingBot(threading.Thread):
                 try:
                     tickers = await self.fetch_tickers(self.symbols)
                 except Exception as exc:
-                    text = str(exc)
+                    # Nicht-leere, menschenlesbare Meldung für Status und
+                    # ErrorLog (Ausnahmen ohne Text fallen auf den
+                    # Exception-Typ zurück).
+                    text = _error_message_text(exc, type(exc).__name__)
                     if isinstance(exc, SymbolValidationError):
                         self.last_error = f"Konfiguration ungültig: {text}"
                         self.last_error_at = time.time()
@@ -600,7 +624,13 @@ class TradingBot(threading.Thread):
                         any_success = True
                     except Exception as exc:
                         logger.error("%s Verarbeitungsfehler: %s", symbol, exc)
-                        self.last_error = f"{symbol}: {exc}"
+                        # Stabiles Präfix für die sichere Dashboard-Kurzform
+                        # (views._user_safe_bot_error); der Rest ist
+                        # app-eigene Diagnose und bleibt hier intern.
+                        self.last_error = (
+                            f"Symbolverarbeitung {symbol}: "
+                            f"{_error_message_text(exc, type(exc).__name__)}"
+                        )
                         self.last_error_at = time.time()
                         await self._persist_error(
                             f"symbol:{symbol}",
@@ -642,6 +672,32 @@ class TradingBot(threading.Thread):
                 await self._persist_error("main_loop", "trading_bot.main_loop", exc)
                 await self._sleep(2)
 
+    # Zeitbudgets für den Kursabruf. Der synchrone Multi-Request-HTTP-Pfad
+    # (BitMart/Bitunix) stellt je Symbol Einzelanfragen auf; jede hat einen
+    # eigenen 15-s-Timeout. Das Gesamtbudget muss so bemessen sein, dass im
+    # Normalfall die Einzel-Requests mit ihrer eigenen, beschreibbaren
+    # Fehlermeldung abschließen und der (immer nicht-leere)
+    # MarketDataTimeoutError nur bei wirklich langsamer/gesperrter Börse
+    # greift – nicht nach einer willkürlichen, zu kurzen Frist.
+    _SYNC_FETCH_BASE_TIMEOUT_SECONDS = 20
+    _SYNC_FETCH_PER_SYMBOL_SECONDS = 12
+    _SYNC_FETCH_MAX_TIMEOUT_SECONDS = 120
+    _WS_FETCH_TIMEOUT_SECONDS = 90
+
+    def _sync_fetch_timeout(self, symbol_count):
+        return min(
+            self._SYNC_FETCH_MAX_TIMEOUT_SECONDS,
+            self._SYNC_FETCH_BASE_TIMEOUT_SECONDS
+            + self._SYNC_FETCH_PER_SYMBOL_SECONDS * max(1, symbol_count),
+        )
+
+    def _timeout_error(self, symbol_count, timeout_seconds):
+        return MarketDataTimeoutError(
+            self.config.get_exchange_display(),
+            max(1, symbol_count),
+            timeout_seconds,
+        )
+
     async def fetch_tickers(self, symbols):
         # Kill-Switch und Hauptzyklus dürfen dasselbe Exchange-/WebSocket-
         # Objekt niemals gleichzeitig lesen.
@@ -650,17 +706,31 @@ class TradingBot(threading.Thread):
         async with self._market_data_lock:
             fetch_many_async = getattr(self.exchange, "fetch_tickers_async", None)
             if fetch_many_async:
-                return await asyncio.wait_for(fetch_many_async(symbols), timeout=90)
+                try:
+                    return await asyncio.wait_for(
+                        fetch_many_async(symbols), timeout=self._WS_FETCH_TIMEOUT_SECONDS
+                    )
+                except asyncio.TimeoutError as exc:
+                    # asyncio.TimeoutError hat keinen Text; in den Fehler-Log
+                    # gehört eine beschreibbare Meldung, kein leerer String.
+                    raise self._timeout_error(len(symbols), self._WS_FETCH_TIMEOUT_SECONDS) from exc
 
             fetch_many = getattr(self.exchange, "fetch_tickers", None)
             if fetch_many:
+                timeout = self._sync_fetch_timeout(len(symbols))
                 future = self.loop.run_in_executor(None, fetch_many, symbols)
-                return await asyncio.wait_for(future, timeout=25)
+                try:
+                    return await asyncio.wait_for(future, timeout=timeout)
+                except asyncio.TimeoutError as exc:
+                    raise self._timeout_error(len(symbols), timeout) from exc
 
             tickers = {}
             for symbol in symbols:
                 future = self.loop.run_in_executor(None, self.exchange.fetch_ticker, symbol)
-                tickers[symbol] = await asyncio.wait_for(future, timeout=20)
+                try:
+                    tickers[symbol] = await asyncio.wait_for(future, timeout=20)
+                except asyncio.TimeoutError as exc:
+                    raise self._timeout_error(1, 20) from exc
             return tickers
 
     def store_price(self, symbol, ticker):

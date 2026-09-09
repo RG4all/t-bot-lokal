@@ -57,11 +57,25 @@
 {% if not errors %}
 <div class="alert alert-success">Für diesen Filter gibt es keine Fehler.</div>
 {% else %}
+{% if not request.user.is_staff %}
+<div class="alert alert-info py-2 small mb-3">
+  Jede Zeile erklärt <strong>was</strong> passiert ist, <strong>warum</strong> und <strong>was du tun kannst</strong>.
+  Die <strong>Referenznummer</strong> identifiziert den Eintrag im technischen Server-Log:
+  Nenne sie dem Betreiber, wenn das Problem anhält oder die Erklärung nicht weiterhilft.
+</div>
+{% endif %}
 <div class="table-responsive">
 <table class="table table-sm table-striped align-middle">
-  <thead><tr><th>Zeitpunkt</th><th>Konfiguration</th><th>Schweregrad</th><th>Quelle / Typ</th><th>Meldung und Details</th><th>Status</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Zeitpunkt</th><th>Konfiguration</th><th>Schweregrad</th>
+      {% if request.user.is_staff %}<th>Quelle / Typ</th><th>Meldung und Details</th>
+      {% else %}<th>Referenz</th><th>Was ist passiert – Ursache und Abhilfe</th>{% endif %}
+      <th>Status</th>
+    </tr>
+  </thead>
   <tbody>
-  {% for error in errors %}
+  {% for item in annotated_errors %}{% with error=item.error %}
     <tr class="{% if error.resolved %}text-muted{% elif error.severity == 'critical' %}table-danger{% elif error.severity == 'warning' %}table-warning{% endif %}">
       <td class="text-nowrap">{{ error.timestamp|date:"d.m.Y H:i:s" }}</td>
       <td>{{ error.configuration.name|default:"–" }}{% if error.configuration_id %}<br><small>#{{ error.configuration_id }}</small>{% endif %}</td>
@@ -71,8 +85,19 @@
       <td><code>{{ error.source }}</code>{% if error.exception_type %}<br><small>{{ error.exception_type }}</small>{% endif %}</td>
       <td style="min-width:24rem; white-space:pre-wrap; word-break:break-word;">{{ error.message }}{% if error.details %}<details class="mt-1"><summary>Technische Details</summary><pre class="small bg-light border rounded p-2 mt-1">{{ error.details }}</pre></details>{% endif %}</td>
       {% else %}
-      <td>Referenz #{{ error.id }}</td>
-      <td>Ein Fehler ist aufgetreten. Bitte bei anhaltenden Problemen den Betreiber mit dieser Referenz kontaktieren.</td>
+      <td>Referenz #{{ error.id }}<br>
+        <span class="field-info-icon text-muted" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="Nummer dieses Eintrags im technischen Server-Log. Bei anhaltenden Problemen diese Nummer und die Konfiguration dem Betreiber nennen.">ⓘ</span>
+      </td>
+      <td style="min-width:28rem;">
+        <div class="fw-semibold">{{ item.explanation.what }}</div>
+        <div class="small"><span class="text-muted">Ursache:</span> {{ item.explanation.why }}</div>
+        {% if item.explanation.context %}
+        <div class="small"><span class="text-muted">Details:</span>
+          {% for fact in item.explanation.context %}{{ fact }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        <div class="small"><span class="text-muted">Was tun:</span> {{ item.explanation.do }}</div>
+      </td>
       {% endif %}
       <td>
         <form method="post" action="{% url 'error_log_resolve' error.id %}">
@@ -81,7 +106,7 @@
         </form>
       </td>
     </tr>
-  {% endfor %}
+  {% endwith %}{% endfor %}
   </tbody>
 </table>
 </div>

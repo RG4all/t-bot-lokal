@@ -18,6 +18,29 @@ class MarketDataConnectionError(MarketDataError):
     """Die Börse war technisch nicht erreichbar oder lieferte ungültige Daten."""
 
 
+class MarketDataTimeoutError(MarketDataConnectionError):
+    """Der Kursabruf lief vor dem Ablauf des Zeitbudgets nicht zu Ende.
+
+    ``asyncio.TimeoutError`` hat keinen eigenen Meldungstext
+    (``str(asyncio.TimeoutError()) == ""``). Würde er unverändert in den
+    Fehler-Log wandern, bliebe dort eine leere Meldung zurück, aus der weder
+    Nutzer noch Betreiber ableiten können, was geschah. Dieser Subtyp trägt
+    deshalb eine präzise, menschenlesbare Beschreibung (Börse, Anzahl der
+    Symbole, Zeitbudget) und wird im Bot wie eine Verbindungsstörung mit
+    wachsender Wartezeit behandelt.
+    """
+
+    def __init__(self, exchange, symbol_count, timeout_seconds):
+        self.exchange = exchange
+        self.symbol_count = symbol_count
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Kursabruf von {exchange} für {symbol_count} Symbol(e) lief nach "
+            f"{timeout_seconds:.0f} s nicht zu Ende. Die Börse antwortet zu langsam, "
+            "ist überlastet oder vom Server aus nicht erreichbar."
+        )
+
+
 class WebSocketReconnectError(MarketDataConnectionError):
     def __init__(self, exchange, attempts, last_error):
         self.exchange = exchange
@@ -342,10 +365,18 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 compact = item
                 active = True
             else:
+                # Dokumentierte Form: {"base": "BTC", "quote": "USDT", "isOpen": 1};
+                # symbol/symbolName bleiben als defensive Variante erhalten.
                 compact = item.get("symbol") or item.get("symbolName") or (
                     f"{item.get('base', '')}{item.get('quote', '')}"
                 ) or item.get("id")
-                status = str(item.get("symbolStatus", item.get("isOpen", "OPEN"))).upper()
+                status_raw = item.get("symbolStatus", item.get("isOpen"))
+                # Fail-closed: Fehlt das Statusfeld, ist der Pair-Status
+                # unbekannt – solche Einträge zählen nicht als handelbar.
+                # (Die Alternative "aktiv annehmen" würde ungültige Symbole
+                # durch die Validierung lassen und erst im Live-Betrieb
+                # fehlschlagen.)
+                status = str(status_raw).upper() if status_raw is not None else ""
                 active = status in {"OPEN", "1", "TRUE"}
             if compact and active:
                 symbols.add(str(compact).replace("_", "").replace("/", "").upper())
@@ -362,6 +393,7 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
         invalid = [symbol for symbol in symbols if _compact_symbol(symbol) not in available]
         if invalid:
             raise SymbolValidationError("Bitunix", invalid)
+        return []
 
     def fetch_tickers(self, symbols):
         self.validate_symbols(symbols)
@@ -384,7 +416,13 @@ class BitunixPublicMarketData(PublicHTTPMarketData):
                 if original and last is not None:
                     prices[original] = {"last": last}
         else:
-            for compact, original in compact_to_original.items():
+            # Die Spot-API kennt keinen Batch-Endpunkt; je Symbol wird
+            # einzeln abgefragt. Zwischenraum hält die Request-Rate
+            # sicher unter dem dokumentierten Limit (10 Requests/Sek/IP),
+            # damit der Bot sich bei 20 Symbolen nicht selbst rate-limitet.
+            for index, (compact, original) in enumerate(compact_to_original.items()):
+                if index:
+                    time.sleep(0.11)
                 payload = self._json(
                     f"{self.spot_base}/market/last_price",
                     params={"symbol": compact},
