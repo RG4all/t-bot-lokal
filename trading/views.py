@@ -80,6 +80,11 @@ _MANUAL_HTML: str | None = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
 _MAX_ANALYSIS_ROWS = 20_000
+# W8: Der Report lud bisher die komplette Trade-Historie in den RAM und
+# skalierte damit mit der Konfigurationsgroesse (bis 200k Logs). Der Report
+# arbeitet auf den neuesten Eintraegen bis zu dieser Grenze und weist im
+# Template sichtbar aus, wenn gekuerzt wurde.
+_MAX_REPORT_ROWS = 10_000
 # W2: Der Dashboard-JS pollt info- und logs-Endpunkt parallel; beide bauen
 # denselben Portfolio-Snapshot (zwei Queries je Symbol). Ein kurzer, prozess-
 # lokaler TTL-Cache (LRU, gedeckelt) entlastet die kleine Produktions-DB um
@@ -1547,8 +1552,15 @@ def _build_report_context(config: Configuration) -> dict[str, Any]:
 
     Raises:
         RuntimeError: Wenn die Diagramm-Engine (Matplotlib) fehlt.
+
+    W8: Kennzahlen und Tabellen beziehen sich auf die neuesten
+    ``_MAX_REPORT_ROWS`` Trades; darueber hinausgehende Historie wird gekuerzt
+    und ueber ``history_truncated`` im Report ausgewiesen statt stillschweigend
+    die Laufzeit/Speichergrenze des Webprozesses zu gefaehrden.
     """
-    logs = list(config.logs.all().order_by("timestamp", "id"))
+    total_logs = config.logs.count()
+    history_truncated = total_logs > _MAX_REPORT_ROWS
+    logs = _latest_rows(config.logs.all(), _MAX_REPORT_ROWS)
     portfolio = _portfolio_snapshot(config)
     sell_logs = [log for log in logs if log.action == "sell"]
     symbol_counts = Counter(log.symbol for log in logs)
@@ -1634,6 +1646,9 @@ def _build_report_context(config: Configuration) -> dict[str, Any]:
         "logs": logs,
         "generated_at": timezone.localtime(),
         "total_trades": len(logs),
+        "history_truncated": history_truncated,
+        "total_log_count": total_logs,
+        "report_row_limit": _MAX_REPORT_ROWS,
         "buy_trades": sum(log.action == "buy" for log in logs),
         "sell_trades": len(sell_logs),
         "total_profit": cumulative_profit,
