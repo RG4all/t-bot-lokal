@@ -5,7 +5,8 @@ import logging
 import math
 import re
 import threading
-from collections import Counter, defaultdict
+import time
+from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
@@ -78,6 +79,17 @@ _MANUAL_RENDER_LOCK = threading.Lock()
 _MANUAL_HTML: str | None = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
+_MAX_ANALYSIS_ROWS = 20_000
+# W2: Der Dashboard-JS pollt info- und logs-Endpunkt parallel; beide bauen
+# denselben Portfolio-Snapshot (zwei Queries je Symbol). Ein kurzer, prozess-
+# lokaler TTL-Cache (LRU, gedeckelt) entlastet die kleine Produktions-DB um
+# den Faktor der gleichzeitig gepollten Endpunkte. Zustandsaendernde POSTs
+# (manueller Verkauf, Kill-Switch, Reset, Konfigurations-/Loschg-Eingriffe)
+# invalidieren explizit, damit das UI den neuen Stand sofort sieht.
+_PORTFOLIO_TTL_SECONDS = 2.0
+_PORTFOLIO_CACHE_MAX = 64
+_PORTFOLIO_CACHE: OrderedDict[int, tuple[float, dict[str, Any]]] = OrderedDict()
+_PORTFOLIO_CACHE_LOCK = threading.Lock()
 
 # Typvariablen für generische Helfer und Decorator. ``_ViewParams`` erhält die
 # vollständige Signatur der dekorierten View (inklusive URL-Parametern),
@@ -296,6 +308,47 @@ def _cash_flow(log: TradingLog) -> Decimal:
 
 
 def _portfolio_snapshot(config: Configuration) -> dict[str, Any]:
+    """Liefert den Portfolio-Snapshot der Konfiguration (kurzzeitig gecacht).
+
+    W2: ``_compute_portfolio_snapshot`` setzt pro Symbol zwei Abfragen ab
+    (letzter Trade, letzter Preis). Dashboard- polling ruft dieselbe
+    Rechnung über ``info_api`` und ``logs_api`` parallel auf. Der Snapshot
+    wird daher ``_PORTFOLIO_TTL_SECONDS`` prozesslokal gecacht und nach
+    zustandsändernden POSTs über ``_invalidate_portfolio_cache`` verworfen.
+    Der Bot schreibt ohnehin höchstens im konfigurierbaren Prüfintervall
+    (≥ 1 s), die Cache-TTL bleibt also unterhalb der Aktualitätsrate der Daten.
+
+    Achtung: Der zurückgegebene Snapshot ist das gecachte Objekt und von allen
+    Aufrufern **read-only** zu behandeln.
+
+    Args:
+        config: Trading-Konfiguration.
+
+    Returns:
+        Dasselbe Dictionary wie ``_compute_portfolio_snapshot``.
+    """
+    now = time.monotonic()
+    with _PORTFOLIO_CACHE_LOCK:
+        cached = _PORTFOLIO_CACHE.get(config.id)
+        if cached is not None and now - cached[0] < _PORTFOLIO_TTL_SECONDS:
+            _PORTFOLIO_CACHE.move_to_end(config.id)
+            return cached[1]
+    snapshot = _compute_portfolio_snapshot(config)
+    with _PORTFOLIO_CACHE_LOCK:
+        _PORTFOLIO_CACHE[config.id] = (now, snapshot)
+        _PORTFOLIO_CACHE.move_to_end(config.id)
+        while len(_PORTFOLIO_CACHE) > _PORTFOLIO_CACHE_MAX:
+            _PORTFOLIO_CACHE.popitem(last=False)
+    return snapshot
+
+
+def _invalidate_portfolio_cache(config_id: int) -> None:
+    """Verwirft den gecachten Portfolio-Snapshot einer Konfiguration (W2)."""
+    with _PORTFOLIO_CACHE_LOCK:
+        _PORTFOLIO_CACHE.pop(config_id, None)
+
+
+def _compute_portfolio_snapshot(config: Configuration) -> dict[str, Any]:
     """Erstellt einen Portfolio-Snapshot für die angegebene Konfiguration.
 
     Args:
@@ -685,6 +738,7 @@ def config_edit_view(request: HttpRequest, config_id: int) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         was_running = config.is_running
         config = form.save()
+        _invalidate_portfolio_cache(config.id)
         if was_running:
             bot_manager.restart_bot(config)
         messages.success(request, "Konfiguration wurde aktualisiert.")
@@ -762,6 +816,7 @@ def config_delete(request: HttpRequest, config_id: int) -> HttpResponse:
     if request.method == "POST":
         bot_manager.stop_bot(config)
         config.delete()
+        _invalidate_portfolio_cache(config_id)
         messages.success(request, "Konfiguration wurde gelöscht.")
         return redirect("config_list")
     return render(
@@ -847,6 +902,7 @@ def reset_log(request: HttpRequest, config_id: int) -> HttpResponseRedirect:
     else:
         config.logs.all().delete()
         messages.success(request, "Trading-Log und simuliertes Portfolio wurden zurückgesetzt.")
+    _invalidate_portfolio_cache(config.id)
     return _redirect_dashboard(config.id)
 
 
@@ -1240,10 +1296,12 @@ def logs_api(request: HttpRequest, config_id: int) -> JsonResponse:
     page = paginator.get_page(request.GET.get("page", 1))
     open_symbols = set(bot_manager.open_symbols(config.id))
     if not open_symbols:
-        for symbol in _symbols(config):
-            latest = config.logs.filter(symbol=symbol).order_by("-timestamp", "-id").first()
-            if latest and latest.action == "buy":
-                open_symbols.add(symbol)
+        # W2: Der (gecachte) Portfolio-Snapshot enthaelt genau die Symbole,
+        # deren letzter Trade ein Kauf ist – dasselbe Kriterium wie die
+        # fruehere Query-pro-Symbol-Schleife, aber ohne N+1-Abfragen.
+        open_symbols = {
+            str(position["symbol"]) for position in _portfolio_snapshot(config)["positions"]
+        }
 
     results = [
         {
@@ -1300,6 +1358,7 @@ def manual_sell_view(request: HttpRequest, config_id: int) -> JsonResponse:
         return JsonResponse({"status": "error", "message": "Ungültiges Symbol"}, status=400)
     try:
         bot_manager.manual_sell(config.id, symbol)
+        _invalidate_portfolio_cache(config.id)
         return JsonResponse({"status": "ok"})
     except Exception as exc:
         logger.exception("Manueller Verkauf für %s/%s fehlgeschlagen", config.id, symbol)
@@ -1341,6 +1400,8 @@ def kill_switch_view(request: HttpRequest, config_id: int) -> JsonResponse:
             {"status": "error", "message": _KILL_SWITCH_ERROR},
             status=400 if isinstance(exc, ValueError) else 500,
         )
+    # Der Kill-Switch veraendert Positionen und Kassenstand unmittelbar.
+    _invalidate_portfolio_cache(config.id)
     status = "ok" if not result["errors"] else "partial"
     return JsonResponse({"status": status, **result})
 
