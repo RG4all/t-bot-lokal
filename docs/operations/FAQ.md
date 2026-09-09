@@ -29,6 +29,13 @@ docker compose up --build -d
 
 Danach oeffnen: **<http://localhost:8369/>** (http, nicht https).
 
+Nach dem Setup ist **kein Neustart nötig** - das Skript startet den Stack
+selbst und wartet auf den Health-Status von `web`. Wer über Weg 1/2 startet,
+muss manuellen `docker compose`-Kommandos die Env-Datei mitgeben
+(`docker compose --env-file .env.local ps`), sonst brechen sie mit
+„required variable SECRET_KEY is missing a value" ab:
+[COMPOSE_ENV_FILE.md](COMPOSE_ENV_FILE.md).
+
 ## 2. Welche Container laufen sollen?
 
 ```bash
@@ -168,6 +175,10 @@ Korrekte Zeile im Log:
 Nicht beide gleichzeitig nutzen - es kann zu Passwort-Konflikten kommen
 (siehe Punkt 5). Empfehlung: `scripts/setup_local.sh` als Standard.
 
+Warum nackte `docker compose`-Kommandos ohne `--env-file` abbrechen, welche
+drei Abhilfen es gibt und welches Kommando welche Wirkung hat:
+[COMPOSE_ENV_FILE.md](COMPOSE_ENV_FILE.md).
+
 ## 8. Passwoerter aendern / Secret-Rotation
 
 Für **App-Secrets** (`SECRET_KEY`, `PASSPHRASE`):
@@ -281,6 +292,12 @@ tests/distro_smoke_test.sh
    `git pull` immer `--build` verwenden.
 6. **Die Startseite braucht Datenbank/Redis**; `/health/` ist davon
    unabhaengig und der beste erste Erreichbarkeitstest.
+7. **„required variable SECRET_KEY is missing a value"** ist kein Defekt:
+   Compose lädt automatisch nur `.env`, das Setup schreibt `.env.local`.
+   Abhilfe: [COMPOSE_ENV_FILE.md](COMPOSE_ENV_FILE.md).
+8. **`docker compose restart` nach Env-Änderungen** übernimmt die neuen Werte
+   nicht - es startet nur den Prozess im bestehenden Container neu. Richtig
+   ist `up -d --force-recreate` ([COMPOSE_ENV_FILE.md](COMPOSE_ENV_FILE.md)).
 
 ## 15. Warum liefert der Gate HTTP 429 hinter einem Proxy?
 
