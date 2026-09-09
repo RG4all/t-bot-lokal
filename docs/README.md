@@ -51,6 +51,7 @@ Ein Dokument pro abgeschlossenem Audit-/Review-Befund. Der Status im Dokumentenk
 - Konventionen, Findings-Vorlage und Peer-Review-/Patch-Workflow: [CONTRIBUTING.md](../CONTRIBUTING.md)
 - Patch-Eingang für Review-Vorschläge: [`patches/`](../patches/README.md)
 - Dokument-Wächter (Links, Anker, Orphans, Namensregeln): `python3 scripts/check_docs.py`
+- Automatischer Qualitäts-Gate bei jedem Push/PR (Doku-Wächter, Django-Checks/-Tests, Ruff, Shell-Suite, ShellCheck, `pip check`): `.github/workflows/quality.yml`
 
 ## Archiv
 

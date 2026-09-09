@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased] – 2026-09-09
+Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
+
+## [Unreleased]
+
+## [2.4.20] – 2026-09-09
 
 ### Dokumentation und Wartbarkeit (Repo-Restrukturierung)
 
@@ -9,11 +13,16 @@
 - **Links:** ein kaputter Anker gefixt (`PERF-21#ci-und-auslieferung` → `#auslieferung-und-pruefgrenzen`); 37 GitHub-only-Deep-Links auf CHANGELOG-Anker zu reinen Dateilinks zurückgebaut; 162 relative Links an die neue Struktur angepasst; zuvor verwaiste Dokumente (Tailscale, Caddy, Peer-Reviews) sind jetzt im Index bzw. Archiv erreichbar.
 - **Code-Referenzen:** `trading/views.py` rendert das Handbuch von `docs/manual/MANUAL.md` (alte Pfade bleiben als Fallback); Kommentare in `scripts/setup_local.sh`, `tests/test_compose_security.sh` und sechs Test-Docstrings auf Archiv-/Findingspfade nachgezogen.
 - **Namensregeln:** `SEC-06-rule-lifecycle-authz.md` → `SEC-06-content-type-nosniff.md` (Dateiname entspricht dem im Dokument erklärten Befund).
-- **Werkzeuge:** neuer Doku-Wächter `scripts/check_docs.py` (Links, Anker, Orphans, Namenskonventionen, Duplikat-/Versions-Hinweise), versionierte CI-Definition `ci/quality.yml` (vom Maintainer nach `.github/workflows/` zu übernehmen – die GitHub-App besitzt keine `workflows`-Push-Rechte), `CONTRIBUTING.md` (Struktur-/Duplikat-/Namensregeln, Audit-Zyklen) und `patches/` als Peer-Review-Patch-Eingang (`inbox/` → `accepted/`/`done/`, Review-Vorlage).
+- **Werkzeuge:** neuer Doku-Wächter `scripts/check_docs.py` (Links, Anker, Orphans, Namenskonventionen, Duplikat-/Versions-Hinweise), ab diesem Release aktiver CI-Qualitäts-Gate `.github/workflows/quality.yml` (nähere Angaben im Abschnitt „CI-Aktivierung“ unten), `CONTRIBUTING.md` (Struktur-/Duplikat-/Namensregeln, Audit-Zyklen) und `patches/` als Peer-Review-Patch-Eingang (`inbox/` → `accepted/`/`done/`, Review-Vorlage).
 - **Konfigurations-Template:** `config.template` heißt jetzt `config.template.env` (Endung = Format); `Dockerfile`-COPY, `.gitignore`-Negation und beide Shell-Prüfungen (`test_compose_security.sh`, `test_config_generation.sh`) nachgezogen; historische CHANGELOG-/Fundstellen-Texte bleiben bewusst im Wortlaut.
-- Keine Code-, Settings-, Modell- oder Migrationsänderung; `/help/`-Auslieferung, Tests und Docker-Stack unverändert gültig (330 Django-/Python-Tests und 8/8 Shell-Tests grün vor und nach der Umstellung).
+- **Changelog-Pflege:** Die Einleitung („Alle relevanten Änderungen …“) steht wieder direkt unter der `# Changelog`-Überschrift; der bislang als `[Unreleased]` geführte Restrukturierungsstand wird mit diesem Release ausgeliefert.
 
-Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
+### CI-Aktivierung und Release-Versionierung
+
+- **CI-Workflow aktiv:** Die GitHub-App besitzt seit diesem Release die `workflows`-Push-Berechtigung; die versionierte CI-Definition liegt jetzt als `.github/workflows/quality.yml` und läuft bei **jedem Push und Pull Request** automatisch: Doku-Wächter, Django-Systemcheck, Migrations- und Statik-Prüfung, 330 Django-/Python-Tests, Ruff, 8/8 Shell-Testgruppen, ShellCheck und `pip check`. Die bis dahin gepflegte Referenzkopie `ci/quality.yml` samt `ci/README.md` (Zwei-Kopien-Pflege „bis die App-Rechte erweitert werden“) ist damit aufgelöst – die aktive Workflow-Datei ist die einzige Quelle; `CONTRIBUTING.md` und `docs/README.md` zeigen darauf.
+- **Erster realer CI-Lauf (Befund und Fix):** Der erste automatische Lauf deckte einen zuvor unsichtbaren ShellCheck-Befund auf: Die per apt installierte ShellCheck-Version (0.9.0 auf Ubuntu 24.04) meldet in `install.sh` `SC2119`/`SC2120` (`detect_distro` deklariert den optionalen Parameter nur für Tests, der Hauptablauf rief ohne Argument auf); die lokal dokumentierte ShellCheck 0.11.0 meldet das Muster nicht mehr. Fix: Der Hauptablauf übergibt den Standardpfad jetzt explizit (`detect_distro /etc/os-release`) – damit ist das Skript unter ShellCheck 0.9.0 **und** 0.11.0 befundfrei. Zusätzlich pinnt der Workflow ShellCheck über `shellcheck-py==0.11.0.1` (kein apt mehr): deterministische Prüfversion, konsistent mit den bisherigen Release-Nachweisen („ShellCheck 0.11.0“), und kein `apt-get`-Schritt im Lauf.
+- **Release-Versionierung:** Zentrale `VERSION` auf **2.4.20** erhöht; `/health/`, Fußzeile und `/help/` melden ab diesem Release **2.4.20**. Der Changelog-Absatz „CI und Auslieferung“ der älteren Findings-Dokumente (kein versionierter GitHub-Actions-Workflow bis 2.4.19) bleibt als releasezeitlicher Nachweis bewusst im Wortlaut erhalten.
+- Keine Änderung an Django-Laufzeit-Code, Settings, Modellen oder Migrationen; einzige Skriptänderung ist der explizite Standardpfad in `install.sh` (eine Zeile, siehe oben). `/help/`-Auslieferung, Tests und Docker-Stack unverändert gültig (330 Django-/Python-Tests und 8/8 Shell-Tests grün vor und nach der Umstellung). Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig. Auslieferung über [PR #28](https://github.com/RG4all/t-bot-lokal/pull/28) (Restrukturierung) und [PR #29](https://github.com/RG4all/t-bot-lokal/pull/29) (Versionierung + CI-Aktivierung).
 
 ## [2.4.19] – 2026-09-08
 
