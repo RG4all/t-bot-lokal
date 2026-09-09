@@ -26,6 +26,7 @@ from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import Count, Max, Min, Model, Q, QuerySet, Sum
 from django.http import (
+    Http404,
     HttpRequest,
     HttpResponse,
     HttpResponseBase,
@@ -218,6 +219,31 @@ def _safe_next_url(request: HttpRequest, candidate: str | None) -> str | None:
 def _redirect_dashboard(config_id: int) -> HttpResponseRedirect:
     """Leitet auf das Dashboard der angegebenen Konfiguration weiter."""
     return redirect(f"{reverse('dashboard')}?config_id={config_id}")
+
+
+def _config_id_from_query(request: HttpRequest) -> int | None:
+    """Liest ``config_id`` aus der Query und prüft, dass es eine Zahl ist.
+
+    Hintergrund (W1, Review 2026-09-09): Rohtext direkt an
+    ``get_object_or_404(…, id=…)`` erzeugt im ORM einen ``ValueError``
+    („Field 'id' expected a number“) und damit einen 500er auf an sich
+    saubere 4xx-Eingabefehler. Die Aufrufer wandeln den Fehler in die
+    dokumentierten Antworten um: JSON-APIs 400, HTML-Views 404.
+
+    Args:
+        request: Aktueller Request mit optionalem ``config_id``-Parameter.
+
+    Returns:
+        Die gelesene Konfigurations-ID oder ``None`` bei fehlendem/leerem
+        Parameter.
+
+    Raises:
+        ValueError: Wenn der Parameter vorhanden, aber keine Zahl ist.
+    """
+    raw = request.GET.get("config_id")
+    if raw is None or not raw.strip():
+        return None
+    return int(raw.strip())
 
 
 def _latest_rows(queryset: QuerySet[_ModelT], limit: int) -> list[_ModelT]:
@@ -758,9 +784,13 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         Gerendertes Dashboard oder Weiterleitung nach dem Speichern.
     """
     user = _authenticated_user(request)
-    config_id = request.GET.get("config_id")
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        # HTML-View: nicht-numerische Query-Parameter sind 404, kein 500 (W1).
+        raise Http404("config_id ist keine Zahl") from None
     config: Configuration | None
-    if config_id:
+    if config_id is not None:
         config = get_object_or_404(Configuration, id=config_id, user=user)
     else:
         config = Configuration.objects.filter(user=user).order_by("-id").first()
@@ -985,12 +1015,18 @@ def backtesting_estimate_api(request: HttpRequest) -> JsonResponse:
 @require_GET
 @no_cache_json
 def data_logs_api(request: HttpRequest) -> JsonResponse:
-    """Liefert Marktdatenpunkte eines Symbols der eigenen Konfiguration."""
-    config = get_object_or_404(
-        Configuration,
-        id=request.GET.get("config_id"),
-        user=_authenticated_user(request),
-    )
+    """Liefert Marktdatenpunkte eines Symbols der eigenen Konfiguration.
+
+    Fehler: 400 bei fehlendem/nicht-numerischem ``config_id`` oder fremdem
+    Symbol, 404 bei unbekannter Konfiguration (W1).
+    """
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
+        return JsonResponse({"error": "config_id fehlt"}, status=400)
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
         return JsonResponse({"error": "Ungültiges Symbol"}, status=400)
@@ -1018,12 +1054,18 @@ def data_logs_api(request: HttpRequest) -> JsonResponse:
 @require_GET
 @no_cache_json
 def trades_api(request: HttpRequest) -> JsonResponse:
-    """Liefert die Trades eines Symbols der eigenen Konfiguration."""
-    config = get_object_or_404(
-        Configuration,
-        id=request.GET.get("config_id"),
-        user=_authenticated_user(request),
-    )
+    """Liefert die Trades eines Symbols der eigenen Konfiguration.
+
+    Fehler: 400 bei fehlendem/nicht-numerischem ``config_id`` oder fremdem
+    Symbol, 404 bei unbekannter Konfiguration (W1).
+    """
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
+        return JsonResponse({"error": "config_id fehlt"}, status=400)
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
         return JsonResponse({"error": "Ungültiges Symbol"}, status=400)
@@ -1159,8 +1201,11 @@ def bot_status_api(request: HttpRequest) -> JsonResponse:
     Interne Fehlertexte werden bewusst durch eine feste Meldung ersetzt; die
     Diagnose bleibt im Fehler-Log.
     """
-    config_id = request.GET.get("config_id")
-    if not config_id:
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
         return JsonResponse({"error": "config_id fehlt"}, status=400)
     config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if config.is_running and not bot_manager.is_running(config.id):
