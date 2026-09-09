@@ -116,7 +116,7 @@ CELERY_TASK_ROUTES = {
     "trading.tasks.run_backtest": {"queue": "backtest", "priority": 0},
     "trading.tasks.simulate_candidate": {"queue": "backtest", "priority": 0},
     "trading.tasks.collect_results": {"queue": "backtest", "priority": 0},
-    "trading.tasks.schedule_backtests": {"queue": "backtest", "priority": 0},
+    "trading.tasks.schedule_backtests": {"queue": "scheduling", "priority": 0},
 }
 
 if REDIS_URL:

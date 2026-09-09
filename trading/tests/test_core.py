@@ -3,6 +3,7 @@ import inspect
 import threading
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -846,6 +847,24 @@ class BacktestTaskTests(TestCase):
         self.assertEqual(settings.CELERY_WORKER_CONCURRENCY, 1)
         self.assertEqual(settings.CELERY_WORKER_PREFETCH_MULTIPLIER, 1)
         self.assertLessEqual(settings.CELERY_WORKER_MAX_MEMORY_PER_CHILD, 384_000)
+
+    def test_schedule_task_runs_on_its_own_queue(self):
+        """W7: Beat-Scheduling darf die knappen Backtest-Worker-Slots nicht blockieren."""
+        from django.conf import settings
+
+        from trading_bot_project.celery_config import CELERY_RUNTIME_CONFIG
+
+        self.assertEqual(
+            settings.CELERY_TASK_ROUTES["trading.tasks.schedule_backtests"]["queue"], "scheduling"
+        )
+        self.assertEqual(
+            CELERY_RUNTIME_CONFIG["task_routes"]["trading.tasks.schedule_backtests"]["queue"],
+            "scheduling",
+        )
+        entrypoint = (
+            Path(__file__).resolve().parents[2] / "docker" / "worker-entrypoint.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("-Q backtest,scheduling", entrypoint)
 
     @override_settings(
         CELERY_TASK_ALWAYS_EAGER=True,

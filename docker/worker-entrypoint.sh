@@ -15,9 +15,9 @@ python manage.py wait_for_database || {
   exit 1
 }
 
-log "Starte Celery-Worker (queue=backtest, concurrency=1)..."
+log "Starte Celery-Worker (queues=backtest,scheduling, concurrency=1)..."
 exec celery -A trading_bot_project worker \
-  -Q backtest \
+  -Q backtest,scheduling \
   --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
   --concurrency=1 \
   --prefetch-multiplier=1 \
