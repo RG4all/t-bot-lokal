@@ -18,6 +18,29 @@ class MarketDataConnectionError(MarketDataError):
     """Die Börse war technisch nicht erreichbar oder lieferte ungültige Daten."""
 
 
+class MarketDataTimeoutError(MarketDataConnectionError):
+    """Der Kursabruf lief vor dem Ablauf des Zeitbudgets nicht zu Ende.
+
+    ``asyncio.TimeoutError`` hat keinen eigenen Meldungstext
+    (``str(asyncio.TimeoutError()) == ""``). Würde er unverändert in den
+    Fehler-Log wandern, bliebe dort eine leere Meldung zurück, aus der weder
+    Nutzer noch Betreiber ableiten können, was geschah. Dieser Subtyp trägt
+    deshalb eine präzise, menschenlesbare Beschreibung (Börse, Anzahl der
+    Symbole, Zeitbudget) und wird im Bot wie eine Verbindungsstörung mit
+    wachsender Wartezeit behandelt.
+    """
+
+    def __init__(self, exchange, symbol_count, timeout_seconds):
+        self.exchange = exchange
+        self.symbol_count = symbol_count
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Kursabruf von {exchange} für {symbol_count} Symbol(e) lief nach "
+            f"{timeout_seconds:.0f} s nicht zu Ende. Die Börse antwortet zu langsam, "
+            "ist überlastet oder vom Server aus nicht erreichbar."
+        )
+
+
 class WebSocketReconnectError(MarketDataConnectionError):
     def __init__(self, exchange, attempts, last_error):
         self.exchange = exchange
