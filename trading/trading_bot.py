@@ -329,7 +329,12 @@ class TradingBot(threading.Thread):
         self._last_db_warning_at = 0
         self.liquidating = False
         self._market_data_lock = None
-        self.start_time = time.time() + max(0, config.countdown) * 60
+        # O4: Deadline auf der monotonic-Uhr. Die Wallclock (time.time) kann
+        # durch NTP-Spruenge oder suspend/resume der VM den Countdown
+        # gefaelschen – either uebersprungen oder endlos gehalten. Der
+        # epoch-basierte ``started_at`` bleibt davon unberuehrt, weil er nur
+        # der Anzeige im Status-Endpunkt dient.
+        self._countdown_deadline = time.monotonic() + max(0, config.countdown) * 60
         self.start_countdown_over = config.countdown <= 0
         self._sync_symbols()
         self._restore_state()
@@ -716,7 +721,7 @@ class TradingBot(threading.Thread):
         if self.liquidating:
             return
         if not self.start_countdown_over:
-            if time.time() >= self.start_time:
+            if time.monotonic() >= self._countdown_deadline:
                 self.start_countdown_over = True
             return
 

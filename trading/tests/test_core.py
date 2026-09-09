@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import threading
+import time
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -793,6 +794,22 @@ class TradingBotTests(TransactionTestCase):
         self.assertIn("BTC/USDT", bot.positions)
         self.assertNotIn("SOL/USDT", bot.positions)
         self.assertEqual(bot.realized_pl, Decimal(25))
+
+    def test_countdown_deadline_is_monotonic(self):
+        """O4: NTP-Spruenge oder suspend/resume duerfen den Countdown nicht faelschen."""
+        self.config.countdown = 30
+        bot = TradingBot(self.config)
+        self.assertFalse(bot.start_countdown_over)
+        self.assertGreater(bot._countdown_deadline, time.monotonic())
+        # Wallclock sprungweit in die Zukunft: kein Einfluss auf die Deadline.
+        with patch("trading.trading_bot.time.time", return_value=time.time() + 10**9):
+            async_to_sync(bot.check_trading)("BTC/USDT", Decimal(100), 0.0, 0.0, 0.0)
+        self.assertFalse(bot.start_countdown_over)
+        # Abgelaufene monotone Deadline: der Ablauf-Tick setzt nur das Flag
+        # und beendet den Tick (Handel startet spaetestens im naechsten).
+        bot._countdown_deadline = time.monotonic() - 1
+        async_to_sync(bot.check_trading)("BTC/USDT", Decimal(100), 0.0, 0.0, 0.0)
+        self.assertTrue(bot.start_countdown_over)
 
     def test_trade_is_buffered_and_position_kept_during_db_outage(self):
         bot = TradingBot(self.config)
