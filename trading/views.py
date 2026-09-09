@@ -75,8 +75,6 @@ from .worker_status import get_backtest_runtime_status
 
 logger = logging.getLogger(__name__)
 _PLOT_LOCK = threading.Lock()
-_MANUAL_RENDER_LOCK = threading.Lock()
-_MANUAL_HTML: str | None = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
 _MAX_ANALYSIS_ROWS = 20_000
@@ -540,64 +538,47 @@ def health_view(request: HttpRequest) -> JsonResponse:
 
 @lru_cache(maxsize=1)
 def _render_manual() -> str:
-    """Kompiliert das vertrauenswürdige Handbuch einmal je Prozess.
+    """Kompiliert das vertrauenswuerdige Handbuch einmal je Prozess.
 
-    Der Lock ergänzt den LRU-Cache für den seltenen Fall zweier gleichzeitiger
-    erster Requests: Auch dann wird Markdown nur genau einmal kompiliert.
+    O3: Der ``lru_cache`` ist der einzige Cache-Layer. Ein zusaetzlicher
+    Lock mit Modul-Global hatte denselben Inhalt ein zweites Mal gecacht und
+    zwang zum Monkey-Patch von ``cache_clear`` – die Klarheit der nativen
+    Cache-API (``cache_clear``/``cache_info`` fuer Tests und Management)
+    wiegt schwerer als die einmalige Mehrfach-Kompilierung bei exakt
+    gleichzeitigen Erstzugriffen, die der native Cache bewusst zulaesst.
     """
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        if _MANUAL_HTML is not None:
-            return _MANUAL_HTML
-        candidates = (
-            settings.BASE_DIR / "docs" / "manual" / "MANUAL.md",
-            settings.BASE_DIR / "docs" / "MANUAL.md",
-            settings.BASE_DIR / "MANUAL.md",
-        )
-        for candidate in candidates:
-            if candidate.exists():
-                source = candidate.read_text(encoding="utf-8")
-                _MANUAL_HTML = markdown.markdown(
-                    source,
-                    extensions=[
-                        "extra",
-                        "fenced_code",
-                        "tables",
-                        "toc",
-                        "sane_lists",
-                        "codehilite",
-                    ],
-                    extension_configs={
-                        "codehilite": {
-                            "css_class": "codehilite",
-                            "guess_lang": False,
-                            "noclasses": False,
-                        }
-                    },
-                    output_format="html5",
-                )
-                return _MANUAL_HTML
-        _MANUAL_HTML = "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
-        return _MANUAL_HTML
-
-
-# Beibehaltung der lru_cache-Kompatibilität für Tests/Management, einschließlich
-# eines echten Reset des zweiten, thread-sicheren Cache-Layers.
-_manual_lru_cache_clear = _render_manual.cache_clear
+    candidates = (
+        settings.BASE_DIR / "docs" / "manual" / "MANUAL.md",
+        settings.BASE_DIR / "docs" / "MANUAL.md",
+        settings.BASE_DIR / "MANUAL.md",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return markdown.markdown(
+                candidate.read_text(encoding="utf-8"),
+                extensions=[
+                    "extra",
+                    "fenced_code",
+                    "tables",
+                    "toc",
+                    "sane_lists",
+                    "codehilite",
+                ],
+                extension_configs={
+                    "codehilite": {
+                        "css_class": "codehilite",
+                        "guess_lang": False,
+                        "noclasses": False,
+                    }
+                },
+                output_format="html5",
+            )
+    return "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
 
 
 def _clear_manual_cache() -> None:
-    """Leert LRU-Cache und den zusätzlichen, thread-sicheren Cache-Layer."""
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        _MANUAL_HTML = None
-        _manual_lru_cache_clear()
-
-
-# Bewusste Ersetzung der lru_cache-API: Tests und Management-Code rufen
-# weiterhin ``_render_manual.cache_clear()`` auf und müssen dabei beide
-# Cache-Layer leeren. Statische Prüfer kennen dieses Muster nicht.
-_render_manual.cache_clear = _clear_manual_cache  # type: ignore[method-assign]
+    """Leert den Manual-Cache; Hook fuer Doku-Aktualisierung im Betrieb."""
+    _render_manual.cache_clear()
 
 
 @require_GET
