@@ -24,7 +24,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db import DatabaseError, InterfaceError, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
 from django.db.models import Count, Max, Min, Model, Q, QuerySet, Sum
 from django.http import (
     Http404,
@@ -534,6 +534,36 @@ def _calculate_metrics_from_db(config: Configuration, limit: int = _MAX_LOG_ROWS
 def health_view(request: HttpRequest) -> JsonResponse:
     """Health-Check-Endpunkt für Monitoring und Load-Balancer."""
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
+
+
+@require_GET
+def readiness_view(request: HttpRequest) -> JsonResponse:
+    """Meldet die Einsatzbereitschaft des Containers an Orchestratoren (O6).
+
+    ``/health/`` bestaetigt nur den Lebenprozess. Ein Web-Container ohne
+    erreichbare Datenbank kann noch laufen, darf aber keinen Traffic
+    erhalten – hier antwortet er mit 503 und ``Retry-After``, ohne einen
+    Neustart zu provozieren. Details der Verbindungspruefung bleiben im Log;
+    nach aussen steht ausschliesslich der Status.
+
+    Args:
+        request: HTTP-GET (authfrei, analog ``health_view``).
+
+    Returns:
+        ``JsonResponse`` 200 mit ``{"status": "ready", ...}`` bei offener
+        Datenbankverbindung, sonst 503 mit ``{"status": "unavailable"}`` und
+        ``Retry-After: 5``.
+    """
+    try:
+        connection.ensure_connection()
+    except DatabaseError as exc:
+        logger.warning("Readiness-Check fehlgeschlagen: %s", exc.__class__.__name__)
+        return JsonResponse(
+            {"status": "unavailable"},
+            status=503,
+            headers={"Retry-After": "5"},
+        )
+    return JsonResponse({"status": "ready", "version": settings.APP_VERSION})
 
 
 @lru_cache(maxsize=1)

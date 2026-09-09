@@ -113,10 +113,14 @@ class PassphraseGateMiddleware:
 
         gate_path = reverse("passphrase_gate")
         health_path = reverse("health")
+        # Readiness haelt Composition/Render zurueck, bevor die Session-Pruefung
+        # einen 503 in eine Gate-Weiterleitung verwandeln darf.
+        readiness_path = reverse("readiness")
         static_url = settings.STATIC_URL or "/static/"
         exempt = (
             request.path == gate_path
             or request.path == health_path
+            or request.path == readiness_path
             or request.path.startswith(static_url)
         )
         if exempt:
