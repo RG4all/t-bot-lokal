@@ -58,6 +58,17 @@ _CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 60
 _CACHE_MAX_ENTRIES = 32
+# W10: refresh=True umging den TTL bisher pro Aufruf komplett. Mehrere Nutzer
+# (oder UI-Retries) feuern damit ungehindert auf die rate-limitierten
+# oeffentlichen Ticker-Endpunkte der Boersen. Erzwungene Scans werden je
+# (Exchange, Marktart) gedrosselt; innerhalb des Fensters bedient der Scan den
+# zuletzt bekannten – ggf. veralteten – Stand, statt einen Exchange-Aufruf zu
+# starten. Ohne jegliche Cache-Info wird immer gescannt (Korrektheit vor
+# Drosselung, der Fall verbraeumt nur das Zeitfenster).
+_FORCE_MIN_INTERVAL_SECONDS = 20.0
+_FORCE_THROTTLE_MAX_ENTRIES = 16
+_LAST_FORCED: OrderedDict[tuple, float] = OrderedDict()
+_FORCE_THROTTLE_LOCK = threading.Lock()
 
 
 class MarketScannerError(MarketDataError):
@@ -852,6 +863,18 @@ def scan_market_opportunities(
             _CACHE.move_to_end(key)
             if not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
                 return cached[1]
+    if refresh:
+        throttle_key = (exchange_id, market)
+        with _FORCE_THROTTLE_LOCK:
+            last_forced = _LAST_FORCED.get(throttle_key)
+            allowed = last_forced is None or now - last_forced >= _FORCE_MIN_INTERVAL_SECONDS
+            if allowed:
+                _LAST_FORCED[throttle_key] = now
+                _LAST_FORCED.move_to_end(throttle_key)
+                while len(_LAST_FORCED) > _FORCE_THROTTLE_MAX_ENTRIES:
+                    _LAST_FORCED.popitem(last=False)
+        if not allowed and cached is not None:
+            return cached[1]
     result = _scan_uncached(exchange_id, market, limit=limit, **values)
     with _CACHE_LOCK:
         _CACHE[key] = (now, result)

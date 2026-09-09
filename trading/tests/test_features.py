@@ -480,8 +480,10 @@ class ScannerCacheTests(SimpleTestCase):
         self.scanner = scanner
         self._saved_cache = dict(scanner._CACHE)
         self._saved_market_caps = dict(scanner._MARKET_CAP_CACHE)
+        self._saved_forced = dict(scanner._LAST_FORCED)
         scanner._CACHE.clear()
         scanner._MARKET_CAP_CACHE.clear()
+        scanner._LAST_FORCED.clear()
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -489,6 +491,8 @@ class ScannerCacheTests(SimpleTestCase):
         self.scanner._CACHE.update(self._saved_cache)
         self.scanner._MARKET_CAP_CACHE.clear()
         self.scanner._MARKET_CAP_CACHE.update(self._saved_market_caps)
+        self.scanner._LAST_FORCED.clear()
+        self.scanner._LAST_FORCED.update(self._saved_forced)
 
     def test_cache_is_bounded_and_evicts_oldest_entries(self):
         calls = []
@@ -527,3 +531,41 @@ class ScannerCacheTests(SimpleTestCase):
                 )
         self.assertEqual(len(calls), 1, "TTL-treffer duerfen nicht erneut scannen")
         self.assertEqual(first, again)
+
+    def test_forced_refresh_is_throttled_and_serves_stale_cache(self):
+        """W10: Zwei ``refresh=True``-Aufrufe im Drosselfenster loesen einen Scan aus."""
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append(exchange_id)
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            first = scan_market_opportunities("binance", "spot", refresh=True)
+            second = scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(len(calls), 1, "zweiter Refresh innerhalb des Fensters muss dienen")
+        self.assertEqual(second, first)
+
+        # Anderer Exchange-Schluessel hat ein eigenes Drosselfenster.
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            scan_market_opportunities("kraken", "spot", refresh=True)
+        self.assertEqual(len(calls), 2)
+
+        # Nach Ablauf des Fensters (hier simuliert: Zeitstempel zuruecksetzen)
+        # wird wieder erzwungen – und zwar gegen den dann stale Cache.
+        for key in list(self.scanner._CACHE):
+            timestamp, payload = self.scanner._CACHE[key]
+            self.scanner._CACHE[key] = (
+                timestamp - self.scanner._CACHE_TTL_SECONDS - 1,
+                payload,
+            )
+        for key in list(self.scanner._LAST_FORCED):
+            self.scanner._LAST_FORCED[key] = (
+                self.scanner._LAST_FORCED[key]
+                - self.scanner._FORCE_MIN_INTERVAL_SECONDS
+                - 1
+            )
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            third = scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(len(calls), 3, "ausserhalb des Fensters muss der Scan erzwungen werden")
+        self.assertIsNot(third, first)
