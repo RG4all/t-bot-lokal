@@ -114,7 +114,7 @@ Services:
 |---|---|---|
 | `tuner` | One-Shot: Hardware-Analyse und Tuning-Datei generieren | kurzlebig |
 | `web` | Django, Daphne, WebSockets, TradingBot | hardwareabhängige CPU/RAM-Cgroup |
-| `backtest-worker` | ausschließlich Queue `backtest` | eigene Cgroup, 384-MB-Celery-Child, Concurrency 1 |
+| `backtest-worker` | Queues `backtest` und `scheduling` | eigene Cgroup, 384-MB-Celery-Child, Concurrency 1 |
 | `redis` | Broker/Result Backend | hardwareabhängiges Maxmemory, keine lokale Persistenz |
 | `postgres` | lokale persistente DB | max. 40 Verbindungen, abgestimmte Cachewerte |
 | `scheduler` | optional Celery Beat | nur Profil `scheduler` |

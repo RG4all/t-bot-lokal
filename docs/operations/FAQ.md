@@ -285,3 +285,10 @@ tests/distro_smoke_test.sh
 ## 15. Warum liefert der Gate HTTP 429 hinter einem Proxy?
 
 Alle Auth-POSTs (auch erfolgreiche) teilen ein Limit von fünf Versuchen pro IP, 15 Minuten und Web-Prozess. Ohne `RATE_LIMIT_TRUSTED_PROXIES` wird ausschließlich `REMOTE_ADDR` verwendet. Hinter einem Reverse-Proxy können dadurch alle Nutzer denselben Zähler teilen. Nur tatsächlich kontrollierte Proxy-Peer-IPs/CIDRs eintragen und sicherstellen, dass dieser Proxy `X-Forwarded-For` bereinigt oder die tatsächliche Client-IP anhängt. Client-gelieferte Header alleine dürfen keine neue Identität erzeugen. Bei mehreren Web-Prozessen ein zusätzliches gemeinsames Limit einsetzen.
+
+## 16. API-Antworten 400/404 und `/readyz/` verstehen (seit 2.5.0)
+
+- `400 {"error": "config_id ist keine Zahl"}` auf `/api/logs/…` o. a. JSON-Endpunkten: die `config_id` im Query war nicht numerisch (manuell editierte URL, abgelaufener Lesezeichenpfad). Vor 2.5.0 beantwortete das die App mit einem 500er und Log-Rauschen; die Ursache bleibt reiner Eingabefehler – URL aus dem Dashboard neu aufrufen.
+- `404`: die ID existiert nicht oder gehört einem anderen Konto. Bewusst kein Hinweis, welcher der beiden Fälle es ist.
+- `400 {"error": "config_id fehlt"}` auf `/api/bot/status/`: Aufrufer muss `?config_id=<id>` mitschicken (das Dashboard tut das automatisch).
+- `/readyz/` liefert dauerhaft `503`: Die Web-Datenbank ist nicht erreichbar; `Retry-After: 5` gibt das Prüfintervall vor. Der Container läuft weiter und `/health/` bleibt `200` – erst `200` auf `/readyz/` bedeutet „DB erreichbar, Traffic kann fließen". Diagnose: `docker compose logs web`, `docker compose exec postgres pg_isready`.
