@@ -168,6 +168,17 @@ class BotManagerSourceTests(SimpleTestCase):
         self.assertIn("bot_manager.is_running(", self.views_source)
         self.assertNotIn("bot_manager._is_running_unlocked(", self.views_source)
 
+    def test_open_symbols_snapshots_position_keys(self):
+        """W6: ``open_symbols`` darf nicht über das Live-Dict der Bot-Loop iterieren.
+
+        Die Bot-Loop mutiert ``positions`` concurrent zum View-Thread; der Fix
+        kopiert die Schlüssel einmalig (``list(...)``) vor dem Sortieren.
+        """
+        src = _method_source(TradingBotManager, "open_symbols")
+        self.assertIn("snapshot = list(bot.positions)", src)
+        self.assertIn("sorted(snapshot)", src)
+        self.assertNotIn("sorted(bot.positions)", src)
+
 
 class BotManagerLockTests(SimpleTestCase):
     """Laufzeit- und Integritätsprüfungen des Bot-Managers."""

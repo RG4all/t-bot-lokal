@@ -993,7 +993,15 @@ class TradingBotManager:
     def open_symbols(self, config_id):
         with self._lock:
             bot = self.bots.get(config_id)
-            return sorted(bot.positions) if bot and bot.is_alive() else []
+            if not bot or not bot.is_alive():
+                return []
+            # W6: explizite, einmalige Schluessel-Kopie des Positionsdictionaries.
+            # Die Bot-Loop mutiert ``positions`` concurrent zum View-Thread;
+            # ``list(dict)`` kopiert unter dem GIL in einem Schritt, waehrend
+            # ``sorted(dict)`` formal ueber das Live-Dict iteriert. Die Kopie
+            # macht die Semantik unabhaengig von Interpreter-Details.
+            snapshot = list(bot.positions)
+            return sorted(snapshot)
 
     def kill_switch(self, config_id):
         with self._lock:
