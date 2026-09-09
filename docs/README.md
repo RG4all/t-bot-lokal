@@ -18,6 +18,7 @@ Einstieg ins Projekt: [README im Repo-Stamm](../README.md). Diese Seite ist der 
 | Dokument | Status | Inhalt |
 |---|---|---|
 | [security/SECURITY_REVIEW_2.4.4.md](security/SECURITY_REVIEW_2.4.4.md) | **verbindlich, aktuell** | Befunde, Prüfgrenzen und Release-Nachweis des Security-Reviews. |
+| [security/CODE_REVIEW_2026-09-09.md](security/CODE_REVIEW_2026-09-09.md) | Review 2026-09-09 | Umfassender Code-Review (nach Kritikalität priorisiert): Bot-Lifecycle-Race, Fail-open-Restart, Cache-Leak, Dependency-/CI-Hygiene, Performance und Umsetzungsreihenfolge. |
 | [CHANGELOG.md](CHANGELOG.md) | gepflegt | Release-Historie; einzige Quelle für „Fixed in x.y.z“-Kontext. |
 
 ### Findings
