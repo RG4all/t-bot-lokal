@@ -361,7 +361,7 @@ Typische **technische Log-Meldungen für Betreiber**:
 
 ### Datenhaltung und Pflege
 
-Ohne Pflege wachsen Trade-Historie und Fehlerlog unbegrenzt (nur DataLogs kürzt der Bot laufend je Symbol). `python manage.py prune_history --dry-run` zeigt, was die Aufbewahrungsschnitte tilgen würden; der Lauf ohne Flag löscht in ID-Batches von 1000 Zeilen. Grenzen kommen aus den Settings (`MAX_TRADING_LOGS_PER_CONFIG` 200.000, `MAX_ERROR_LOGS` 50.000, `ERROR_LOG_RETENTION_DAYS` 30; jeweils per Umgebungsvariable überschreibbar) und lassen sich pro Aufruf mit `--trading-logs-per-config`, `--error-logs` und `--error-days` übersteuern. Als erledigt markierte oder Info-Fehler verfallen zusätzlich nach der Aufbewahrungsfrist; offene Fehler bleiben bis zur globalen Obergrenze bestehen.
+Ohne Pflege wachsen Trade-Historie und Fehlerlog unbegrenzt (nur DataLogs kürzt der Bot laufend je Symbol). `python manage.py prune_history --dry-run` zeigt, was die Aufbewahrungsgrenzen tilgen würden; der Lauf ohne Flag löscht in ID-Batches von 1000 Zeilen. Grenzen kommen aus den Settings (`MAX_TRADING_LOGS_PER_CONFIG` 200.000, `MAX_ERROR_LOGS` 50.000, `ERROR_LOG_RETENTION_DAYS` 30; jeweils per Umgebungsvariable überschreibbar) und lassen sich pro Aufruf mit `--trading-logs-per-config`, `--error-logs` und `--error-days` übersteuern. Als erledigt markierte oder Info-Fehler verfallen zusätzlich nach der Aufbewahrungsfrist; offene Fehler bleiben bis zur globalen Obergrenze bestehen.
 
 ### Verbindungsmodell ab Version 2.0.4
 

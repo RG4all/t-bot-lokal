@@ -129,7 +129,7 @@ class Command(BaseCommand):
         Auswahl stabil, auch wenn waehrend der Pflege neue Zeilen entstehen.
 
         Returns:
-            ``None``, wenn die queryset nicht ueber das Limit hinauswaechst.
+            ``None``, wenn das Queryset nicht ueber das Limit hinauswaechst.
         """
         return queryset.order_by("-id").values_list("id", flat=True)[keep : keep + 1].first()
 
