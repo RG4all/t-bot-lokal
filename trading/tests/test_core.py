@@ -172,6 +172,22 @@ class FormTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["symbols"], "BTC/USDT,ETH/USDT")
 
+    def test_leverage_must_be_within_realistic_range(self):
+        """W9: Der Hebel war als '>= 1' beschrieben, akzeptierte aber 0 (2^0-Effekt)."""
+        for bad in ("0", "11"):
+            form = ConfigurationForm(self.configuration_data(leverage=bad))
+            self.assertFalse(form.is_valid(), f"leverage={bad} sollte abgewiesen werden")
+        form = ConfigurationForm(self.configuration_data(leverage="1"))
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_trade_direction_is_restricted_to_choices(self):
+        """W9: Freitext-Richtungen waren speicherbar, obwohl die Engine nur long kennt."""
+        form = ConfigurationForm(self.configuration_data(trade_direction="moon"))
+        self.assertFalse(form.is_valid())
+        for ok in ("long", "short"):
+            form = ConfigurationForm(self.configuration_data(trade_direction=ok))
+            self.assertTrue(form.is_valid(), form.errors)
+
     def test_configuration_rejects_overspending(self):
         form = ConfigurationForm(
             self.configuration_data(start_capital="10", trade_amount="10", fee="1")
