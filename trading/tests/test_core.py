@@ -33,7 +33,13 @@ from trading.middleware import DatabaseAvailabilityMiddleware
 from trading.models import BacktestTask, Configuration, DataLog, ErrorLog, TradingLog
 from trading.symbols import get_available_symbols
 from trading.tasks import _collect_results, dispatch_task, run_backtest
-from trading.trading_bot import TradingBot, _close_db_circuit, _db_circuit_remaining, db_safe
+from trading.trading_bot import (
+    TradingBot,
+    TradingBotManager,
+    _close_db_circuit,
+    _db_circuit_remaining,
+    db_safe,
+)
 
 
 class BacktestingTests(TestCase):
@@ -789,6 +795,32 @@ class TradingBotTests(TransactionTestCase):
 
         restart = inspect.getsource(TradingBotManager.restart_bot)
         self.assertIn("is_running=True).exists()", restart)
+
+    def test_ensure_started_waits_for_concurrent_construction(self):
+        """W5: Ein Restart darf nicht entfallen, nur weil gerade jemand anderes baut."""
+        manager = TradingBotManager()
+        self.config.is_running = True
+        self.config.save(update_fields=["is_running"])
+        sentinel_bot = object()
+        with (
+            patch.object(manager, "start_bot", side_effect=[None, sentinel_bot]) as start,
+            patch("trading.trading_bot.time.sleep") as sleep,
+        ):
+            self.assertIs(manager._ensure_started(self.config), sentinel_bot)
+        self.assertEqual(start.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    def test_ensure_started_abandons_when_config_deactivated_while_waiting(self):
+        """W5: Deaktivierung im Wartefenster beendet die Uebernahme (K1-Geist)."""
+        manager = TradingBotManager()
+        self.config.is_running = False
+        self.config.save(update_fields=["is_running"])
+        with (
+            patch.object(manager, "start_bot", return_value=None) as start,
+            patch("trading.trading_bot.time.sleep"),
+        ):
+            self.assertIsNone(manager._ensure_started(self.config))
+        start.assert_called_once()
 
     def test_restore_state_fails_closed_on_unreachable_db(self):
         """K2/BUG-23: Ohne verlaessliche Trade-Historie darf der Bot nicht mit

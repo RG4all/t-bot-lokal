@@ -898,6 +898,9 @@ class TradingBot(threading.Thread):
 class TradingBotManager:
     def __init__(self):
         self.bots = {}
+        # W5: laufende Konstruktionen je config-id (Sentinel gegen Doppelstart
+        # ohne gehaltenen Lock waehrend der teuren Initialisierung).
+        self._starting = set()
         self._lock = threading.RLock()
 
     def _forget(self, config_id, bot):
@@ -931,14 +934,51 @@ class TradingBotManager:
         Thread-sicher: Prüft unter dem Lock, ob bereits ein Bot läuft,
         und startet sonst genau einen neuen Thread. Die Prüfung nutzt
         ``_is_running_unlocked``, damit der Lock nicht erneut erworben wird.
+
+        W5: Die Konstruktion selbst – State-Recovery per DB-Scan der
+        Trade-Historie plus Exchange-Setup – läuft bewusst außerhalb des
+        Manager-Locks. Ein einzelnen Bot-Start wuerde sonst jedes parallel
+        pollende ``status()``/``open_symbols()`` (Dashboard!) fuer die Dauer
+        des Restore-Scans blockieren – und der Status-Endpunkt triggert
+        seinerseits Auto-Restarts. Ein ``_starting``-Sentinel verhindert
+        Doppelstarts, waehrend konstruiert wird; hat ein anderer Aufrufer bis
+        zur Insertion schon fertig gestartet, wird der zu spaet kommende Bot
+        nie gestartet und verworfen.
         """
         with self._lock:
             if self._is_running_unlocked(config.id):
                 return self.bots[config.id]
+            if config.id in self._starting:
+                return None
+            self._starting.add(config.id)
+        try:
             bot = TradingBot(config, on_exit=self._forget)
+        finally:
+            with self._lock:
+                self._starting.discard(config.id)
+        with self._lock:
+            if self._is_running_unlocked(config.id):
+                return None
             self.bots[config.id] = bot
             bot.start()
             return bot
+
+    def _ensure_started(self, config):
+        """Startet absichernd und übernimmt, falls ein anderer Aufrufer gerade baut.
+
+        ``start_bot`` liefert ``None``, solange das W5-Sentinel eine laufende
+        Konstruktion markiert. Ein Restart darf dann nicht kommentarlos
+        entfallen (der Bot-Thread wäre tot, die Konfiguration auf "läuft" –
+        ohne eigenen Selbststart). Also: kurz warten, Fahne erneut gegen die
+        DB prüfen (Deaktivierung beendet die Warteschleife) und selbst starten.
+        """
+        bot = self.start_bot(config)
+        while bot is None:
+            time.sleep(1.0)
+            if not Configuration.objects.filter(id=config.id, is_running=True).exists():
+                return None
+            bot = self.start_bot(config)
+        return bot
 
     def stop_bot(self, config):
         """Stoppt den TradingBot für die gegebene Konfiguration.
@@ -978,7 +1018,7 @@ class TradingBotManager:
                 # zusaetzlich beendet der is_running-Check im main_loop spaeter
                 # jeden Bot, der durch ein TOCTOU-Fenster durchgerutscht ist.
                 if Configuration.objects.filter(id=config.id, is_running=True).exists():
-                    self.start_bot(config)
+                    self._ensure_started(config)
             except Exception as exc:
                 logger.exception("Neustart für Konfiguration %s fehlgeschlagen", config.id)
                 ErrorLog.objects.create(
