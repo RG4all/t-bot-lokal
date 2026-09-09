@@ -457,6 +457,18 @@ class TradingBot(threading.Thread):
                     try:
                         self.config = await db_get_config(self.config_id)
                         self._sync_symbols()
+                        # K1/BUG-22: Die DB-Fahne ist die einzige Wahrheit fuer
+                        # "soll der Bot laufen?". Stop erfolgt sonst nur ueber
+                        # bot_manager.stop_bot(); bei einer Restart-/Deaktivie-
+                        # rungs-Race koennte ein frisch gestarteter Bot ohne
+                        # diese Pruefung dauerhaft mit is_running=False handeln.
+                        if not self.config.is_running:
+                            logger.info(
+                                "Bot %s: Deaktivierung erkannt; Loop beendet sauber",
+                                self.config_id,
+                            )
+                            self.running = False
+                            break
                     except (OperationalError, InterfaceError):
                         # Mit der letzten validierten Konfiguration weiterlaufen.
                         # Preisstream und Strategie hängen nicht vom Frontend ab.
@@ -912,7 +924,12 @@ class TradingBotManager:
                 if before_start:
                     before_start()
                 config.refresh_from_db()
-                if config.is_running:
+                # K1/BUG-22: Fahne unmittelbar vor dem Start gegen die DB
+                # pruefen (_exists, nicht gecachtes Attribut): zwischen dem
+                # refresh_from_db und start_bot kann "deaktivieren" liegen;
+                # zusaetzlich beendet der is_running-Check im main_loop spaeter
+                # jeden Bot, der durch ein TOCTOU-Fenster durchgerutscht ist.
+                if Configuration.objects.filter(id=config.id, is_running=True).exists():
                     self.start_bot(config)
             except Exception as exc:
                 logger.exception("Neustart für Konfiguration %s fehlgeschlagen", config.id)

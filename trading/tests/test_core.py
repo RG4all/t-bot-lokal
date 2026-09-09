@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import threading
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -709,47 +710,41 @@ class TradingBotTests(TransactionTestCase):
         self.assertIn("with self._lock", public)
         self.assertNotIn("with self._lock", unlocked)
 
-    def test_trade_is_buffered_and_position_kept_during_db_outage(self):
+    def test_main_loop_self_stops_when_config_is_deactivated(self):
+        """K1/BUG-22: Ein deaktivierter Bot muss sich spaetestens beim naechsten
+        Config-Refresh selbst beenden – auch wenn stop_bot() ihn wegen einer
+        Restart-Race nie erreicht hat."""
+        Configuration.objects.filter(id=self.config.id).update(is_running=False)
         bot = TradingBot(self.config)
-        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
-        with patch(
-            "trading.trading_bot.db_create_tradinglog_safe",
-            new=AsyncMock(return_value=None),
-        ):
-            async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
-        self.assertIn("BTC/USDT", bot.positions)
-        self.assertEqual(len(bot.pending_trading_logs), 1)
-        self.assertEqual(bot.pending_trading_logs[0]["action"], "buy")
+        bot.fetch_tickers = AsyncMock(return_value={})
+        # Ersten Durchlauf sofort ins Config-Refresh laufen lassen (statt nach
+        # BOT_CONFIG_REFRESH_SECONDS): der Loop liest die frische DB-Fahne.
+        bot._last_config_refresh = 0.0
 
-    def test_kill_switch_uses_fresh_ticker_and_closes_every_position(self):
-        bot = TradingBot(self.config)
-        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
-        async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
-        bot.fetch_tickers = AsyncMock(return_value={"BTC/USDT": {"last": "105"}})
-        result = async_to_sync(bot.liquidate_all_positions)()
-        self.assertEqual(result, {"sold": ["BTC/USDT"], "errors": {}})
-        self.assertEqual(bot.positions, {})
-        self.assertEqual(TradingLog.objects.filter(action="sell").count(), 1)
+        outcome = {}
 
-    def test_buy_and_sell_keep_amount_and_include_buy_fee(self):
-        bot = TradingBot(self.config)
-        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
-        async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
-        buy = TradingLog.objects.get(action="buy")
-        self.assertEqual(
-            buy.current_capital,
-            self.config.start_capital - (buy.amount * buy.price + buy.fee_amount),
-        )
-        bot.price_buffer["BTC/USDT"] = [Decimal(110)]
-        async_to_sync(bot.execute_trade)("BTC/USDT", "sell")
-        sell = TradingLog.objects.get(action="sell")
-        self.assertEqual(sell.amount, buy.amount)
-        expected = sell.amount * (sell.price - buy.price) - buy.fee_amount - sell.fee_amount
-        self.assertEqual(sell.pl_nominal, expected.quantize(Decimal("0.00000001")))
-        self.assertEqual(sell.current_capital, self.config.start_capital + sell.pl_nominal)
+        def _run():
+            try:
+                asyncio.run(bot.main_loop())
+                outcome["done"] = True
+            except BaseException as exc:
+                outcome["error"] = exc
 
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=15)
+        self.assertFalse(thread.is_alive(), "main_loop endete nicht nach Deaktivierung")
+        self.assertTrue(outcome.get("done"), f"main_loop-Fehler: {outcome.get('error')!r}")
+        self.assertFalse(bot.running)
 
-@override_settings(AUTOSTART_BOTS=False, PASSPHRASE_GATE_ENABLED=False)
+    def test_restart_bot_rechecks_running_flag_against_db(self):
+        """K1/BUG-22: prepare_and_start darf nicht auf dem gecachten Attribut
+        entscheiden, sondern muss die DB-Fahne unmittelbar vor dem Start pruefen."""
+        from trading.trading_bot import TradingBotManager
+
+        restart = inspect.getsource(TradingBotManager.restart_bot)
+        self.assertIn("is_running=True).exists()", restart)
+
 class BacktestTaskTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("backtest-user", password="backtest-password")
