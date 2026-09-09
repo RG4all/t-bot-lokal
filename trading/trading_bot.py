@@ -97,6 +97,24 @@ def db_safe(max_retries=None, base_delay=None, max_delay=None, suppress=False):
                 _close_db_circuit()
                 return result
             except (InterfaceError, OperationalError) as exc:
+                if suppress:
+                    # W4: Schreib-/Bufferpfade duerfen niemals in die koordinierte
+                    # Reconnect-Schleife eintreten. Sie halten sonst den globalen
+                    # Recovery-Lock inkl. der sleep()-Kaskade (bis ~90 s) und haengen
+                    # damit ALLE Bots und den Config-Pfad hinter sich ein – genau in
+                    # dem Moment, in dem die Puffer da sind, um weiterzulaufen.
+                    # Fast-Fail: Circuit oeffnen, None liefern; der Aufrufer puffert
+                    # den Eintrag, und der eine nicht-suppress-Aufruf (db_get_config)
+                    # betreibt die eigentliche Wiederherstellung.
+                    _open_db_circuit(exc)
+                    logger.warning(
+                        "DB ausgefallen; %s uebersprungen (Circuit %ss offen, "
+                        "Puffer uebernimmt): %s",
+                        func.__name__,
+                        settings.DB_CIRCUIT_BREAKER_SECONDS,
+                        exc,
+                    )
+                    return None
                 last_error = exc
 
             retry_limit = max_retries or settings.DB_RECONNECT_MAX_RETRIES

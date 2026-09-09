@@ -33,7 +33,7 @@ from trading.middleware import DatabaseAvailabilityMiddleware
 from trading.models import BacktestTask, Configuration, DataLog, ErrorLog, TradingLog
 from trading.symbols import get_available_symbols
 from trading.tasks import _collect_results, dispatch_task, run_backtest
-from trading.trading_bot import TradingBot, _close_db_circuit, db_safe
+from trading.trading_bot import TradingBot, _close_db_circuit, _db_circuit_remaining, db_safe
 
 
 class BacktestingTests(TestCase):
@@ -437,6 +437,32 @@ class DatabaseAvailabilityMiddlewareTests(TestCase):
             raise AssertionError("Offener Circuit darf die Funktion nicht aufrufen")
 
         self.assertIsNone(blocked_write())
+
+    def test_suppressed_writer_fails_fast_without_recovery_loop(self):
+        """W4: suppress-Pfade rufen die Funktion genau einmal auf und oeffnen den Circuit.
+
+        Frueher durchliefen auch Write-Pfade die Reconnect-Schleife (mit sleep) und
+        blockierten den einzigen DB-Executor – inkl. des Config-Pfads aller Bots.
+        """
+        _close_db_circuit()
+        self.addCleanup(_close_db_circuit)
+        calls = 0
+
+        @db_safe(suppress=True)
+        def failing_write():
+            nonlocal calls
+            calls += 1
+            raise OperationalError("connection refused")
+
+        with (
+            patch("trading.trading_bot.settings") as fake_settings,
+            patch("trading.trading_bot.time.sleep") as sleep,
+        ):
+            fake_settings.DB_CIRCUIT_BREAKER_SECONDS = 42
+            self.assertIsNone(failing_write())
+        self.assertEqual(calls, 1, "kein Recovery-Loop fuer suppress-Aufrufe")
+        sleep.assert_not_called()
+        self.assertGreater(_db_circuit_remaining(), 0)
 
     def test_database_outage_returns_json_503_for_api(self):
         def unavailable(request):
