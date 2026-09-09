@@ -121,9 +121,11 @@ Spot-Marktdaten laufen über die aktuelle öffentliche BitMart-V3-API. Symbole w
 ### Bitunix
 
 - Futures: offizielle öffentliche Trading-Pair- und Batch-Ticker-Endpunkte von `fapi.bitunix.com`.
-- Spot: öffentliche Spot-Pair- und Last-Price-Endpunkte; mindestens 5 Sekunden Intervall begrenzen Einzelabfragen defensiv.
+- Spot: öffentliche Spot-Pair- und Last-Price-Endpunkte. Es gibt keinen Batch-Endpunkt, deshalb wird je Symbol einzeln abgefragt; die Einzelabfragen sind mit 0,11 s Abstand getaktet und bleiben damit selbst bei 20 Symbolen unter dem dokumentierten Limit von 10 Requests/Sek/IP.
+- Spot-Katalog: ein Pair ohne Statusfeld (`isOpen`) zählt nicht als handelbar (fail-closed), damit keine ungültigen Symbole die Validierung passieren.
 - Keine privaten API-Schlüssel für Paper Trading.
 - Ist ein öffentlicher Endpoint nicht verfügbar oder liefert keinen verifizierbaren Katalog, wird die Konfiguration sicher abgelehnt. Dadurch entsteht kein aggressiver Fehler-/Retry-Loop und kein API-Ban.
+- Der Kursabruf hat ein gesamtzeitliches Budget, das mit der Symbolzahl skaliert (Basis 20 s + 12 s je Symbol, max. 120 s). Läuft es aus, erzeugt der Bot einen `MarketDataTimeoutError` (siehe §12) mit 5–300-s-Backoff statt eines leeren Eintrags und 2-s-Retrys.
 
 ### Lokale Marktanalyse ohne Binance-REST
 
@@ -328,10 +330,17 @@ Ergebnisse liegen 60 Sekunden in einem gedeckelten LRU-Cache (32 Einträge);
 ein manueller Refresh (`refresh=1`) ist je Börse und Marktart auf alle 20
 Sekunden gedrosselt – innerhalb des Fensters dient der letzte Stand, auch
 wenn er veraltet ist.
-Fehlende Marktkapitalisierung, 24h-Volumendaten oder ein nicht belastbares
-Orderbuch führen immer zum Ausschluss und werden nicht günstig geschätzt. Das
-Ergebnis ist keine Anlageempfehlung; volatile Märkte benötigen ein begrenztes
-Risiko und eine passende Stop-Loss-Order.
+Fehlende Marktkapitalisierung oder ein nicht belastbares Orderbuch führen
+immer zum Ausschluss und werden nicht günstig geschätzt. **Bitunix Spot ist
+die Ausnahme bei den 24h-Volumendaten:** die dort dokumentierte Kline-API
+liefert kein Quotevolumen, deshalb übernimmt der Liquiditätsnachweis die
+**absolute Orderbuch-Tiefe** – die Summe valider Bid- und Ask-Orders innerhalb
+von ±2 % des Mittelkurses muss mindestens 100.000 USDT betragen. Die
+Volumen-Kriterien erscheinen in der Tabelle dann als „nicht ermittelt"
+(statt „ausgeschlossen"); der Grund wird transparent ausgegeben. Leert der
+Scan alle Märkte aus, zeigt die Vorlage die nächsten Ausschlüsse mit
+Hauptgrund. Das Ergebnis ist keine Anlageempfehlung; volatile Märkte
+benötigen ein begrenztes Risiko und eine passende Stop-Loss-Order.
 
 ### Zugriff auf HTTP-API und WebSockets
 
@@ -345,7 +354,7 @@ Seit 2.4.9 setzt jede HTTP-Antwort zusätzlich den Header `Permissions-Policy: c
 
 ## 12. Fehler-Log und Betrieb
 
-Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Gelöste Einträge können als erledigt markiert werden. Seit **2.4.10** erhalten normale Konten generische Meldungen mit einer Referenznummer statt technischer Diagnosen; bei anhaltenden Problemen diese Referenz und die Konfiguration dem Betreiber nennen.
+Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert werden. Gelöste Einträge können als erledigt markiert werden. Seit **2.4.10** erhalten normale Konten keine technischen Diagnosen; seit **2.5.1** zeigt jeder Eintrag zusätzlich eine **Referenznummer** (Eintrag im Server-Log) und eine **menschenlesbare Erklärung** aus drei Teilen: *Was ist passiert*, *Ursache* (mit typischen Ursachen) und *Was tun* – plus sichere Kurzdaten wie Exchange, betroffene Symbole oder den Zeitpunkt einer Anfragesperre. Die Erklärung wird serverseitig pro Fehlerquelle formuliert; rohe Meldungen und Tracebacks bleiben wie bisher staff-only. Bei anhaltenden Problemen Referenznummer und Konfiguration dem Betreiber nennen.
 
 Technische Log-Meldungen, Exception-Typen und Details sind nur für Betreiberkonten (`is_staff`) sichtbar, weiterhin ausschließlich für eigene Konfigurationen. Das gilt auch für alte Einträge. Betreiber können zusätzlich die geschützten Server-Logs bzw. die vorhandene Django-Administration mit den entsprechenden Berechtigungen verwenden. Staff-Rechte nicht an normale Nutzer vergeben, um die generische Anzeige zu umgehen.
 
@@ -355,6 +364,8 @@ Typische **technische Log-Meldungen für Betreiber**:
 
 - `SymbolValidationError`: Paar ist nicht gelistet oder passt nicht zur Marktart.
 - `RateLimitError`: Börse hat 418/429 geliefert; t-bot wartet den angegebenen Zeitpunkt oder Backoff ab.
+- `MarketDataTimeoutError`: Der synchrone Kursabruf hat das gesamtzeitliche Budget überschritten (Börse langsam, gesperrt oder blockiert); t-bot wiederholt mit 5–300-s-Backoff, nicht mit 2 s. Die Meldung nennt Börse, Symbolanzahl und Budget.
+- `MarketDataConnectionError` ohne Meldungstext: Die Ursache ist nur im Server-Log (Traceback) dokumentiert; die Fehler-Log-Meldung benennt den Exception-Typ und die Referenznummer.
 - `WebSocketReconnectError`: interne Wiederverbindungen waren erfolglos.
 - `OperationalError could not translate host name` oder `connection refused`: PostgreSQL beziehungsweise Render-Netzwerk ist nicht erreichbar.
 - `remaining connection slots are reserved for roles with the SUPERUSER attribute`: Die direkten PostgreSQL-Client-Slots sind ausgeschöpft. Das ist kein DNS-Problem und war die tatsächliche Ursache der wiederkehrenden Ausfälle.
