@@ -4,6 +4,14 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [Unreleased]
 
+### Added
+
+- **Betriebsdokument `docs/operations/COMPOSE_ENV_FILE.md`:** erklärt, warum nackte `docker compose`-Kommandos nach `scripts/setup_local.sh` mit „required variable SECRET_KEY is missing a value" abbrechen — Compose lädt für die Interpolation automatisch nur `.env`, die Secrets liegen aber in `.env.local`, und `docker-compose.yml` verlangt `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` per `${VAR:?…}` ohne Default-Fallback. Das Dokument sammelt die drei Abhilfen (`--env-file .env.local`, `.env`-Symlink, Sitzungs-Export), die Regel „`restart` übernimmt keine Env-Änderungen, `up -d --force-recreate` schon", die Klarstellung „nach dem Setup ist kein Neustart nötig" und eine Tabelle, welches Kommando welche Wirkung hat. Im Index, in `LOCAL_DEVELOPMENT.md` und im FAQ verlinkt statt dupliziert.
+
+### Fixed
+
+- **Setup-Hinweise zeigten einen Compose-Aufruf, den niemand so ausführen kann:** `scripts/setup_local.sh` nannte in `--help` und beim Start `docker compose up --build -d`, führte intern aber `docker compose --env-file .env.local up --build -d` aus — genau die Diskrepanz, aus der die obige Fehlermeldung beim Kopieren des Hinweises entsteht. Beide Hinweise nennen jetzt den realen Aufruf mit Verweis auf das neue Dokument, und `docker compose ps` am Ende des Setups bekommt dasselbe Flag. `--help` gibt nur noch den Kopf-Kommentar aus (bisher zusätzlich `set -euo pipefail` aus dem Skriptkörper). Regressionstest in `tests/test_setup_local.sh`.
+
 ## [2.5.0] – 2026-09-09
 
 Bugfix-, Robustheits- und Wartbarkeits-Release; umgesetzt aus dem [umfassenden Code-Review vom 2026-09-09](security/CODE_REVIEW_2026-09-09.md). Commit-Bereich ab Review-Grundlage `727d3ee`; jeder Befund (K1–K4, W1–W10, O1–O9) ist ein eigener Merge-fähiger Commit mit Regressionstest, rot am Ausgangsstand. 370 Django-/Python-Tests und die Shell-Suite sind grün; neu im Gate: gepinntes Ruff und mypy.

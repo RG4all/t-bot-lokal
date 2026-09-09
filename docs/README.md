@@ -10,6 +10,7 @@ Einstieg ins Projekt: [README im Repo-Stamm](../README.md). Diese Seite ist der 
 | [manual/BACKTESTING.md](manual/BACKTESTING.md) | Backtesting-Kapitel: Annahmen, Formeln, Grenzen der Ergebnisse. |
 | [operations/LOCAL_DEVELOPMENT.md](operations/LOCAL_DEVELOPMENT.md) | Lokales Setup (Docker und ohne), Passphrase-Matrix, Hardwarediagnose, Render-Free-Simulation, Graceful Degradation, Render-Deployment, Qualitätssicherung. |
 | [operations/FAQ.md](operations/FAQ.md) | Häufige Fragen, Troubleshooting, Secret-Rotation. |
+| [operations/COMPOSE_ENV_FILE.md](operations/COMPOSE_ENV_FILE.md) | `.env.local` vs. `.env` bei `docker compose`: warum nackte Kommandos mit „required variable … is missing a value" abbrechen, drei Workarounds, `restart` vs. `--force-recreate`, Kommandotabelle. |
 | [operations/REMOTE_ACCESS_TAILSCALE.md](operations/REMOTE_ACCESS_TAILSCALE.md) | Fernzugriff ohne öffentliche Ports über Tailscale (DS-Lite-Szenario). |
 | [operations/CADDY_PROXY.md](operations/CADDY_PROXY.md) | LAN-Zugriff über Caddy als Reverse Proxy im Docker-Stack. |
 

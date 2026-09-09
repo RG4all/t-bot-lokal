@@ -54,4 +54,35 @@ else
   fail "Unabhängige Setups teilen dasselbe Datenbank-Passwort"
 fi
 
+# ---------------------------------------------------------------------------
+# Hinweise muessen den realen Compose-Aufruf zeigen. Compose laedt fuer die
+# Interpolation automatisch nur `.env`; die Secrets liegen in `.env.local`
+# (docs/operations/COMPOSE_ENV_FILE.md). Hinweise ohne `--env-file` fuehren
+# Anwender direkt in den Abbruch "required variable SECRET_KEY is missing".
+# ---------------------------------------------------------------------------
+ENV_LOCAL=".env.local"
+DRY_RUN=1
+dry_run_output="$(start_stack)"
+DRY_RUN=0
+assert_contains "${dry_run_output}" "docker compose --env-file .env.local up --build -d" \
+  "Dry-run nennt den realen Compose-Aufruf inklusive --env-file"
+
+bare_compose="$(
+  grep -nE 'docker compose [a-z-]+' "${REPO_ROOT}/scripts/setup_local.sh" |
+    grep -v 'docker compose version' |
+    grep -v -- '--env-file' || true
+)"
+assert_eq "" "${bare_compose}" "Kein Compose-Aufruf im Setup ohne --env-file"
+
+help_text="$(bash "${REPO_ROOT}/scripts/setup_local.sh" --help)"
+assert_contains "${help_text}" "docker compose --env-file .env.local up --build -d" \
+  "--help zeigt den Compose-Aufruf mit --env-file"
+assert_contains "${help_text}" "docs/operations/COMPOSE_ENV_FILE.md" \
+  "--help verweist auf den Compose-Env-Datei-Artikel"
+if [[ "${help_text}" == *"set -euo pipefail"* ]]; then
+  fail "Hilfetext darf keinen Shell-Code aus dem Skriptkoerper ausgeben"
+else
+  pass "Hilfetext bleibt auf den Kopf-Kommentar beschraenkt"
+fi
+
 finish_test

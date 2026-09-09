@@ -13,7 +13,10 @@
 #      hartcodierte oder oeffentlich bekannte Secrets; das lokale
 #      DB-Passwort wird zufaellig erzeugt und beim Retuning beibehalten.
 #   4. Baut die Images und startet den isolierten Stack mit
-#      `docker compose up --build -d`.
+#      `docker compose --env-file .env.local up --build -d`. Das Flag ist
+#      Pflicht: Compose laedt fuer die Interpolation automatisch nur `.env`,
+#      die Secrets liegen aber in `.env.local` (Details und Abhilfen:
+#      docs/operations/COMPOSE_ENV_FILE.md).
 #
 # Nutzung:
 #   scripts/setup_local.sh                       # Setup + Start
@@ -55,7 +58,10 @@ error() { printf '%s[setup]%s %s\n' "${C_RED}"  "${C_RESET}" "$*" >&2; }
 die()   { error "$*"; exit 1; }
 
 usage() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  # Kopf-Kommentar (ab Zeile 3 bis vor die schliessende Trennlinie) als
+  # Hilfetext; zeilennummernfrei, damit Textaenderungen die Hilfe nicht
+  # abschneiden.
+  awk 'NR < 3 { next } /^# =+$/ { exit } { sub(/^# ?/, ""); print }' "$0"
   exit 0
 }
 
@@ -256,7 +262,7 @@ start_stack() {
   [[ "${DO_UP}" -eq 1 ]] || { info "--no-up gesetzt - Stack wird nicht gestartet."; return 0; }
 
   # Compose liest .env automatisch; .env.local muss explizit eingebunden werden.
-  info "Lade ${ENV_LOCAL} und starte 'docker compose up --build -d'..."
+  info "Lade ${ENV_LOCAL} und starte 'docker compose --env-file ${ENV_LOCAL} up --build -d'..."
   set -a
   # shellcheck source=/dev/null
   . "./${ENV_LOCAL}"
@@ -275,7 +281,7 @@ start_stack() {
   # attempt nur fuer die Schleife benoetigt; Shellcheck-Zufriedenheit:
   : "${attempt:-1}"
 
-  docker compose ps || true
+  docker compose --env-file "${ENV_LOCAL}" ps || true
 
   if [ "${healthy}" -ne 1 ]; then
     error "Web-Container wurde nicht healthy. Starte Diagnose..."
@@ -299,6 +305,9 @@ start_stack() {
       info "Web ist healthy und vom Host erreichbar (HTTP ${host_http})."
       info "App: http://localhost:${port}/"
       info "Hinweis: Die Startseite liefert lokal standardmäßig 302 auf /login/; bei aktiviertem Gate zuerst auf /gate/."
+      info "Manuelle Compose-Kommandos brauchen '--env-file ${ENV_LOCAL}', z. B.:"
+      info "  docker compose --env-file ${ENV_LOCAL} ps"
+      info "Grund und Abhilfen: docs/operations/COMPOSE_ENV_FILE.md"
       ;;
     *)
       error "Web-Container ist healthy, aber vom Host aus nicht erreichbar (HTTP ${host_http})."

@@ -135,6 +135,11 @@ curl http://localhost:8369/health/
 docker compose exec backtest-worker celery -A trading_bot_project inspect ping --timeout 3
 ```
 
+Diese Compose-Kommandos (und die im Block darüber) brauchen nach dem
+Ein-Schritt-Setup `--env-file .env.local` — ohne das Flag brechen sie mit
+„required variable SECRET_KEY is missing a value" ab. Ursache, Abhilfen und
+eine Kommandotabelle: [COMPOSE_ENV_FILE.md](COMPOSE_ENV_FILE.md).
+
 Admin anlegen:
 
 ```bash
