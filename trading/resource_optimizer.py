@@ -11,8 +11,6 @@ from __future__ import annotations
 import math
 import os
 import shutil
-import threading
-import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -310,21 +308,3 @@ def format_duration(seconds: float) -> str:
         return f"ca. {minutes} min {remainder:02d} s"
     hours, minutes = divmod(minutes, 60)
     return f"ca. {hours} h {minutes:02d} min"
-
-
-class ResourceSnapshotCache:
-    """Kleiner TTL-Cache für API-Aufrufe, die einen frischen Snapshot wollen."""
-
-    def __init__(self, ttl_seconds: float = 30):
-        self.ttl_seconds = ttl_seconds
-        self._lock = threading.Lock()
-        self._value = None
-        self._created = 0.0
-
-    def get(self):
-        now = time.monotonic()
-        with self._lock:
-            if self._value is None or now - self._created >= self.ttl_seconds:
-                self._value = get_server_resources(refresh=True)
-                self._created = now
-            return self._value

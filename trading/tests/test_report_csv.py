@@ -328,3 +328,65 @@ class TradingReportCsvTests(TestCase):
             r'\d{8}_\d{6}\.csv"$',
         )
         self.assertNotIn("X-Injected", response)
+
+
+@override_settings(PASSPHRASE_GATE_ENABLED=False)
+class ReportTruncationTests(TestCase):
+    """W8: Report-Kennzahlen laufen auf einer gedeckelten Historie, kein Voll-Scan.
+
+    Der Report baute fruher ``list(config.logs.all())`` – auf Render Free
+    (512 MB) wuchs das mit der Konfigurationshistorie bis zur OOM-Kante. Jetzt
+    newest-first bis ``_MAX_REPORT_ROWS``; eine sichtbare Warnzeile im Template
+    verhindert, dass gekuerzte Kennzahlen als Vollstaendigkeit gelesen werden.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user("w8-user", password="w8-test-password")
+        self.config = Configuration.objects.create(
+            user=self.user,
+            name="W8",
+            symbols="BTC/USDT",
+            start_capital=Decimal(100),
+            trade_amount=Decimal(10),
+            fee=Decimal("0.1"),
+        )
+
+    def _create_logs(self, count):
+        TradingLog.objects.bulk_create(
+            [
+                TradingLog(
+                    configuration=self.config,
+                    symbol="BTC/USDT",
+                    action="sell" if i % 2 else "buy",
+                    price=Decimal(100 + i),
+                    amount=Decimal(1),
+                    fee_amount=Decimal("0.1"),
+                    pl_nominal=Decimal(i),
+                    pl_relative=Decimal(0),
+                    total_pl=Decimal(0),
+                    current_capital=Decimal(100),
+                    tank=Decimal(0),
+                    order_id=f"w8-{i}",
+                )
+                for i in range(count)
+            ]
+        )
+
+    def test_context_is_capped_and_flags_truncation(self):
+        self._create_logs(7)
+        with patch.object(views, "_MAX_REPORT_ROWS", 5):
+            context = views._build_report_context(self.config)
+        self.assertTrue(context["history_truncated"])
+        self.assertEqual(context["total_log_count"], 7)
+        self.assertEqual(context["report_row_limit"], 5)
+        self.assertEqual(context["total_trades"], 5)
+        self.assertEqual(len(context["logs"]), 5)
+        # Chronologische Reihenfolge bleibt erhalten (aelterste -> neueste).
+        self.assertEqual([log.order_id for log in context["logs"]], ["w8-2", "w8-3", "w8-4", "w8-5", "w8-6"])
+
+    def test_short_history_is_not_flagged(self):
+        self._create_logs(2)
+        with patch.object(views, "_MAX_REPORT_ROWS", 5):
+            context = views._build_report_context(self.config)
+        self.assertFalse(context["history_truncated"])
+        self.assertEqual(context["total_trades"], 2)

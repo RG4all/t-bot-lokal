@@ -45,7 +45,7 @@ Nach einem Upgrade auf 2.4.4 oder einer Passphrase-Rotation muss der Gate erneut
 
 ### 3.1 Basis- und Kontofelder
 
-> **Hinweis zu API-Schlüsseln:** API-Schlüssel werden **nicht** in der Datenbank gespeichert. Sie werden beim Start des Containers als Umgebungsvariablen `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` übergeben. Der Bot liest sie einmal beim Start in den Arbeitsspeicher. Das Feld `has_live_credentials` in der Datenbank signalisiert nur, ob Live-Handel aktiviert ist.
+> **Hinweis zu API-Schlüsseln:** API-Schlüssel werden **nicht** in der Datenbank gespeichert. Sie werden beim Start des Containers als Umgebungsvariablen `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` übergeben. Der Bot liest sie einmal beim Start in den Arbeitsspeicher. Das Feld `has_live_credentials` ist eine reine Dokumentationsmarkierung: Sie zeigt an, dass der Betreiber Schlüssel gesetzt hat – aktiviert wird dadurch nichts.
 
 Für Live-Handel:
 ```bash
@@ -71,7 +71,9 @@ Für Paper-Trading: `has_live_credentials` auf `false` lassen (Standard) und kei
 | **Start-Countdown (Minuten)** | `countdown` | Wartezeit nach Botstart in Minuten, bevor Käufe erlaubt sind. | Sammelt vorab Kursdaten zur Indikatorstabilisierung. |
 | **Indikatoren nach Verkauf zurücksetzen** | `countdown_reset_indicators` | Leert den 10-Punkte-Preisbuffer nach einem Verkauf. | Verhindert Sofort-Wiedereinstiege auf altem Momentum. |
 | **Auswertungsintervall (Sekunden)** | `time_interval` | Pause zwischen zwei Preisabfragen/Prüfzyklen (1 bis 300 s). | BitMart/Bitunix Spot min. 5 s für API-Schonung. |
-| **Echtzeit-Handel aktiviert** | `has_live_credentials` | `true` oder `false`. | Nur auf `true` setzen, wenn `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` als Umgebungsvariablen beim Container-Start uebergeben wurden. |
+| **Live-API-Schlüssel konfiguriert** | `has_live_credentials` | `true` oder `false`; reiner Dokumentationsstatus ohne Auswirkung auf die Engine. | Nur auf `true` setzen, wenn `EXCHANGE_API_KEY` und `EXCHANGE_SECRET_KEY` als Umgebungsvariablen beim Container-Start uebergeben wurden. |
+| **Hebel (Leverage)** | `leverage` | Ganzzahl 1–10; wird derzeit nur aufgezeichnet und von der Paper-/Spot-Engine nicht umgesetzt. | Vorgesehen für künftige Futures-Unterstützung; eine Änderung verändert keine Ordergröße. |
+| **Richtung** | `trade_direction` | `long` oder `short`; `short` ist nicht implementiert und hat keine Auswirkung. | Der Bot handelt ausschließlich long; `short` wird nur gespeichert. |
 
 ### 3.2 Indikatoren-Zuordnungsmatrix (Live-Konfiguration vs. Backtesting)
 
@@ -268,6 +270,8 @@ Im Dashboard stehen drei Exportformate bereit:
 - **HTML**: Eigenständige Reportdatei für Offline-Betrachtung im Browser.
 - **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation. Die zwölf Spalten und die chronologische Reihenfolge (Zeitstempel, dann ID) bleiben unverändert. Ab 2.4.13 erzeugt ein wiederverwendeter `io.StringIO`-Zeilenpuffer das CSV; Sonderzeichen und eingebettete Zeilenumbrüche werden weiterhin durch `csv.writer` maskiert. [Technische Details und Streaming-Prüfgrenzen](../findings/BUG-14-csv-echo-true-stream.md).
 
+Kennzahlen, Tabellen und Diagramme des PDF-/HTML-Reports basieren auf den neuesten 10.000 Trades; ist die Historie länger, weist ein sichtbarer Hinweis im Report darauf aus und der CSV-Export bleibt die vollständige Referenz (Grenze: `trading/views.py`, `_MAX_REPORT_ROWS`).
+
 Dateinamenschema: `username_exchange_config-id_YYYYMMDD_HHMMSS.ext` (z. B. `anna_binance_5_20260820_184501.pdf`).
 
 ## 11. Backtesting
@@ -320,6 +324,10 @@ Tagesvolumen zu Marktkapitalisierung (10 %) und die marktnahe Orderbuch-Tiefe
 zum Tagesvolumen (0,1 %). Für die Tiefe zählen nur valide Bid- und Ask-Orders
 innerhalb von ±2 % des Mittelkurses. Der Scanner verwendet bei Binance einen
 kompakten Abruf aller 24h-Ticker und die aktuell dokumentierten Bitunix-Endpunkte.
+Ergebnisse liegen 60 Sekunden in einem gedeckelten LRU-Cache (32 Einträge);
+ein manueller Refresh (`refresh=1`) ist je Börse und Marktart auf alle 20
+Sekunden gedrosselt – innerhalb des Fensters dient der letzte Stand, auch
+wenn er veraltet ist.
 Fehlende Marktkapitalisierung, 24h-Volumendaten oder ein nicht belastbares
 Orderbuch führen immer zum Ausschluss und werden nicht günstig geschätzt. Das
 Ergebnis ist keine Anlageempfehlung; volatile Märkte benötigen ein begrenztes
@@ -327,7 +335,7 @@ Risiko und eine passende Stop-Loss-Order.
 
 ### Zugriff auf HTTP-API und WebSockets
 
-Die vorhandenen API-URLs und Nutzdatenformate bleiben in 2.4.4 unverändert. Ohne aktuelle Gate-Freigabe leiten geschützte HTTP-Endpunkte zuerst mit `302` auf `/gate/?next=…` um; `/health/` und statische Dateien bleiben ausgenommen. WebSocket-Verbindungen zu `/ws/backtest/<id>/` benötigen beim Aufbau zusätzlich zum angemeldeten Eigentümer einen aktuellen Gate-Nachweis; andernfalls werden sie vor Annahme mit Anwendungscode `4403` abgelehnt.
+Die vorhandenen API-URLs und Nutzdatenformate bleiben in 2.4.4 unverändert. Ohne aktuelle Gate-Freigabe leiten geschützte HTTP-Endpunkte zuerst mit `302` auf `/gate/?next=…` um; `/health/`, `/readyz/` und statische Dateien bleiben ausgenommen. Die JSON-APIs (`/api/logs/`, `/api/trades/`, `/api/bot/status/`) erwarten eine numerische `config_id` im Query: nicht-numerische Werte antworten mit `400` und fester Meldung, unbekannte oder fremde IDs mit `404`; die Dashboard-URL selbst liefert bei ungültiger oder fehlender ID die Übersichtsseite bzw. `404` statt eines 500ers. `POST /api/manual_sell/<id>/` meldet `status: "ok"` (Verkauf durchgeführt) oder `status: "delayed"` (Auftrag in der Bot-Queue, wird gleich ausgeführt) – letzteres ist bewusst kein Fehler. WebSocket-Verbindungen zu `/ws/backtest/<id>/` benötigen beim Aufbau zusätzlich zum angemeldeten Eigentümer einen aktuellen Gate-Nachweis; andernfalls werden sie vor Annahme mit Anwendungscode `4403` abgelehnt.
 
 `POST /gate/`, `/login/`, `/register/` und `/admin/login/` teilen ein prozesslokales Limit von fünf POSTs je IP in 15 Minuten, auch für erfolgreiche POSTs. Der nächste POST liefert `429` mit `Retry-After: 900`. Hinter Proxys `RATE_LIMIT_TRUSTED_PROXIES` korrekt setzen; mehrere Web-Prozesse brauchen zusätzlich ein gemeinsames Limit. Siehe [Deployment-Anleitung](https://github.com/RG4all/t-bot-lokal/blob/tbot.local/docs/README.md).
 
@@ -350,6 +358,10 @@ Typische **technische Log-Meldungen für Betreiber**:
 - `WebSocketReconnectError`: interne Wiederverbindungen waren erfolglos.
 - `OperationalError could not translate host name` oder `connection refused`: PostgreSQL beziehungsweise Render-Netzwerk ist nicht erreichbar.
 - `remaining connection slots are reserved for roles with the SUPERUSER attribute`: Die direkten PostgreSQL-Client-Slots sind ausgeschöpft. Das ist kein DNS-Problem und war die tatsächliche Ursache der wiederkehrenden Ausfälle.
+
+### Datenhaltung und Pflege
+
+Ohne Pflege wachsen Trade-Historie und Fehlerlog unbegrenzt (nur DataLogs kürzt der Bot laufend je Symbol). `python manage.py prune_history --dry-run` zeigt, was die Aufbewahrungsgrenzen tilgen würden; der Lauf ohne Flag löscht in ID-Batches von 1000 Zeilen. Grenzen kommen aus den Settings (`MAX_TRADING_LOGS_PER_CONFIG` 200.000, `MAX_ERROR_LOGS` 50.000, `ERROR_LOG_RETENTION_DAYS` 30; jeweils per Umgebungsvariable überschreibbar) und lassen sich pro Aufruf mit `--trading-logs-per-config`, `--error-logs` und `--error-days` übersteuern. Als erledigt markierte oder Info-Fehler verfallen zusätzlich nach der Aufbewahrungsfrist; offene Fehler bleiben bis zur globalen Obergrenze bestehen.
 
 ### Verbindungsmodell ab Version 2.0.4
 
@@ -375,7 +387,7 @@ Der Trading-Thread ist vom Browser unabhängig. Schließt der Nutzer das Dashboa
 
 Das RAM-Journal überlebt keinen kompletten Container-Neustart. Für garantierten 24/7-Betrieb sind deshalb ein externer Redis/Queue-Worker oder eine dauerhaft verfügbare Datenbank und ein bezahlter Render-Service erforderlich.
 
-Für Bot-Threads greift zusätzlich ein globaler Circuit-Breaker: Nach fünf koordinierten Fehlversuchen werden weitere DB-Operationen fünf Minuten lang sofort verworfen. Danach führt genau ein Thread einen Recovery-Versuch aus. Konfigurationen werden höchstens alle 30 Sekunden neu geladen und DataLogs standardmäßig nur alle 10 Sekunden je Symbol geschrieben.
+Für Bot-Threads greift zusätzlich ein globaler Circuit-Breaker: Nach fünf koordinierten Fehlversuchen werden weitere DB-Operationen fünf Minuten lang sofort verworfen. Danach führt genau ein Thread einen Recovery-Versuch aus; ausschließlich der Konfigurationspfad betreibt diese Wiederherstellung – Schreib- und Bufferoperationen laufen nicht in die Recovery-Schleife, sondern öffnen nur den Circuit und übergeben den Eintrag an die RAM-Puffer, statt den Recovery-Lock mit Backoff-Sleeps zu belegen. Konfigurationen werden höchstens alle 30 Sekunden neu geladen und DataLogs standardmäßig nur alle 10 Sekunden je Symbol geschrieben. Eine Deaktivierung (`is_running=False`) beendet den Bot-Thread daher spätestens mit dem nächsten Refresh-Zyklus selbst; der Neustart-Pfad prüft die Fahne zusätzlich unmittelbar vor dem Start gegen die DB. Ein Bot, der die Trade-Historie nicht zuverlässig aus der DB wiederherstellen kann, startet nicht mit leerem Portfolio, sondern bricht mit kritischer Fehlermeldung ab (fail-closed).
 
 ## 13. Integrierte Hilfe-Seite und Performance
 
@@ -383,13 +395,15 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 
 **Minimaler Ressourcenverbrauch:**
 - Das gerenderte HTML wird mittels `@lru_cache(maxsize=1)` im Arbeitsspeicher gehalten.
-- Die Markdown-Kompilierung erfolgt exakt **einmal** beim ersten Aufruf und erzeugt bei nachfolgenden Anfragen **nahezu 0 % CPU- und I/O-Last**.
+- Die Markdown-Kompilierung erfolgt beim ersten Aufruf (bei exakt gleichzeitigen Erstzugriffen höchstens doppelt, ohne zweiten Cache-Layer) und erzeugt bei nachfolgenden Anfragen **nahezu 0 % CPU- und I/O-Last**.
 - Die Pfadsuche prüft automatisch `docs/manual/MANUAL.md`, `docs/MANUAL.md` sowie `MANUAL.md` im Projektstamm (Rückwärtskompatibilität).
 
 ## 14. Render-Hinweise
 
 - Free-Web-Services schlafen bei Inaktivität ein; für 24/7-Betrieb empfiehlt sich ein bezahlter Service oder ein lokaler Container.
 - `/health/` liefert leichtgewichtig `{"status": "ok", "version": "..."}` für Health-Checks.
+- `/readyz/` prüft zusätzlich die Datenbankverbindung und antwortet ohne sie mit `503` und `Retry-After: 5` – der richtige Haken, um Traffic erst nach echter Einsatzbereitschaft freizugeben.
+- Der optionale Celery-Worker abonniert die Queues `backtest` und `scheduling`; der minuteliche Beat-Task `schedule_backtests` läuft bewusst in der eigenen Queue, damit er die knappen Backtest-Slots nicht blockiert (`-Q backtest,scheduling`).
 
 ## 15. Sicherheits- und Risikocheckliste
 

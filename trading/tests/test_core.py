@@ -1,7 +1,11 @@
 import asyncio
 import inspect
+import threading
+import time
+from concurrent.futures import TimeoutError
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -29,7 +33,13 @@ from trading.middleware import DatabaseAvailabilityMiddleware
 from trading.models import BacktestTask, Configuration, DataLog, ErrorLog, TradingLog
 from trading.symbols import get_available_symbols
 from trading.tasks import _collect_results, dispatch_task, run_backtest
-from trading.trading_bot import TradingBot, _close_db_circuit, db_safe
+from trading.trading_bot import (
+    TradingBot,
+    TradingBotManager,
+    _close_db_circuit,
+    _db_circuit_remaining,
+    db_safe,
+)
 
 
 class BacktestingTests(TestCase):
@@ -169,6 +179,22 @@ class FormTests(TestCase):
         form = ConfigurationForm(self.configuration_data())
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["symbols"], "BTC/USDT,ETH/USDT")
+
+    def test_leverage_must_be_within_realistic_range(self):
+        """W9: Der Hebel war als '>= 1' beschrieben, akzeptierte aber 0 (2^0-Effekt)."""
+        for bad in ("0", "11"):
+            form = ConfigurationForm(self.configuration_data(leverage=bad))
+            self.assertFalse(form.is_valid(), f"leverage={bad} sollte abgewiesen werden")
+        form = ConfigurationForm(self.configuration_data(leverage="1"))
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_trade_direction_is_restricted_to_choices(self):
+        """W9: Freitext-Richtungen waren speicherbar, obwohl die Engine nur long kennt."""
+        form = ConfigurationForm(self.configuration_data(trade_direction="moon"))
+        self.assertFalse(form.is_valid())
+        for ok in ("long", "short"):
+            form = ConfigurationForm(self.configuration_data(trade_direction=ok))
+            self.assertTrue(form.is_valid(), form.errors)
 
     def test_configuration_rejects_overspending(self):
         form = ConfigurationForm(
@@ -417,6 +443,32 @@ class DatabaseAvailabilityMiddlewareTests(TestCase):
             raise AssertionError("Offener Circuit darf die Funktion nicht aufrufen")
 
         self.assertIsNone(blocked_write())
+
+    def test_suppressed_writer_fails_fast_without_recovery_loop(self):
+        """W4: suppress-Pfade rufen die Funktion genau einmal auf und oeffnen den Circuit.
+
+        Frueher durchliefen auch Write-Pfade die Reconnect-Schleife (mit sleep) und
+        blockierten den einzigen DB-Executor – inkl. des Config-Pfads aller Bots.
+        """
+        _close_db_circuit()
+        self.addCleanup(_close_db_circuit)
+        calls = 0
+
+        @db_safe(suppress=True)
+        def failing_write():
+            nonlocal calls
+            calls += 1
+            raise OperationalError("connection refused")
+
+        with (
+            patch("trading.trading_bot.settings") as fake_settings,
+            patch("trading.trading_bot.time.sleep") as sleep,
+        ):
+            fake_settings.DB_CIRCUIT_BREAKER_SECONDS = 42
+            self.assertIsNone(failing_write())
+        self.assertEqual(calls, 1, "kein Recovery-Loop fuer suppress-Aufrufe")
+        sleep.assert_not_called()
+        self.assertGreater(_db_circuit_remaining(), 0)
 
     def test_database_outage_returns_json_503_for_api(self):
         def unavailable(request):
@@ -709,6 +761,115 @@ class TradingBotTests(TransactionTestCase):
         self.assertIn("with self._lock", public)
         self.assertNotIn("with self._lock", unlocked)
 
+    def test_main_loop_self_stops_when_config_is_deactivated(self):
+        """K1/BUG-22: Ein deaktivierter Bot muss sich spaetestens beim naechsten
+        Config-Refresh selbst beenden – auch wenn stop_bot() ihn wegen einer
+        Restart-Race nie erreicht hat."""
+        Configuration.objects.filter(id=self.config.id).update(is_running=False)
+        bot = TradingBot(self.config)
+        bot.fetch_tickers = AsyncMock(return_value={})
+        # Ersten Durchlauf sofort ins Config-Refresh laufen lassen (statt nach
+        # BOT_CONFIG_REFRESH_SECONDS): der Loop liest die frische DB-Fahne.
+        bot._last_config_refresh = 0.0
+
+        outcome = {}
+
+        def _run():
+            try:
+                asyncio.run(bot.main_loop())
+                outcome["done"] = True
+            except BaseException as exc:
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=15)
+        self.assertFalse(thread.is_alive(), "main_loop endete nicht nach Deaktivierung")
+        self.assertTrue(outcome.get("done"), f"main_loop-Fehler: {outcome.get('error')!r}")
+        self.assertFalse(bot.running)
+
+    def test_restart_bot_rechecks_running_flag_against_db(self):
+        """K1/BUG-22: prepare_and_start darf nicht auf dem gecachten Attribut
+        entscheiden, sondern muss die DB-Fahne unmittelbar vor dem Start pruefen."""
+        from trading.trading_bot import TradingBotManager
+
+        restart = inspect.getsource(TradingBotManager.restart_bot)
+        self.assertIn("is_running=True).exists()", restart)
+
+    def test_ensure_started_waits_for_concurrent_construction(self):
+        """W5: Ein Restart darf nicht entfallen, nur weil gerade jemand anderes baut."""
+        manager = TradingBotManager()
+        self.config.is_running = True
+        self.config.save(update_fields=["is_running"])
+        sentinel_bot = object()
+        with (
+            patch.object(manager, "start_bot", side_effect=[None, sentinel_bot]) as start,
+            patch("trading.trading_bot.time.sleep") as sleep,
+        ):
+            self.assertIs(manager._ensure_started(self.config), sentinel_bot)
+        self.assertEqual(start.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    def test_ensure_started_abandons_when_config_deactivated_while_waiting(self):
+        """W5: Deaktivierung im Wartefenster beendet die Uebernahme (K1-Geist)."""
+        manager = TradingBotManager()
+        self.config.is_running = False
+        self.config.save(update_fields=["is_running"])
+        with (
+            patch.object(manager, "start_bot", return_value=None) as start,
+            patch("trading.trading_bot.time.sleep"),
+        ):
+            self.assertIsNone(manager._ensure_started(self.config))
+        start.assert_called_once()
+
+    def test_restore_state_fails_closed_on_unreachable_db(self):
+        """K2/BUG-23: Ohne verlaessliche Trade-Historie darf der Bot nicht mit
+        leerer Positionsliste starten (doppelter Kapitaleinsatz, falsche P/L-Basis)."""
+        with (
+            patch(
+                "trading.trading_bot.db_restore_state",
+                side_effect=OperationalError("Datenbank nicht erreichbar"),
+            ),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            TradingBot(self.config)
+        self.assertIn("nicht zuverlaessig wiederhergestellt", str(ctx.exception))
+
+    def test_restore_state_loads_positions_and_realized_pl(self):
+        """K2: Positiver Pfad – Trades aus der DB rekonstruieren den Zustand."""
+        TradingLog.objects.create(
+            configuration=self.config, symbol="BTC/USDT", action="buy",
+            price=Decimal(100), amount=Decimal(1), fee_amount=Decimal("0.1"),
+            pl_nominal=Decimal(0), pl_relative=Decimal(0), total_pl=Decimal(0),
+            current_capital=Decimal("89.9"), tank=Decimal(0), order_id="paper_buy_1",
+        )
+        TradingLog.objects.create(
+            configuration=self.config, symbol="SOL/USDT", action="sell",
+            price=Decimal(50), amount=Decimal(2), fee_amount=Decimal("0.1"),
+            pl_nominal=Decimal(25), pl_relative=Decimal(0), total_pl=Decimal(25),
+            current_capital=Decimal(100), tank=Decimal(25), order_id="paper_sell_1",
+        )
+        bot = TradingBot(self.config)
+        self.assertIn("BTC/USDT", bot.positions)
+        self.assertNotIn("SOL/USDT", bot.positions)
+        self.assertEqual(bot.realized_pl, Decimal(25))
+
+    def test_countdown_deadline_is_monotonic(self):
+        """O4: NTP-Spruenge oder suspend/resume duerfen den Countdown nicht faelschen."""
+        self.config.countdown = 30
+        bot = TradingBot(self.config)
+        self.assertFalse(bot.start_countdown_over)
+        self.assertGreater(bot._countdown_deadline, time.monotonic())
+        # Wallclock sprungweit in die Zukunft: kein Einfluss auf die Deadline.
+        with patch("trading.trading_bot.time.time", return_value=time.time() + 10**9):
+            async_to_sync(bot.check_trading)("BTC/USDT", Decimal(100), 0.0, 0.0, 0.0)
+        self.assertFalse(bot.start_countdown_over)
+        # Abgelaufene monotone Deadline: der Ablauf-Tick setzt nur das Flag
+        # und beendet den Tick (Handel startet spaetestens im naechsten).
+        bot._countdown_deadline = time.monotonic() - 1
+        async_to_sync(bot.check_trading)("BTC/USDT", Decimal(100), 0.0, 0.0, 0.0)
+        self.assertTrue(bot.start_countdown_over)
+
     def test_trade_is_buffered_and_position_kept_during_db_outage(self):
         bot = TradingBot(self.config)
         bot.price_buffer["BTC/USDT"] = [Decimal(100)]
@@ -720,6 +881,25 @@ class TradingBotTests(TransactionTestCase):
         self.assertIn("BTC/USDT", bot.positions)
         self.assertEqual(len(bot.pending_trading_logs), 1)
         self.assertEqual(bot.pending_trading_logs[0]["action"], "buy")
+
+    def test_manual_sell_timeout_is_reported_as_delayed_not_error(self):
+        """O8: Wartezeit-Timeout laesst den Verkauf eingeplant, nicht gescheitert sein."""
+        loop = SimpleNamespace()
+        from trading.trading_bot import TradingBotManager
+
+        bot = SimpleNamespace(is_alive=lambda: True, loop=loop, manual_sell=lambda symbol: None)
+        manager = TradingBotManager()
+        manager.bots[self.config.id] = bot
+        self.addCleanup(manager.bots.pop, self.config.id, None)
+        with (
+            patch("trading.trading_bot.asyncio.run_coroutine_threadsafe") as run,
+            patch("trading.trading_bot.MANUAL_SELL_TIMEOUT_SECONDS", 0.01),
+        ):
+            run.return_value.result.side_effect = TimeoutError("abgelaufen")
+            self.assertEqual(manager.manual_sell(self.config.id, "BTC/USDT"), "delayed")
+            run.return_value.result.side_effect = None
+            run.return_value.result.return_value = None
+            self.assertEqual(manager.manual_sell(self.config.id, "BTC/USDT"), "ok")
 
     def test_kill_switch_uses_fresh_ticker_and_closes_every_position(self):
         bot = TradingBot(self.config)
@@ -778,6 +958,24 @@ class BacktestTaskTests(TestCase):
         self.assertEqual(settings.CELERY_WORKER_CONCURRENCY, 1)
         self.assertEqual(settings.CELERY_WORKER_PREFETCH_MULTIPLIER, 1)
         self.assertLessEqual(settings.CELERY_WORKER_MAX_MEMORY_PER_CHILD, 384_000)
+
+    def test_schedule_task_runs_on_its_own_queue(self):
+        """W7: Beat-Scheduling darf die knappen Backtest-Worker-Slots nicht blockieren."""
+        from django.conf import settings
+
+        from trading_bot_project.celery_config import CELERY_RUNTIME_CONFIG
+
+        self.assertEqual(
+            settings.CELERY_TASK_ROUTES["trading.tasks.schedule_backtests"]["queue"], "scheduling"
+        )
+        self.assertEqual(
+            CELERY_RUNTIME_CONFIG["task_routes"]["trading.tasks.schedule_backtests"]["queue"],
+            "scheduling",
+        )
+        entrypoint = (
+            Path(__file__).resolve().parents[2] / "docker" / "worker-entrypoint.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("-Q backtest,scheduling", entrypoint)
 
     @override_settings(
         CELERY_TASK_ALWAYS_EAGER=True,

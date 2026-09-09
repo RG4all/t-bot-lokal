@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
 
+from trading import views
 from trading.backtest_templates import build_backtest_templates
 from trading.market_scanner import (
     MarketScannerError,
@@ -464,3 +465,138 @@ class ScannerTests(SimpleTestCase):
             scan_market_opportunities("binance", "spot", volatility_threshold=0)
         with self.assertRaises(MarketScannerFilterError):
             scan_market_opportunities("binance", "spot", min_orderbook_depth_ratio="nan")
+
+
+class ScannerCacheTests(SimpleTestCase):
+    """K3/PERF-24: Der Scanner-Cache muss gedeckelt sein und eviktieren.
+
+    Ohne Obergrenze waechst das Dict mit benutzergewaehlten Float-Filtern als
+    Schluessel im langlebigen Webprozess monotom (Memory-Leak mit OOM-Risiko
+    fuer den gesamten Container inkl. der laufenden Bots).
+    """
+
+    def setUp(self):
+        import trading.market_scanner as scanner
+
+        self.scanner = scanner
+        self._saved_cache = dict(scanner._CACHE)
+        self._saved_market_caps = dict(scanner._MARKET_CAP_CACHE)
+        self._saved_forced = dict(scanner._LAST_FORCED)
+        scanner._CACHE.clear()
+        scanner._MARKET_CAP_CACHE.clear()
+        scanner._LAST_FORCED.clear()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.scanner._CACHE.clear()
+        self.scanner._CACHE.update(self._saved_cache)
+        self.scanner._MARKET_CAP_CACHE.clear()
+        self.scanner._MARKET_CAP_CACHE.update(self._saved_market_caps)
+        self.scanner._LAST_FORCED.clear()
+        self.scanner._LAST_FORCED.update(self._saved_forced)
+
+    def test_cache_is_bounded_and_evicts_oldest_entries(self):
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append((exchange_id, market_type, tuple(sorted(filters.items()))))
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            # Mehr distincte Filter-Kombinationen als das LRU-Limit erlaubt.
+            n = self.scanner._CACHE_MAX_ENTRIES + 8
+            for index in range(n):
+                scan_market_opportunities(
+                    "binance", "spot", volatility_threshold=0.5 + index / 10
+                )
+        self.assertEqual(len(calls), n, "jede neue Kombination muss genau einmal scannen")
+        self.assertLessEqual(len(self.scanner._CACHE), self.scanner._CACHE_MAX_ENTRIES)
+        self.assertEqual(
+            len(self.scanner._CACHE),
+            self.scanner._CACHE_MAX_ENTRIES,
+            "bei Ueberschreitung muss auf das Limit verengt werden",
+        )
+
+    def test_repeated_lookup_serves_from_cache_and_keeps_key_alive(self):
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append(filters)
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            first = scan_market_opportunities("binance", "spot", volatility_threshold=12.5)
+            for _ in range(3):
+                again = scan_market_opportunities(
+                    "binance", "spot", volatility_threshold=12.5
+                )
+        self.assertEqual(len(calls), 1, "TTL-treffer duerfen nicht erneut scannen")
+        self.assertEqual(first, again)
+
+    def test_forced_refresh_is_throttled_and_serves_stale_cache(self):
+        """W10: Zwei ``refresh=True``-Aufrufe im Drosselfenster loesen einen Scan aus."""
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append(exchange_id)
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            first = scan_market_opportunities("binance", "spot", refresh=True)
+            second = scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(len(calls), 1, "zweiter Refresh innerhalb des Fensters muss dienen")
+        self.assertEqual(second, first)
+
+        # Anderer Exchange-Schluessel hat ein eigenes Drosselfenster.
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            scan_market_opportunities("bybit", "spot", refresh=True)
+        self.assertEqual(len(calls), 2)
+
+        # Nach Ablauf des Fensters (hier simuliert: Zeitstempel zuruecksetzen)
+        # wird wieder erzwungen – und zwar gegen den dann stale Cache.
+        for key in list(self.scanner._CACHE):
+            timestamp, payload = self.scanner._CACHE[key]
+            self.scanner._CACHE[key] = (
+                timestamp - self.scanner._CACHE_TTL_SECONDS - 1,
+                payload,
+            )
+        for key in list(self.scanner._LAST_FORCED):
+            self.scanner._LAST_FORCED[key] = (
+                self.scanner._LAST_FORCED[key]
+                - self.scanner._FORCE_MIN_INTERVAL_SECONDS
+                - 1
+            )
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            third = scan_market_opportunities("binance", "spot", refresh=True)
+        self.assertEqual(len(calls), 3, "ausserhalb des Fensters muss der Scan erzwungen werden")
+        self.assertIsNot(third, first)
+
+
+class CombinationCountTests(SimpleTestCase):
+    """O9: Die View-Zählung muss dem Decimal-Raster des Tasks exakt folgen."""
+
+    def _params(self, acc, nda, delta):
+        values = {}
+        for prefix, (start, end, step) in zip(
+            ("acc", "nda", "deltadelta"), (acc, nda, delta)
+        ):
+            values[f"{prefix}_from"] = start
+            values[f"{prefix}_to"] = end
+            values[f"{prefix}_steps"] = step
+        return values
+
+    def test_matches_task_grid_for_even_ranges(self):
+        from trading.tasks import _parameter_values
+
+        params = self._params((0.0, 0.2, 0.1), (0.0, 0.2, 0.1), (0.0, 0.2, 0.1))
+        # 3 Rasterpunkte je Achse, 2 Symbole -> 3^3 * 2.
+        self.assertEqual(views._combination_count(params, 2), 54)
+        self.assertEqual(len(_parameter_values(0.0, 0.2, 0.1)), 3)
+
+    def test_no_off_by_one_where_float_epsilon_failed(self):
+        from trading.tasks import _parameter_values
+
+        params = self._params((0.0, 0.3, 0.1), (0.0, 0.3, 0.1), (0.0, 0.3, 0.1))
+        expected = len(_parameter_values(0.0, 0.3, 0.1))
+        self.assertEqual(expected, 4, "Decimal-Raster hat 4 Punkte; der alte Float-Count: 3")
+        self.assertEqual(views._combination_count(params, 1), 4**3)

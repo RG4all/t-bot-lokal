@@ -11,7 +11,7 @@ services:
     branch: tbot.local
     dockerfilePath: ./Dockerfile
     dockerCommand: >-
-      celery -A trading_bot_project worker -Q backtest --loglevel=INFO
+      celery -A trading_bot_project worker -Q backtest,scheduling --loglevel=INFO
       --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=1
       --max-memory-per-child=384000
     envVars:

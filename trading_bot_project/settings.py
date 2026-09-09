@@ -116,7 +116,7 @@ CELERY_TASK_ROUTES = {
     "trading.tasks.run_backtest": {"queue": "backtest", "priority": 0},
     "trading.tasks.simulate_candidate": {"queue": "backtest", "priority": 0},
     "trading.tasks.collect_results": {"queue": "backtest", "priority": 0},
-    "trading.tasks.schedule_backtests": {"queue": "backtest", "priority": 0},
+    "trading.tasks.schedule_backtests": {"queue": "scheduling", "priority": 0},
 }
 
 if REDIS_URL:
@@ -441,10 +441,23 @@ DB_RECONNECT_BASE_DELAY = env_float("DB_RECONNECT_BASE_DELAY", 1.0)
 DB_RECONNECT_MAX_DELAY = env_float("DB_RECONNECT_MAX_DELAY", 30.0)
 DB_CIRCUIT_BREAKER_SECONDS = env_int("DB_CIRCUIT_BREAKER_SECONDS", 300, minimum=30)
 BOT_DB_WORKERS = env_int("BOT_DB_WORKERS", 1, minimum=1)
+# Siehe trading/test_runner.py: Prozess-Caches (Portfolio, Scanner) werden
+# vor jedem Testfall geleert, damit die Suite reproduzierbar
+# unabhaengig von Ausfuehrungsreihenfolge und PK-Wiederverwendung ist.
+TEST_RUNNER = "trading.test_runner.CacheClearingDiscoverRunner"
+
 MAX_DATA_LOGS_PER_SYMBOL = env_int("MAX_DATA_LOGS_PER_SYMBOL", 20_000, minimum=1_000)
 DATA_LOG_CLEANUP_EVERY = env_int("DATA_LOG_CLEANUP_EVERY", 500, minimum=10)
 DATA_LOG_WRITE_INTERVAL_SECONDS = env_int("DATA_LOG_WRITE_INTERVAL_SECONDS", 10, minimum=2)
 BOT_CONFIG_REFRESH_SECONDS = env_int("BOT_CONFIG_REFRESH_SECONDS", 30, minimum=5)
+
+# O5: Obergrenzen fuer die regelmaessige Pflege via 'manage.py prune_history'.
+# DataLogs kuerzt der Bot waehrend des Laufs selbst (MAX_DATA_LOGS_PER_SYMBOL);
+# Trading- und ErrorLogs wachsen dagegen unbegrenzt und bremsen auf kleiner
+# Hardware Reports, Filter-Queries und am Ende die Datenbank-Copies.
+MAX_TRADING_LOGS_PER_CONFIG = env_int("MAX_TRADING_LOGS_PER_CONFIG", 200_000, minimum=1_000)
+MAX_ERROR_LOGS = env_int("MAX_ERROR_LOGS", 50_000, minimum=1_000)
+ERROR_LOG_RETENTION_DAYS = env_int("ERROR_LOG_RETENTION_DAYS", 30, minimum=1)
 
 # ---------------------------------------------------------------------------
 # Passphrase-Gate (Landingpage vor Registrierung/Login)

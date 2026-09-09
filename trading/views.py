@@ -5,10 +5,11 @@ import logging
 import math
 import re
 import threading
-from collections import Counter, defaultdict
+import time
+from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 from functools import lru_cache, wraps
 from html import escape
 from io import BytesIO
@@ -23,9 +24,10 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db import DatabaseError, InterfaceError, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
 from django.db.models import Count, Max, Min, Model, Q, QuerySet, Sum
 from django.http import (
+    Http404,
     HttpRequest,
     HttpResponse,
     HttpResponseBase,
@@ -73,10 +75,24 @@ from .worker_status import get_backtest_runtime_status
 
 logger = logging.getLogger(__name__)
 _PLOT_LOCK = threading.Lock()
-_MANUAL_RENDER_LOCK = threading.Lock()
-_MANUAL_HTML: str | None = None
 _MAX_API_ROWS = 5_000
 _MAX_LOG_ROWS = 2_000
+_MAX_ANALYSIS_ROWS = 20_000
+# W8: Der Report lud bisher die komplette Trade-Historie in den RAM und
+# skalierte damit mit der Konfigurationsgroesse (bis 200k Logs). Der Report
+# arbeitet auf den neuesten Eintraegen bis zu dieser Grenze und weist im
+# Template sichtbar aus, wenn gekuerzt wurde.
+_MAX_REPORT_ROWS = 10_000
+# W2: Der Dashboard-JS pollt info- und logs-Endpunkt parallel; beide bauen
+# denselben Portfolio-Snapshot (zwei Queries je Symbol). Ein kurzer, prozess-
+# lokaler TTL-Cache (LRU, gedeckelt) entlastet die kleine Produktions-DB um
+# den Faktor der gleichzeitig gepollten Endpunkte. Zustandsaendernde POSTs
+# (manueller Verkauf, Kill-Switch, Reset, Konfigurations-/Loschg-Eingriffe)
+# invalidieren explizit, damit das UI den neuen Stand sofort sieht.
+_PORTFOLIO_TTL_SECONDS = 2.0
+_PORTFOLIO_CACHE_MAX = 64
+_PORTFOLIO_CACHE: OrderedDict[int, tuple[float, dict[str, Any]]] = OrderedDict()
+_PORTFOLIO_CACHE_LOCK = threading.Lock()
 
 # Typvariablen für generische Helfer und Decorator. ``_ViewParams`` erhält die
 # vollständige Signatur der dekorierten View (inklusive URL-Parametern),
@@ -220,6 +236,31 @@ def _redirect_dashboard(config_id: int) -> HttpResponseRedirect:
     return redirect(f"{reverse('dashboard')}?config_id={config_id}")
 
 
+def _config_id_from_query(request: HttpRequest) -> int | None:
+    """Liest ``config_id`` aus der Query und prüft, dass es eine Zahl ist.
+
+    Hintergrund (W1, Review 2026-09-09): Rohtext direkt an
+    ``get_object_or_404(…, id=…)`` erzeugt im ORM einen ``ValueError``
+    („Field 'id' expected a number“) und damit einen 500er auf an sich
+    saubere 4xx-Eingabefehler. Die Aufrufer wandeln den Fehler in die
+    dokumentierten Antworten um: JSON-APIs 400, HTML-Views 404.
+
+    Args:
+        request: Aktueller Request mit optionalem ``config_id``-Parameter.
+
+    Returns:
+        Die gelesene Konfigurations-ID oder ``None`` bei fehlendem/leerem
+        Parameter.
+
+    Raises:
+        ValueError: Wenn der Parameter vorhanden, aber keine Zahl ist.
+    """
+    raw = request.GET.get("config_id")
+    if raw is None or not raw.strip():
+        return None
+    return int(raw.strip())
+
+
 def _latest_rows(queryset: QuerySet[_ModelT], limit: int) -> list[_ModelT]:
     """Lädt die jüngsten ``limit`` Zeilen und gibt sie chronologisch zurück.
 
@@ -270,6 +311,47 @@ def _cash_flow(log: TradingLog) -> Decimal:
 
 
 def _portfolio_snapshot(config: Configuration) -> dict[str, Any]:
+    """Liefert den Portfolio-Snapshot der Konfiguration (kurzzeitig gecacht).
+
+    W2: ``_compute_portfolio_snapshot`` setzt pro Symbol zwei Abfragen ab
+    (letzter Trade, letzter Preis). Dashboard- polling ruft dieselbe
+    Rechnung über ``info_api`` und ``logs_api`` parallel auf. Der Snapshot
+    wird daher ``_PORTFOLIO_TTL_SECONDS`` prozesslokal gecacht und nach
+    zustandsändernden POSTs über ``_invalidate_portfolio_cache`` verworfen.
+    Der Bot schreibt ohnehin höchstens im konfigurierbaren Prüfintervall
+    (≥ 1 s), die Cache-TTL bleibt also unterhalb der Aktualitätsrate der Daten.
+
+    Achtung: Der zurückgegebene Snapshot ist das gecachte Objekt und von allen
+    Aufrufern **read-only** zu behandeln.
+
+    Args:
+        config: Trading-Konfiguration.
+
+    Returns:
+        Dasselbe Dictionary wie ``_compute_portfolio_snapshot``.
+    """
+    now = time.monotonic()
+    with _PORTFOLIO_CACHE_LOCK:
+        cached = _PORTFOLIO_CACHE.get(config.id)
+        if cached is not None and now - cached[0] < _PORTFOLIO_TTL_SECONDS:
+            _PORTFOLIO_CACHE.move_to_end(config.id)
+            return cached[1]
+    snapshot = _compute_portfolio_snapshot(config)
+    with _PORTFOLIO_CACHE_LOCK:
+        _PORTFOLIO_CACHE[config.id] = (now, snapshot)
+        _PORTFOLIO_CACHE.move_to_end(config.id)
+        while len(_PORTFOLIO_CACHE) > _PORTFOLIO_CACHE_MAX:
+            _PORTFOLIO_CACHE.popitem(last=False)
+    return snapshot
+
+
+def _invalidate_portfolio_cache(config_id: int) -> None:
+    """Verwirft den gecachten Portfolio-Snapshot einer Konfiguration (W2)."""
+    with _PORTFOLIO_CACHE_LOCK:
+        _PORTFOLIO_CACHE.pop(config_id, None)
+
+
+def _compute_portfolio_snapshot(config: Configuration) -> dict[str, Any]:
     """Erstellt einen Portfolio-Snapshot für die angegebene Konfiguration.
 
     Args:
@@ -454,66 +536,79 @@ def health_view(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok", "version": settings.APP_VERSION})
 
 
+@require_GET
+def readiness_view(request: HttpRequest) -> JsonResponse:
+    """Meldet die Einsatzbereitschaft des Containers an Orchestratoren (O6).
+
+    ``/health/`` bestaetigt nur den Lebenprozess. Ein Web-Container ohne
+    erreichbare Datenbank kann noch laufen, darf aber keinen Traffic
+    erhalten – hier antwortet er mit 503 und ``Retry-After``, ohne einen
+    Neustart zu provozieren. Details der Verbindungspruefung bleiben im Log;
+    nach aussen steht ausschliesslich der Status.
+
+    Args:
+        request: HTTP-GET (authfrei, analog ``health_view``).
+
+    Returns:
+        ``JsonResponse`` 200 mit ``{"status": "ready", ...}`` bei offener
+        Datenbankverbindung, sonst 503 mit ``{"status": "unavailable"}`` und
+        ``Retry-After: 5``.
+    """
+    try:
+        connection.ensure_connection()
+    except DatabaseError as exc:
+        logger.warning("Readiness-Check fehlgeschlagen: %s", exc.__class__.__name__)
+        return JsonResponse(
+            {"status": "unavailable"},
+            status=503,
+            headers={"Retry-After": "5"},
+        )
+    return JsonResponse({"status": "ready", "version": settings.APP_VERSION})
+
+
 @lru_cache(maxsize=1)
 def _render_manual() -> str:
-    """Kompiliert das vertrauenswürdige Handbuch einmal je Prozess.
+    """Kompiliert das vertrauenswuerdige Handbuch einmal je Prozess.
 
-    Der Lock ergänzt den LRU-Cache für den seltenen Fall zweier gleichzeitiger
-    erster Requests: Auch dann wird Markdown nur genau einmal kompiliert.
+    O3: Der ``lru_cache`` ist der einzige Cache-Layer. Ein zusaetzlicher
+    Lock mit Modul-Global hatte denselben Inhalt ein zweites Mal gecacht und
+    zwang zum Monkey-Patch von ``cache_clear`` – die Klarheit der nativen
+    Cache-API (``cache_clear``/``cache_info`` fuer Tests und Management)
+    wiegt schwerer als die einmalige Mehrfach-Kompilierung bei exakt
+    gleichzeitigen Erstzugriffen, die der native Cache bewusst zulaesst.
     """
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        if _MANUAL_HTML is not None:
-            return _MANUAL_HTML
-        candidates = (
-            settings.BASE_DIR / "docs" / "manual" / "MANUAL.md",
-            settings.BASE_DIR / "docs" / "MANUAL.md",
-            settings.BASE_DIR / "MANUAL.md",
-        )
-        for candidate in candidates:
-            if candidate.exists():
-                source = candidate.read_text(encoding="utf-8")
-                _MANUAL_HTML = markdown.markdown(
-                    source,
-                    extensions=[
-                        "extra",
-                        "fenced_code",
-                        "tables",
-                        "toc",
-                        "sane_lists",
-                        "codehilite",
-                    ],
-                    extension_configs={
-                        "codehilite": {
-                            "css_class": "codehilite",
-                            "guess_lang": False,
-                            "noclasses": False,
-                        }
-                    },
-                    output_format="html5",
-                )
-                return _MANUAL_HTML
-        _MANUAL_HTML = "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
-        return _MANUAL_HTML
-
-
-# Beibehaltung der lru_cache-Kompatibilität für Tests/Management, einschließlich
-# eines echten Reset des zweiten, thread-sicheren Cache-Layers.
-_manual_lru_cache_clear = _render_manual.cache_clear
+    candidates = (
+        settings.BASE_DIR / "docs" / "manual" / "MANUAL.md",
+        settings.BASE_DIR / "docs" / "MANUAL.md",
+        settings.BASE_DIR / "MANUAL.md",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return markdown.markdown(
+                candidate.read_text(encoding="utf-8"),
+                extensions=[
+                    "extra",
+                    "fenced_code",
+                    "tables",
+                    "toc",
+                    "sane_lists",
+                    "codehilite",
+                ],
+                extension_configs={
+                    "codehilite": {
+                        "css_class": "codehilite",
+                        "guess_lang": False,
+                        "noclasses": False,
+                    }
+                },
+                output_format="html5",
+            )
+    return "<p>Handbuchdatei <code>MANUAL.md</code> konnte nicht gefunden werden.</p>"
 
 
 def _clear_manual_cache() -> None:
-    """Leert LRU-Cache und den zusätzlichen, thread-sicheren Cache-Layer."""
-    global _MANUAL_HTML
-    with _MANUAL_RENDER_LOCK:
-        _MANUAL_HTML = None
-        _manual_lru_cache_clear()
-
-
-# Bewusste Ersetzung der lru_cache-API: Tests und Management-Code rufen
-# weiterhin ``_render_manual.cache_clear()`` auf und müssen dabei beide
-# Cache-Layer leeren. Statische Prüfer kennen dieses Muster nicht.
-_render_manual.cache_clear = _clear_manual_cache  # type: ignore[method-assign]
+    """Leert den Manual-Cache; Hook fuer Doku-Aktualisierung im Betrieb."""
+    _render_manual.cache_clear()
 
 
 @require_GET
@@ -659,6 +754,7 @@ def config_edit_view(request: HttpRequest, config_id: int) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         was_running = config.is_running
         config = form.save()
+        _invalidate_portfolio_cache(config.id)
         if was_running:
             bot_manager.restart_bot(config)
         messages.success(request, "Konfiguration wurde aktualisiert.")
@@ -736,6 +832,7 @@ def config_delete(request: HttpRequest, config_id: int) -> HttpResponse:
     if request.method == "POST":
         bot_manager.stop_bot(config)
         config.delete()
+        _invalidate_portfolio_cache(config_id)
         messages.success(request, "Konfiguration wurde gelöscht.")
         return redirect("config_list")
     return render(
@@ -758,9 +855,13 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
         Gerendertes Dashboard oder Weiterleitung nach dem Speichern.
     """
     user = _authenticated_user(request)
-    config_id = request.GET.get("config_id")
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        # HTML-View: nicht-numerische Query-Parameter sind 404, kein 500 (W1).
+        raise Http404("config_id ist keine Zahl") from None
     config: Configuration | None
-    if config_id:
+    if config_id is not None:
         config = get_object_or_404(Configuration, id=config_id, user=user)
     else:
         config = Configuration.objects.filter(user=user).order_by("-id").first()
@@ -817,6 +918,7 @@ def reset_log(request: HttpRequest, config_id: int) -> HttpResponseRedirect:
     else:
         config.logs.all().delete()
         messages.success(request, "Trading-Log und simuliertes Portfolio wurden zurückgesetzt.")
+    _invalidate_portfolio_cache(config.id)
     return _redirect_dashboard(config.id)
 
 
@@ -985,12 +1087,18 @@ def backtesting_estimate_api(request: HttpRequest) -> JsonResponse:
 @require_GET
 @no_cache_json
 def data_logs_api(request: HttpRequest) -> JsonResponse:
-    """Liefert Marktdatenpunkte eines Symbols der eigenen Konfiguration."""
-    config = get_object_or_404(
-        Configuration,
-        id=request.GET.get("config_id"),
-        user=_authenticated_user(request),
-    )
+    """Liefert Marktdatenpunkte eines Symbols der eigenen Konfiguration.
+
+    Fehler: 400 bei fehlendem/nicht-numerischem ``config_id`` oder fremdem
+    Symbol, 404 bei unbekannter Konfiguration (W1).
+    """
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
+        return JsonResponse({"error": "config_id fehlt"}, status=400)
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
         return JsonResponse({"error": "Ungültiges Symbol"}, status=400)
@@ -1018,12 +1126,18 @@ def data_logs_api(request: HttpRequest) -> JsonResponse:
 @require_GET
 @no_cache_json
 def trades_api(request: HttpRequest) -> JsonResponse:
-    """Liefert die Trades eines Symbols der eigenen Konfiguration."""
-    config = get_object_or_404(
-        Configuration,
-        id=request.GET.get("config_id"),
-        user=_authenticated_user(request),
-    )
+    """Liefert die Trades eines Symbols der eigenen Konfiguration.
+
+    Fehler: 400 bei fehlendem/nicht-numerischem ``config_id`` oder fremdem
+    Symbol, 404 bei unbekannter Konfiguration (W1).
+    """
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
+        return JsonResponse({"error": "config_id fehlt"}, status=400)
+    config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     symbol = request.GET.get("symbol", "").strip()
     if symbol not in _symbols(config):
         return JsonResponse({"error": "Ungültiges Symbol"}, status=400)
@@ -1159,8 +1273,11 @@ def bot_status_api(request: HttpRequest) -> JsonResponse:
     Interne Fehlertexte werden bewusst durch eine feste Meldung ersetzt; die
     Diagnose bleibt im Fehler-Log.
     """
-    config_id = request.GET.get("config_id")
-    if not config_id:
+    try:
+        config_id = _config_id_from_query(request)
+    except ValueError:
+        return JsonResponse({"error": "config_id ist keine Zahl"}, status=400)
+    if config_id is None:
         return JsonResponse({"error": "config_id fehlt"}, status=400)
     config = get_object_or_404(Configuration, id=config_id, user=_authenticated_user(request))
     if config.is_running and not bot_manager.is_running(config.id):
@@ -1195,10 +1312,12 @@ def logs_api(request: HttpRequest, config_id: int) -> JsonResponse:
     page = paginator.get_page(request.GET.get("page", 1))
     open_symbols = set(bot_manager.open_symbols(config.id))
     if not open_symbols:
-        for symbol in _symbols(config):
-            latest = config.logs.filter(symbol=symbol).order_by("-timestamp", "-id").first()
-            if latest and latest.action == "buy":
-                open_symbols.add(symbol)
+        # W2: Der (gecachte) Portfolio-Snapshot enthaelt genau die Symbole,
+        # deren letzter Trade ein Kauf ist – dasselbe Kriterium wie die
+        # fruehere Query-pro-Symbol-Schleife, aber ohne N+1-Abfragen.
+        open_symbols = {
+            str(position["symbol"]) for position in _portfolio_snapshot(config)["positions"]
+        }
 
     results = [
         {
@@ -1254,8 +1373,11 @@ def manual_sell_view(request: HttpRequest, config_id: int) -> JsonResponse:
     if symbol not in _symbols(config):
         return JsonResponse({"status": "error", "message": "Ungültiges Symbol"}, status=400)
     try:
-        bot_manager.manual_sell(config.id, symbol)
-        return JsonResponse({"status": "ok"})
+        status = bot_manager.manual_sell(config.id, symbol)
+        _invalidate_portfolio_cache(config.id)
+        # "delayed" (O8) ist erfolgreich eingeplant: Der naechste Poll zeigt den
+        # Verkauf; kein Grund fuer eine Fehlerbehandlung im Frontend.
+        return JsonResponse({"status": status})
     except Exception as exc:
         logger.exception("Manueller Verkauf für %s/%s fehlgeschlagen", config.id, symbol)
         _record_view_error(
@@ -1296,6 +1418,8 @@ def kill_switch_view(request: HttpRequest, config_id: int) -> JsonResponse:
             {"status": "error", "message": _KILL_SWITCH_ERROR},
             status=400 if isinstance(exc, ValueError) else 500,
         )
+    # Der Kill-Switch veraendert Positionen und Kassenstand unmittelbar.
+    _invalidate_portfolio_cache(config.id)
     status = "ok" if not result["errors"] else "partial"
     return JsonResponse({"status": status, **result})
 
@@ -1441,8 +1565,15 @@ def _build_report_context(config: Configuration) -> dict[str, Any]:
 
     Raises:
         RuntimeError: Wenn die Diagramm-Engine (Matplotlib) fehlt.
+
+    W8: Kennzahlen und Tabellen beziehen sich auf die neuesten
+    ``_MAX_REPORT_ROWS`` Trades; darueber hinausgehende Historie wird gekuerzt
+    und ueber ``history_truncated`` im Report ausgewiesen statt stillschweigend
+    die Laufzeit/Speichergrenze des Webprozesses zu gefaehrden.
     """
-    logs = list(config.logs.all().order_by("timestamp", "id"))
+    total_logs = config.logs.count()
+    history_truncated = total_logs > _MAX_REPORT_ROWS
+    logs = _latest_rows(config.logs.all(), _MAX_REPORT_ROWS)
     portfolio = _portfolio_snapshot(config)
     sell_logs = [log for log in logs if log.action == "sell"]
     symbol_counts = Counter(log.symbol for log in logs)
@@ -1528,6 +1659,9 @@ def _build_report_context(config: Configuration) -> dict[str, Any]:
         "logs": logs,
         "generated_at": timezone.localtime(),
         "total_trades": len(logs),
+        "history_truncated": history_truncated,
+        "total_log_count": total_logs,
+        "report_row_limit": _MAX_REPORT_ROWS,
         "buy_trades": sum(log.action == "buy" for log in logs),
         "sell_trades": len(sell_logs),
         "total_profit": cumulative_profit,
@@ -1645,13 +1779,22 @@ def generate_report_csv(request: HttpRequest, config_id: int) -> StreamingHttpRe
 
 
 def _combination_count(params: Mapping[str, Any], symbol_count: int) -> int:
-    """Zählt die Rasterkombinationen eines Backtests über alle Symbole."""
+    """Zählt die Rasterkombinationen eines Backtests über alle Symbole.
+
+    O9: Die Zählung folgt exakt der Iteration von ``trading.tasks._parameter_values``
+    (Anzahl = floor((end - start) / step) + 1) statt eines Float-Nachbaus mit Epsilon.
+    Der Nachbau zählte bei glatteiligen Schritten einen Wert zu wenig (0.0→0.3 bei
+    Schritt 0.1: 3 statt 4) und unterschlug Kombinationen gegenüber der harten Grenze,
+    die der View anschließend prüft. Die Division zweier endlicher Dezimalzahlen ist
+    selbst endlich, daher rundungsfehlerfrei.
+    """
     result = symbol_count
     for prefix in ("acc", "nda", "deltadelta"):
-        start = params[f"{prefix}_from"]
-        end = params[f"{prefix}_to"]
-        step = params[f"{prefix}_steps"]
-        result *= math.floor((end - start) / step + 1e-9) + 1
+        start = Decimal(str(params[f"{prefix}_from"]))
+        end = Decimal(str(params[f"{prefix}_to"]))
+        step = Decimal(str(params[f"{prefix}_steps"]))
+        steps = ((end - start) / step).to_integral_value(rounding=ROUND_FLOOR)
+        result *= int(steps) + 1
     return result
 
 
@@ -2206,16 +2349,20 @@ def analyse_view(request: HttpRequest) -> HttpResponse:
             )
             continue
         source_config = Configuration.objects.get(id=source_config_id)
+        # W3: values_list liefert nur (timestamp, price) statt eines vollen
+        # ORM-Objekts je Zeile – bei bis zu 20k Reihen der teuerste Teil des
+        # Endpunkts. Ansonsten unveraendert: neueste Zeilen zuerst begrenzen,
+        # fuer die Analyse aufsteigend sortieren.
         rows = list(
-            DataLog.objects.filter(configuration_id=source_config_id, symbol=symbol).order_by(
-                "-timestamp", "-id"
-            )[:20_000]
+            DataLog.objects.filter(configuration_id=source_config_id, symbol=symbol)
+            .order_by("-timestamp", "-id")
+            .values_list("timestamp", "price")[:_MAX_ANALYSIS_ROWS]
         )
         rows.reverse()
         closes_by_bucket: dict[int, float] = {}
-        for row in rows:
-            bucket = int(row.timestamp.timestamp()) // bucket_size
-            closes_by_bucket[bucket] = float(row.price)
+        for timestamp, price in rows:
+            bucket = int(timestamp.timestamp()) // bucket_size
+            closes_by_bucket[bucket] = float(price)
         closes = list(closes_by_bucket.values())
         if len(closes) < 16:
             analysis_results.append(

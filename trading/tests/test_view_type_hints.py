@@ -264,8 +264,12 @@ class ViewDocstringTests(SimpleTestCase):
                 )
 
     def test_portfolio_snapshot_documents_returned_keys(self) -> None:
-        """Der Snapshot-Docstring nennt jeden zurückgegebenen Schlüssel."""
-        docstring = inspect.getdoc(views._portfolio_snapshot) or ""
+        """Der Snapshot-Docstring nennt jeden zurückgegebenen Schlüssel.
+
+        authoritativer Ort der Schluesseldoku ist der Builder; die
+        cache-wickelnde ``_portfolio_snapshot`` verweist nur auf ihn.
+        """
+        docstring = inspect.getdoc(views._compute_portfolio_snapshot) or ""
         for key in (
             "cash",
             "realized_profit",

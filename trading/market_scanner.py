@@ -16,6 +16,7 @@ import math
 import statistics
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 
@@ -49,9 +50,25 @@ _ESTABLISHED_UTILITY_ASSETS = {
     "XLM",
     "XRP",
 }
-_CACHE = {}
+# K3/PERF-24: gedeckelter LRU statt TTL-only-dict. Die Cache-Schluessel
+# enthalten benutzergewaehlte Float-Filter; ohne Eviction wuechse das Dict
+# im langlebigen Webprozess (512-MB-Limit inkl. Bots!) monoton. Der Lock wird
+# bewusst nur fuer Dict-Zugriffe gehalten, nie ueber Netzwerk-I/O.
+_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 60
+_CACHE_MAX_ENTRIES = 32
+# W10: refresh=True umging den TTL bisher pro Aufruf komplett. Mehrere Nutzer
+# (oder UI-Retries) feuern damit ungehindert auf die rate-limitierten
+# oeffentlichen Ticker-Endpunkte der Boersen. Erzwungene Scans werden je
+# (Exchange, Marktart) gedrosselt; innerhalb des Fensters bedient der Scan den
+# zuletzt bekannten – ggf. veralteten – Stand, statt einen Exchange-Aufruf zu
+# starten. Ohne jegliche Cache-Info wird immer gescannt (Korrektheit vor
+# Drosselung, der Fall verbraeumt nur das Zeitfenster).
+_FORCE_MIN_INTERVAL_SECONDS = 20.0
+_FORCE_THROTTLE_MAX_ENTRIES = 16
+_LAST_FORCED: OrderedDict[tuple, float] = OrderedDict()
+_FORCE_THROTTLE_LOCK = threading.Lock()
 
 
 class MarketScannerError(MarketDataError):
@@ -448,9 +465,13 @@ _COINGECKO_IDS = {
     "XLM": "stellar",
     "XRP": "ripple",
 }
-_MARKET_CAP_CACHE = {}
+# Gleiches Muster wie _CACHE (K3/PERF-24): gedeckelter LRU, da die Schluessel
+# aus den auf der Exchange gefundenen Assets resultieren und nicht hart
+# begrenzt sind.
+_MARKET_CAP_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _MARKET_CAP_CACHE_LOCK = threading.Lock()
 _MARKET_CAP_TTL_SECONDS = 300
+_MARKET_CAP_MAX_ENTRIES = 16
 
 
 def _coingecko_market_caps(bases):
@@ -461,8 +482,10 @@ def _coingecko_market_caps(bases):
     now = time.monotonic()
     with _MARKET_CAP_CACHE_LOCK:
         cached = _MARKET_CAP_CACHE.get(key)
-        if cached and now - cached[0] < _MARKET_CAP_TTL_SECONDS:
-            return cached[1]
+        if cached is not None:
+            _MARKET_CAP_CACHE.move_to_end(key)
+            if now - cached[0] < _MARKET_CAP_TTL_SECONDS:
+                return cached[1]
     try:
         response = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
@@ -483,6 +506,9 @@ def _coingecko_market_caps(bases):
         values = {}
     with _MARKET_CAP_CACHE_LOCK:
         _MARKET_CAP_CACHE[key] = (now, values)
+        _MARKET_CAP_CACHE.move_to_end(key)
+        while len(_MARKET_CAP_CACHE) > _MARKET_CAP_MAX_ENTRIES:
+            _MARKET_CAP_CACHE.popitem(last=False)
     return values
 
 
@@ -831,12 +857,49 @@ def scan_market_opportunities(
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached and not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
+        if cached is not None:
+            # LRU-Treffer nach hinten setzen, damit aktive Schluessel nicht
+            # evikiert werden.
+            _CACHE.move_to_end(key)
+            if not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
+                return cached[1]
+    if refresh:
+        throttle_key = (exchange_id, market)
+        with _FORCE_THROTTLE_LOCK:
+            last_forced = _LAST_FORCED.get(throttle_key)
+            allowed = last_forced is None or now - last_forced >= _FORCE_MIN_INTERVAL_SECONDS
+            if allowed:
+                _LAST_FORCED[throttle_key] = now
+                _LAST_FORCED.move_to_end(throttle_key)
+                while len(_LAST_FORCED) > _FORCE_THROTTLE_MAX_ENTRIES:
+                    _LAST_FORCED.popitem(last=False)
+        if not allowed and cached is not None:
             return cached[1]
     result = _scan_uncached(exchange_id, market, limit=limit, **values)
     with _CACHE_LOCK:
         _CACHE[key] = (now, result)
+        _CACHE.move_to_end(key)
+        # K3/PERF-24: harte Obergrenze; aelteste Eintraege fliegen raus, statt
+        # dass der Cache nur TTL-geprueft weiterwuchert.
+        while len(_CACHE) > _CACHE_MAX_ENTRIES:
+            _CACHE.popitem(last=False)
     return result
+
+
+def _reset_process_state_for_tests() -> None:
+    """Leert Scanner-Caches und Refresh-Drossel (Test-Hermetizitaet).
+
+    Die Modul-globalen Zaehler (TTL/LRU-Caches, ``_LAST_FORCED``) ueberleben
+    Django-Testfaelle, weil nur die DB zurueckgerollt wird; ohne Reset haengt
+    das Verhalten eines Tests an der Ausfuehrungsreihenfolge. Produktionscode
+    ruft den Hook nie auf.
+    """
+    with _CACHE_LOCK:
+        _CACHE.clear()
+    with _MARKET_CAP_CACHE_LOCK:
+        _MARKET_CAP_CACHE.clear()
+    with _FORCE_THROTTLE_LOCK:
+        _LAST_FORCED.clear()
 
 
 def get_top_gainers(exchange_id: str, market: str = "spot", *, refresh: bool = False):

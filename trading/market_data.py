@@ -300,13 +300,6 @@ class BinancePublicMarketData:
                 await asyncio.sleep(delay)
         raise WebSocketReconnectError("Binance", max_reconnects, last_error)
 
-    async def validate_symbols_async(self, symbols):
-        try:
-            await self.fetch_tickers_async(symbols, timeout_seconds=10, max_reconnects=2)
-        finally:
-            await self.close()
-        return []
-
     async def close(self):
         await self._disconnect()
 

@@ -18,6 +18,7 @@ Einstieg ins Projekt: [README im Repo-Stamm](../README.md). Diese Seite ist der 
 | Dokument | Status | Inhalt |
 |---|---|---|
 | [security/SECURITY_REVIEW_2.4.4.md](security/SECURITY_REVIEW_2.4.4.md) | **verbindlich, aktuell** | Befunde, Prüfgrenzen und Release-Nachweis des Security-Reviews. |
+| [security/CODE_REVIEW_2026-09-09.md](security/CODE_REVIEW_2026-09-09.md) | Review 2026-09-09 | Umfassender Code-Review (nach Kritikalität priorisiert): Bot-Lifecycle-Race, Fail-open-Restart, Cache-Leak, Dependency-/CI-Hygiene, Performance und Umsetzungsreihenfolge. |
 | [CHANGELOG.md](CHANGELOG.md) | gepflegt | Release-Historie; einzige Quelle für „Fixed in x.y.z“-Kontext. |
 
 ### Findings
@@ -39,6 +40,10 @@ Ein Dokument pro abgeschlossenem Audit-/Review-Befund. Der Status im Dokumentenk
 | [CODE-18](findings/CODE-18-indicator-dedup.md) | Indikator-Deduplizierung Bot/Backtest | Fixed |
 | [CODE-19](findings/CODE-19-view-type-hints.md) | Typannotation und Doku der Views | Fixed |
 | [CODE-20](findings/CODE-20-module-exports.md) | Explizite Modul-Exports (`__all__`) | Fixed |
+| [BUG-22](findings/BUG-22-selfstop-deactivated-bots.md) | Deaktivierte Bots handelten weiter (Main-Loop-Guard) | Fixed |
+| [BUG-23](findings/BUG-23-restore-state-fail-closed.md) | State-Restart fail-open → jetzt fail-closed | Fixed |
+| [PERF-24](findings/PERF-24-scanner-cache-lru.md) | Scanner-Caches als gedeckelte LRUs | Fixed |
+| [CODE-25](findings/CODE-25-requirements-aiohttp-pin.md) | `aiohttp` deklariert und gepinnt | Fixed |
 
 ## Architektur-Entscheidungen
 

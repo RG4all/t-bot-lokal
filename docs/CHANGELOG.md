@@ -4,6 +4,51 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [Unreleased]
 
+## [2.5.0] – 2026-09-09
+
+Bugfix-, Robustheits- und Wartbarkeits-Release; umgesetzt aus dem [umfassenden Code-Review vom 2026-09-09](security/CODE_REVIEW_2026-09-09.md). Commit-Bereich ab Review-Grundlage `727d3ee`; jeder Befund (K1–K4, W1–W10, O1–O9) ist ein eigener Merge-fähiger Commit mit Regressionstest, rot am Ausgangsstand. 370 Django-/Python-Tests und die Shell-Suite sind grün; neu im Gate: gepinntes Ruff und mypy.
+
+### Added
+
+- **Readiness-Endpunkt `/readyz/`:** prüft die Datenbankverbindung und antwortet ohne sie mit `503` und `Retry-After: 5`, ohne Exception-Details nach außen; vom Passphrase-Gate ausgenommen. Damit unterscheidet die App erstmals „Prozess lebt" (`/health/`) von „Traffic bereit". [Review O6]
+- **Pflegekommando `prune_history`:** begrenzt TradingLogs je Konfiguration und ErrorLogs global auf die Settings-Grenzen (`MAX_TRADING_LOGS_PER_CONFIG`, `MAX_ERROR_LOGS`, `ERROR_LOG_RETENTION_DAYS`, alle per Env überschreibbar), zusätzlich Altersfrist für gelöschte/Info-Fehler; ID-basierte 1000er-Löschbatches wie der Bot-Trim, `--dry-run` inklusive. [Review O5]
+- **Mypy im Quality-Gate:** der in `pyproject.toml` dokumentierte Scope `trading/views.py` läuft jetzt als CI-Step mit exakt den lokal referenzierten Pins (`mypy==1.18.2`, `django-stubs==5.2.7`). [Review O2]
+
+### Changed
+
+- **Portfolio-Snapshots gecacht:** `_portfolio_snapshot` (zwei Queries je Symbol) liegt 2 s prozesslokal in einer gedeckelten LRU; Dashboard-Polling über `info_api`/`logs_api` teilt sich denselben Stand, `logs_api` leitet offene Symbole aus dem Snapshot ab statt pro Symbol zu fragen. Zustandsändernde POSTs (Verkauf, Kill-Switch, Reset, Edit, Löschung) invalidieren gezielt, das UI bleibt sofort frisch. [Review W2]
+- **Analyse-Datenzugriff:** `analyse_view` lädt statt bis zu 20.000 kompletter ORM-Objekte nur noch `(timestamp, price)`-Paare via `values_list` (Limit als Konstante `_MAX_ANALYSIS_ROWS`). [Review W3]
+- **Hilfe-Cache vereinfacht:** der zweite, von Hand gepflegte Cache-Layer um `_render_manual` samt Monkey-Patch von `cache_clear` ist entfallen; `@lru_cache` ist die einzige Schicht und die native `cache_clear()`/`cache_info()`-API gilt uneingeschränkt. [Review O3]
+- **Bot-Start außerhalb des Manager-Locks:** Konstruktion (State-Recovery, Exchange-Setup) blockiert Status-Polls nicht mehr; ein `starting`-Sentinel verhindert Doppelstarts und `restart_bot` übernimmt über `_ensure_started` den Start, falls ein paralleler Builder das Sentinel hielt. [Review W5]
+- **CI-Ruff gepinnt:** `ruff==0.16.6` statt `pip install ruff` – Gate-Ergebnisse hängen nicht mehr am Veröffentlichungsdatum des Linters. [Review O1]
+
+### Removed
+
+- **Totcode:** `market_data.validate_symbols_async` (gab immer `[]` zurück), `resource_optimizer.ResourceSnapshotCache` (nie instanziiert) und der einmalige Migrationsbefehl `clear_api_keys` sind gelöscht. [Review O7]
+
+### Fixed
+
+- **K1 – Deaktivierte Bots handelten weiter:** `main_loop` wertet `is_running=False` nach dem Konfigurations-Refresh selbst aus (maximal ein Zyklus bis zum sauberen Ende), `restart_bot` prüft die Fahne unmittelbar vorher gegen die DB. [Nachweis BUG-22](findings/BUG-22-selfstop-deactivated-bots.md)
+- **K2 – State-Restart war fail-open:** kann die Trade-Historie nicht zuverlässig geladen werden (DB-Ausfall während des Starts), bricht der Bot sichtbar ab statt mit leerem Portfolio doppelt zu investieren. [Nachweis BUG-23](findings/BUG-23-restore-state-fail-closed.md)
+- **K3 – Unbegrenztes Wachstum der Scanner-Caches:** `_CACHE` und `_MARKET_CAP_CACHE` sind gedeckelte LRUs (32/16 Einträge) statt TTL-only-Dicts; der OOM-Hebel gegen den langlebigen Webprozess ist beseitigt. [Nachweis PERF-24](findings/PERF-24-scanner-cache-lru.md)
+- **K4 – Undeklarierte Laufzeitabhängigkeit:** `aiohttp` ist jetzt direkt in `requirements.txt` gepinnt (`==3.14.3`) und hängt nicht mehr allein an ccxts Transitivität. [Nachweis CODE-25](findings/CODE-25-requirements-aiohttp-pin.md)
+- **Ungültige `config_id` lieferte 500er:** JSON-APIs antworten auf nicht-numerische Werte mit `400` und fester Meldung, die Dashboard-URL mit `404`; fehlende Parameter behalten ihr bisheriges Verhalten. Log- und ErrorLog-Rauschen durch reine Eingabefehler entfällt. [Review W1; Troubleshooting im FAQ]
+- **DB-Ausfall blockierte alle Bots bis ~90 s:** `db_safe(suppress=True)`-Schreibpfade laufen nicht mehr in die koordinierte Reconnect-Schleife, sondern öffnen nur den Circuit und übergeben an die RAM-Puffer; Recovery bleibt beim einen Konfigurationspfad. [Review W4]
+- **`open_symbols`-Härtung:** die Positions-Schlüssel werden vor dem Sortieren explizit kopiert statt über das live von der Bot-Loop mutierte Dict zu iterieren (Semantik unabhängig von Interpreter-Details). [Review W6]
+- **Beat-Scheduling blockierte Backtest-Slots:** `schedule_backtests` läuft in der eigenen Queue `scheduling`, der Worker abonniert `backtest,scheduling` (Entrypoint und Render-Beispiel); ein hängender Schedule-Laufruf verhungert keine Backtests mehr. [Review W7]
+- **Reports ohne Obergrenze:** PDF-/HTML-Reports arbeiten auf den neuesten 10.000 Trades (`_MAX_REPORT_ROWS`) und weisen Kappungen mit sichtbarem Hinweis samt Verweis auf den vollständigen CSV-Export aus. [Review W8]
+- **Irreführende Konfigurationsfelder:** `leverage` validiert 1–10 statt `>= 0`, `trade_direction` ist auf `long`/`short` beschränkt, beide Hilfetexte benennen ehrlich, dass die Engine die Werte nur aufzeichnet; `has_live_credentials` heißt im Formular „Live-API-Schlüssel konfiguriert" (Migration `0015`). [Review W9]
+- **`?refresh=1` ohne Bremse:** erzwungene Scanner-Refreshes sind je Börse und Marktart auf 20 s gedrosselt; innerhalb des Fensters bedient der letzte Scan – ohne jeden Cache-Info wird dagegen immer gescannt. [Review W10]
+- **Countdown auf der Wallclock:** die Startverzögerung nutzt eine monotone Deadline; NTP-Sprünge und suspend/resume verkürzen oder verlängern sie nicht mehr. `started_at` bleibt epoch-basiert fürs Display. [Review O4]
+- **Manueller Verkauf meldete Timeout als Fehlschlag:** nach 10 s Wartezeit (jetzt Konstante `MANUAL_SELL_TIMEOUT_SECONDS`) bleibt der Auftrag in der Bot-Queue; API und Frontend unterscheiden `ok`/`delayed`, ein erfolgreicher Verkauf wurde als Fehlschlag gemeldet und der ErrorLog mit falschem Critical gefüllt. [Review O8]
+- **Kombinationszähler am Randwert:** `_combination_count` folgt exakt der Decimal-Rasteriteration des Backtest-Tasks statt eines Float-Nachbaus mit Epsilon (0.0→0.3 bei Schritt 0.1 zählte 3 statt 4 und unterschritt das Hard-Limit). [Review O9]
+
+### Security
+
+- Die 500er- und Timeout-Pfade oben sind zugleich Information-Disclosure- und Self-DoS-Hebel gewesen: ORM-Diagnosen landeten im Log, billige Retry-/Refresh-Klicks trafen die eigenen Rate-Limits. Feste Fehlermeldungen, Drosseln und gedeckelte Caches schließen das; `/readyz/` gibt ausschließlich den Status nach außen.
+
+- Auslieferung über [PR #30](https://github.com/RG4all/t-bot-lokal/pull/30). Fürs Deploy gilt: einzige Migration ist 0015 (Validierungen und Choices an bestehenden Feldern), keine neuen Pflicht-Umgebungsvariablen; `prune_history` ist als optionaler Wartungsjob empfohlen (Handbuch §12, „Datenhaltung und Pflege“).
+
 ## [2.4.20] – 2026-09-09
 
 ### Dokumentation und Wartbarkeit (Repo-Restrukturierung)

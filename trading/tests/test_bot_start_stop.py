@@ -168,6 +168,75 @@ class BotManagerSourceTests(SimpleTestCase):
         self.assertIn("bot_manager.is_running(", self.views_source)
         self.assertNotIn("bot_manager._is_running_unlocked(", self.views_source)
 
+    def test_open_symbols_snapshots_position_keys(self):
+        """W6: ``open_symbols`` darf nicht über das Live-Dict der Bot-Loop iterieren.
+
+        Die Bot-Loop mutiert ``positions`` concurrent zum View-Thread; der Fix
+        kopiert die Schlüssel einmalig (``list(...)``) vor dem Sortieren.
+        """
+        src = _method_source(TradingBotManager, "open_symbols")
+        self.assertIn("snapshot = list(bot.positions)", src)
+        self.assertIn("sorted(snapshot)", src)
+        self.assertNotIn("sorted(bot.positions)", src)
+
+
+class BotManagerStartConcurrencyTests(SimpleTestCase):
+    """W5: Bot-Start darf Status-Abfragen waehrend der Konstruktion nicht blockieren."""
+
+    def setUp(self):
+        _FakeTradingBot.instances = []
+        self.manager = TradingBotManager()
+        self.config = SimpleNamespace(id=77)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+        outer = self
+
+        class _BlockingBot(_FakeTradingBot):
+            def __init__(self, config, on_exit=None):
+                super().__init__(config, on_exit=on_exit)
+                outer.entered.set()
+                outer.release.wait(timeout=5)
+
+        self.patcher = patch.object(trading_bot_module, "TradingBot", _BlockingBot)
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+        self.addCleanup(self.release.set)
+
+    def test_status_poll_is_not_blocked_by_pending_construction(self):
+        thread = threading.Thread(target=self.manager.start_bot, args=(self.config,))
+        thread.start()
+        self.assertTrue(self.entered.wait(timeout=2), "Konstruktion sollte laufen")
+        started = time.monotonic()
+        # Waehrend die Konstruktion laeuft, muss der Lock fuer Polls frei bleiben.
+        self.assertFalse(self.manager.is_running(self.config.id))
+        self.assertEqual(self.manager.open_symbols(self.config.id), [])
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.release.set()
+        thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(self.manager.is_running(self.config.id))
+
+    def test_second_start_returns_none_while_first_is_building(self):
+        thread = threading.Thread(target=self.manager.start_bot, args=(self.config,))
+        thread.start()
+        self.assertTrue(self.entered.wait(timeout=2))
+        self.assertIsNone(self.manager.start_bot(self.config))
+        self.release.set()
+        thread.join(timeout=5)
+        self.assertEqual(len(_FakeTradingBot.instances), 1)
+        self.assertTrue(self.manager.is_running(self.config.id))
+
+    def test_lock_depth_stays_one_with_release_path(self):
+        depth_lock = _DepthLock()
+        self.manager._lock = depth_lock
+        thread = threading.Thread(target=self.manager.start_bot, args=(self.config,))
+        thread.start()
+        self.assertTrue(self.entered.wait(timeout=2))
+        self.release.set()
+        thread.join(timeout=5)
+        self.assertEqual(depth_lock.max_depth, 1)
+
 
 class BotManagerLockTests(SimpleTestCase):
     """Laufzeit- und Integritätsprüfungen des Bot-Managers."""

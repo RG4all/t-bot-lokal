@@ -28,15 +28,23 @@ class Configuration(models.Model):
     )
     leverage = models.IntegerField(
         default=1,
-        validators=[MinValueValidator(0)],
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
         verbose_name="Hebel (Leverage)",
-        help_text="Hebelwirkung für Futures-Handel (1 = kein Hebel, >= 1).",
+        help_text=(
+            "Hebelwirkung für Futures-Handel (1 = kein Hebel). Achtung: Die Engine "
+            "bildet derzeit ausschließlich Spot-Trades ohne Hebel; der Wert wird nur "
+            "aufgezeichnet."
+        ),
     )
     trade_direction = models.CharField(
         max_length=10,
         default="long",
-        verbose_name="Richtrichtung",
-        help_text="Richtrichtung des Handels: long (Kauf) oder short (Verkauf).",
+        choices=[("long", "Long (Kaufen)"), ("short", "Short (Verkauf) [nicht implementiert]")],
+        verbose_name="Richtung",
+        help_text=(
+            "Handelsrichtung. Achtung: Der Bot handelt derzeit ausschließlich long; "
+            "„short“ wird nur gespeichert und hat keine Auswirkung auf die Strategie."
+        ),
     )
     name = models.CharField(
         max_length=100,

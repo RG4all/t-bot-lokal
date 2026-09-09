@@ -53,6 +53,14 @@
         border-top: 1px solid #333;
         margin: 20px 0;
       }
+    .report-note {
+      background: #fff7e6;
+      border: 1px solid #f0c36d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      margin: 12px 0;
+    }
     </style>
 </head>
 <body>
@@ -81,6 +89,9 @@
     </table>
     {% endif %}
     <hr>
+    {% if history_truncated %}
+    <p class="report-note">Hinweis: Dieser Report basiert auf den neuesten {{ report_row_limit }} von {{ total_log_count }} Trades. Ältere Einträge sind für Laufzeit- und Speichergrenze ausgeschlossen; vollständige Historie über den CSV-Export.</p>
+    {% endif %}
     <h3>Allgemeine Statistiken</h3>
     <table>
       <tr>

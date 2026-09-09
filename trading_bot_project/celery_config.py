@@ -11,6 +11,12 @@ def _env_int(name, default):
 
 
 BACKTEST_QUEUE = "backtest"
+# W7: Der Scheduling-Task (Beat, 1x/min) faechert Backtests erst auf.
+# Laege er selbst in "backtest", koennte ein haengender Schedule-Lauf die
+# knappen Worker-Slots (concurrency=1, max-tasks-per-child=1) blockieren und
+# echte Backtests verhungern lassen. Eigene Queue, gleicher Worker (beide
+# Queues per -Q abonniert) -> Trennung ohne zusaetzlichen Dienst.
+SCHEDULING_QUEUE = "scheduling"
 BACKTEST_PRIORITY = 0
 BOT_PRIORITY = 9
 
@@ -36,7 +42,7 @@ CELERY_RUNTIME_CONFIG = {
         },
         "trading.tasks.collect_results": {"queue": BACKTEST_QUEUE, "priority": BACKTEST_PRIORITY},
         "trading.tasks.schedule_backtests": {
-            "queue": BACKTEST_QUEUE,
+            "queue": SCHEDULING_QUEUE,
             "priority": BACKTEST_PRIORITY,
         },
     },

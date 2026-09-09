@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import wraps
 
@@ -39,6 +40,11 @@ logger = logging.getLogger("trading")
 # EIGHT_PLACES (8 Nachkommastellen) kommt aus trading.indicators und ist die
 # einzige Rundungspräzision von Indikatoren, Ordergrößen und DataLog-Feldern.
 _MAX_DECIMAL = Decimal("999999999999.99999999")
+# O8: Zeitfenster, in dem der Webprozess auf die Fertigstellung des
+# manuellen Verkaufs in der Bot-Loop wartet. Ein Timeout ist kein Fehler:
+# Der Auftrag bleibt in der Loop-Queue und wird ausgefuehrt; er darf also
+# weder als Fehlermeldung noch als kritischer ErrorLog enden.
+MANUAL_SELL_TIMEOUT_SECONDS = 10.0
 # Maximale Zeilenzahl je Lösch-Charge in db_trim_datalog: Hält jede einzelne
 # DELETE-Transaktion kurz, damit bei großen Tabellen keine langen
 # Datenbank-Locks entstehen.
@@ -91,6 +97,24 @@ def db_safe(max_retries=None, base_delay=None, max_delay=None, suppress=False):
                 _close_db_circuit()
                 return result
             except (InterfaceError, OperationalError) as exc:
+                if suppress:
+                    # W4: Schreib-/Bufferpfade duerfen niemals in die koordinierte
+                    # Reconnect-Schleife eintreten. Sie halten sonst den globalen
+                    # Recovery-Lock inkl. der sleep()-Kaskade (bis ~90 s) und haengen
+                    # damit ALLE Bots und den Config-Pfad hinter sich ein – genau in
+                    # dem Moment, in dem die Puffer da sind, um weiterzulaufen.
+                    # Fast-Fail: Circuit oeffnen, None liefern; der Aufrufer puffert
+                    # den Eintrag, und der eine nicht-suppress-Aufruf (db_get_config)
+                    # betreibt die eigentliche Wiederherstellung.
+                    _open_db_circuit(exc)
+                    logger.warning(
+                        "DB ausgefallen; %s uebersprungen (Circuit %ss offen, "
+                        "Puffer uebernimmt): %s",
+                        func.__name__,
+                        settings.DB_CIRCUIT_BREAKER_SECONDS,
+                        exc,
+                    )
+                    return None
                 last_error = exc
 
             retry_limit = max_retries or settings.DB_RECONNECT_MAX_RETRIES
@@ -273,8 +297,14 @@ def db_log_error(
         logger.exception("Fehler konnte nicht in ErrorLog gespeichert werden")
 
 
-@db_safe(suppress=True)
+@db_safe()
 def db_restore_state(config_id):
+    """Laedt die Trade-Historie fuer den State-Restart.
+
+    Bewusst ohne ``suppress=True``: ein Fehler wird hier nicht zu "leerer
+    Historie", sondern ist ein harter Startabbruch (siehe K2/BUG-23 im
+    Docstring von ``TradingBot._restore_state``).
+    """
     return list(
         TradingLog.objects.filter(configuration_id=config_id)
         .order_by("timestamp", "id")
@@ -323,7 +353,12 @@ class TradingBot(threading.Thread):
         self._last_db_warning_at = 0
         self.liquidating = False
         self._market_data_lock = None
-        self.start_time = time.time() + max(0, config.countdown) * 60
+        # O4: Deadline auf der monotonic-Uhr. Die Wallclock (time.time) kann
+        # durch NTP-Spruenge oder suspend/resume der VM den Countdown
+        # gefaelschen – either uebersprungen oder endlos gehalten. Der
+        # epoch-basierte ``started_at`` bleibt davon unberuehrt, weil er nur
+        # der Anzeige im Status-Endpunkt dient.
+        self._countdown_deadline = time.monotonic() + max(0, config.countdown) * 60
         self.start_countdown_over = config.countdown <= 0
         self._sync_symbols()
         self._restore_state()
@@ -363,7 +398,20 @@ class TradingBot(threading.Thread):
                 del self.price_buffer[symbol]
 
     def _restore_state(self):
-        logs = db_restore_state(self.config_id) or []
+        # K2/BUG-23: Fail-closed. db_restore_state ohne Unterdrueckung:
+        # Liefert die DB keinen verlaesslichen Stand (ausgefallene Reconnects,
+        # geoeffneter Circuit), darf der Bot NICHT mit leerer Positionsliste
+        # starten - sonst rechnet _available_capital() ohne die gebundenen
+        # Mittel offener Positionen und setzt Kapital faktisch doppelt ein.
+        # Der Aufrufer (start_bot/Autostart) faengt den RuntimeError und
+        # schreibt ein ErrorLog; bot_status_api versucht den Start spaeter erneut.
+        try:
+            logs = db_restore_state(self.config_id)
+        except (OperationalError, InterfaceError) as exc:
+            raise RuntimeError(
+                f"Bot {self.config_id}: Trade-Historie konnte nicht "
+                "zuverlaessig wiederhergestellt werden; Start verweigert"
+            ) from exc
         self.realized_pl = sum(
             (log["pl_nominal"] or Decimal(0) for log in logs if log["action"] == "sell"),
             Decimal(0),
@@ -457,6 +505,18 @@ class TradingBot(threading.Thread):
                     try:
                         self.config = await db_get_config(self.config_id)
                         self._sync_symbols()
+                        # K1/BUG-22: Die DB-Fahne ist die einzige Wahrheit fuer
+                        # "soll der Bot laufen?". Stop erfolgt sonst nur ueber
+                        # bot_manager.stop_bot(); bei einer Restart-/Deaktivie-
+                        # rungs-Race koennte ein frisch gestarteter Bot ohne
+                        # diese Pruefung dauerhaft mit is_running=False handeln.
+                        if not self.config.is_running:
+                            logger.info(
+                                "Bot %s: Deaktivierung erkannt; Loop beendet sauber",
+                                self.config_id,
+                            )
+                            self.running = False
+                            break
                     except (OperationalError, InterfaceError):
                         # Mit der letzten validierten Konfiguration weiterlaufen.
                         # Preisstream und Strategie hängen nicht vom Frontend ab.
@@ -685,7 +745,7 @@ class TradingBot(threading.Thread):
         if self.liquidating:
             return
         if not self.start_countdown_over:
-            if time.time() >= self.start_time:
+            if time.monotonic() >= self._countdown_deadline:
                 self.start_countdown_over = True
             return
 
@@ -838,6 +898,9 @@ class TradingBot(threading.Thread):
 class TradingBotManager:
     def __init__(self):
         self.bots = {}
+        # W5: laufende Konstruktionen je config-id (Sentinel gegen Doppelstart
+        # ohne gehaltenen Lock waehrend der teuren Initialisierung).
+        self._starting = set()
         self._lock = threading.RLock()
 
     def _forget(self, config_id, bot):
@@ -871,14 +934,51 @@ class TradingBotManager:
         Thread-sicher: Prüft unter dem Lock, ob bereits ein Bot läuft,
         und startet sonst genau einen neuen Thread. Die Prüfung nutzt
         ``_is_running_unlocked``, damit der Lock nicht erneut erworben wird.
+
+        W5: Die Konstruktion selbst – State-Recovery per DB-Scan der
+        Trade-Historie plus Exchange-Setup – läuft bewusst außerhalb des
+        Manager-Locks. Ein einzelnen Bot-Start wuerde sonst jedes parallel
+        pollende ``status()``/``open_symbols()`` (Dashboard!) fuer die Dauer
+        des Restore-Scans blockieren – und der Status-Endpunkt triggert
+        seinerseits Auto-Restarts. Ein ``_starting``-Sentinel verhindert
+        Doppelstarts, waehrend konstruiert wird; hat ein anderer Aufrufer bis
+        zur Insertion schon fertig gestartet, wird der zu spaet kommende Bot
+        nie gestartet und verworfen.
         """
         with self._lock:
             if self._is_running_unlocked(config.id):
                 return self.bots[config.id]
+            if config.id in self._starting:
+                return None
+            self._starting.add(config.id)
+        try:
             bot = TradingBot(config, on_exit=self._forget)
+        finally:
+            with self._lock:
+                self._starting.discard(config.id)
+        with self._lock:
+            if self._is_running_unlocked(config.id):
+                return None
             self.bots[config.id] = bot
             bot.start()
             return bot
+
+    def _ensure_started(self, config):
+        """Startet absichernd und übernimmt, falls ein anderer Aufrufer gerade baut.
+
+        ``start_bot`` liefert ``None``, solange das W5-Sentinel eine laufende
+        Konstruktion markiert. Ein Restart darf dann nicht kommentarlos
+        entfallen (der Bot-Thread wäre tot, die Konfiguration auf "läuft" –
+        ohne eigenen Selbststart). Also: kurz warten, Fahne erneut gegen die
+        DB prüfen (Deaktivierung beendet die Warteschleife) und selbst starten.
+        """
+        bot = self.start_bot(config)
+        while bot is None:
+            time.sleep(1.0)
+            if not Configuration.objects.filter(id=config.id, is_running=True).exists():
+                return None
+            bot = self.start_bot(config)
+        return bot
 
     def stop_bot(self, config):
         """Stoppt den TradingBot für die gegebene Konfiguration.
@@ -912,8 +1012,13 @@ class TradingBotManager:
                 if before_start:
                     before_start()
                 config.refresh_from_db()
-                if config.is_running:
-                    self.start_bot(config)
+                # K1/BUG-22: Fahne unmittelbar vor dem Start gegen die DB
+                # pruefen (_exists, nicht gecachtes Attribut): zwischen dem
+                # refresh_from_db und start_bot kann "deaktivieren" liegen;
+                # zusaetzlich beendet der is_running-Check im main_loop spaeter
+                # jeden Bot, der durch ein TOCTOU-Fenster durchgerutscht ist.
+                if Configuration.objects.filter(id=config.id, is_running=True).exists():
+                    self._ensure_started(config)
             except Exception as exc:
                 logger.exception("Neustart für Konfiguration %s fehlgeschlagen", config.id)
                 ErrorLog.objects.create(
@@ -952,12 +1057,28 @@ class TradingBotManager:
         if not bot or not bot.is_alive() or bot.loop is None:
             raise ValueError("Bot läuft nicht; manueller Verkauf ist nicht möglich")
         future = asyncio.run_coroutine_threadsafe(bot.manual_sell(symbol), bot.loop)
-        return future.result(timeout=10)
+        try:
+            future.result(timeout=MANUAL_SELL_TIMEOUT_SECONDS)
+        except FuturesTimeoutError:
+            # O8: Auftrag bleibt in der Queue der Bot-Loop; die Ausfuehrung
+            # folgt spaetestens im naechsten Tick. "delayed" statt Fehler, weil
+            # ein Abbruch hier die Position langere Zeit offen hielte und der
+            # Nutzer einen fehlgeschlagenen Verkauf annaehme, der langst laeuft.
+            return "delayed"
+        return "ok"
 
     def open_symbols(self, config_id):
         with self._lock:
             bot = self.bots.get(config_id)
-            return sorted(bot.positions) if bot and bot.is_alive() else []
+            if not bot or not bot.is_alive():
+                return []
+            # W6: explizite, einmalige Schluessel-Kopie des Positionsdictionaries.
+            # Die Bot-Loop mutiert ``positions`` concurrent zum View-Thread;
+            # ``list(dict)`` kopiert unter dem GIL in einem Schritt, waehrend
+            # ``sorted(dict)`` formal ueber das Live-Dict iteriert. Die Kopie
+            # macht die Semantik unabhaengig von Interpreter-Details.
+            snapshot = list(bot.positions)
+            return sorted(snapshot)
 
     def kill_switch(self, config_id):
         with self._lock:

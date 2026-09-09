@@ -18,7 +18,7 @@ app.conf.beat_schedule = {
     "check-scheduled-backtests": {
         "task": "trading.tasks.schedule_backtests",
         "schedule": crontab(),
-        "options": {"queue": "backtest", "priority": 0},
+        "options": {"queue": "scheduling", "priority": 0},
     },
 }
 
