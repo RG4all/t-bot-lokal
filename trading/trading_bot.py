@@ -273,8 +273,14 @@ def db_log_error(
         logger.exception("Fehler konnte nicht in ErrorLog gespeichert werden")
 
 
-@db_safe(suppress=True)
+@db_safe()
 def db_restore_state(config_id):
+    """Laedt die Trade-Historie fuer den State-Restart.
+
+    Bewusst ohne ``suppress=True``: ein Fehler wird hier nicht zu "leerer
+    Historie", sondern ist ein harter Startabbruch (siehe K2/BUG-23 im
+    Docstring von ``TradingBot._restore_state``).
+    """
     return list(
         TradingLog.objects.filter(configuration_id=config_id)
         .order_by("timestamp", "id")
@@ -363,7 +369,20 @@ class TradingBot(threading.Thread):
                 del self.price_buffer[symbol]
 
     def _restore_state(self):
-        logs = db_restore_state(self.config_id) or []
+        # K2/BUG-23: Fail-closed. db_restore_state ohne Unterdrueckung:
+        # Liefert die DB keinen verlaesslichen Stand (ausgefallene Reconnects,
+        # geoeffneter Circuit), darf der Bot NICHT mit leerer Positionsliste
+        # starten - sonst rechnet _available_capital() ohne die gebundenen
+        # Mittel offener Positionen und setzt Kapital faktisch doppelt ein.
+        # Der Aufrufer (start_bot/Autostart) faengt den RuntimeError und
+        # schreibt ein ErrorLog; bot_status_api versucht den Start spaeter erneut.
+        try:
+            logs = db_restore_state(self.config_id)
+        except (OperationalError, InterfaceError) as exc:
+            raise RuntimeError(
+                f"Bot {self.config_id}: Trade-Historie konnte nicht "
+                "zuverlaessig wiederhergestellt werden; Start verweigert"
+            ) from exc
         self.realized_pl = sum(
             (log["pl_nominal"] or Decimal(0) for log in logs if log["action"] == "sell"),
             Decimal(0),

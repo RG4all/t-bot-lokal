@@ -745,6 +745,79 @@ class TradingBotTests(TransactionTestCase):
         restart = inspect.getsource(TradingBotManager.restart_bot)
         self.assertIn("is_running=True).exists()", restart)
 
+    def test_restore_state_fails_closed_on_unreachable_db(self):
+        """K2/BUG-23: Ohne verlaessliche Trade-Historie darf der Bot nicht mit
+        leerer Positionsliste starten (doppelter Kapitaleinsatz, falsche P/L-Basis)."""
+        with (
+            patch(
+                "trading.trading_bot.db_restore_state",
+                side_effect=OperationalError("Datenbank nicht erreichbar"),
+            ),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            TradingBot(self.config)
+        self.assertIn("nicht zuverlaessig wiederhergestellt", str(ctx.exception))
+
+    def test_restore_state_loads_positions_and_realized_pl(self):
+        """K2: Positiver Pfad – Trades aus der DB rekonstruieren den Zustand."""
+        TradingLog.objects.create(
+            configuration=self.config, symbol="BTC/USDT", action="buy",
+            price=Decimal(100), amount=Decimal(1), fee_amount=Decimal("0.1"),
+            pl_nominal=Decimal(0), pl_relative=Decimal(0), total_pl=Decimal(0),
+            current_capital=Decimal("89.9"), tank=Decimal(0), order_id="paper_buy_1",
+        )
+        TradingLog.objects.create(
+            configuration=self.config, symbol="SOL/USDT", action="sell",
+            price=Decimal(50), amount=Decimal(2), fee_amount=Decimal("0.1"),
+            pl_nominal=Decimal(25), pl_relative=Decimal(0), total_pl=Decimal(25),
+            current_capital=Decimal(100), tank=Decimal(25), order_id="paper_sell_1",
+        )
+        bot = TradingBot(self.config)
+        self.assertIn("BTC/USDT", bot.positions)
+        self.assertNotIn("SOL/USDT", bot.positions)
+        self.assertEqual(bot.realized_pl, Decimal(25))
+
+    def test_trade_is_buffered_and_position_kept_during_db_outage(self):
+        bot = TradingBot(self.config)
+        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
+        with patch(
+            "trading.trading_bot.db_create_tradinglog_safe",
+            new=AsyncMock(return_value=None),
+        ):
+            async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
+        self.assertIn("BTC/USDT", bot.positions)
+        self.assertEqual(len(bot.pending_trading_logs), 1)
+        self.assertEqual(bot.pending_trading_logs[0]["action"], "buy")
+
+    def test_kill_switch_uses_fresh_ticker_and_closes_every_position(self):
+        bot = TradingBot(self.config)
+        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
+        async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
+        bot.fetch_tickers = AsyncMock(return_value={"BTC/USDT": {"last": "105"}})
+        result = async_to_sync(bot.liquidate_all_positions)()
+        self.assertEqual(result, {"sold": ["BTC/USDT"], "errors": {}})
+        self.assertEqual(bot.positions, {})
+        self.assertEqual(TradingLog.objects.filter(action="sell").count(), 1)
+
+    def test_buy_and_sell_keep_amount_and_include_buy_fee(self):
+        bot = TradingBot(self.config)
+        bot.price_buffer["BTC/USDT"] = [Decimal(100)]
+        async_to_sync(bot.execute_trade)("BTC/USDT", "buy")
+        buy = TradingLog.objects.get(action="buy")
+        self.assertEqual(
+            buy.current_capital,
+            self.config.start_capital - (buy.amount * buy.price + buy.fee_amount),
+        )
+        bot.price_buffer["BTC/USDT"] = [Decimal(110)]
+        async_to_sync(bot.execute_trade)("BTC/USDT", "sell")
+        sell = TradingLog.objects.get(action="sell")
+        self.assertEqual(sell.amount, buy.amount)
+        expected = sell.amount * (sell.price - buy.price) - buy.fee_amount - sell.fee_amount
+        self.assertEqual(sell.pl_nominal, expected.quantize(Decimal("0.00000001")))
+        self.assertEqual(sell.current_capital, self.config.start_capital + sell.pl_nominal)
+
+
+@override_settings(AUTOSTART_BOTS=False, PASSPHRASE_GATE_ENABLED=False)
 class BacktestTaskTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("backtest-user", password="backtest-password")
