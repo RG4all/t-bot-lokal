@@ -14,7 +14,7 @@ aus dem Formularfeld und bleiben daher vollständig funktionsfähig.
 Die Integrationstests laufen mit ``Client(enforce_csrf_checks=True)``, damit
 die echte CSRF-Prüfung (statt des Test-Client-Shortcuts) validiert wird.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 5 und SECURITY_AUDIT.md Abschnitt 2.5.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 5 und docs/archive/SECURITY_AUDIT_2026-09-07.md Abschnitt 2.5.
 """
 
 import os

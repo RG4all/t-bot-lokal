@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased] – 2026-09-09
+
+### Dokumentation und Wartbarkeit (Repo-Restrukturierung)
+
+- **Struktur:** `docs/` ist nach Dokumenttyp getrennt: `manual/` (App-Hilfe, Backtesting-Kapitel), `operations/` (lokales Setup, FAQ, Tailscale, Caddy), `findings/` (13 Audit-Tickets plus Pflichtvorlage `TEMPLATE.md`), `security/` (aktuelles Review), `adr/` (neu: ADR-0001 aus der Backtesting-Studie) und `archive/` (überholte Dokumente mit Lesezugriff-Banner). Die Umzugsphase-Commits sind reine `git mv`-Renames.
+- **Duplikate:** `docs/README.md` war ein zweites Produkt-README (≈41 % Überlappung); einzigartige Inhalte (Host-/manuelle Installation, Passphrase-Matrix, Render-Blueprint + Free-Einschränkungen, QA-Befehle) wanderten nach `docs/operations/LOCAL_DEVELOPMENT.md`. `docs/README.md` ist jetzt der Index. Das Root-README trägt keine hartcodierte Versionszahl mehr.
+- **Links:** ein kaputter Anker gefixt (`PERF-21#ci-und-auslieferung` → `#auslieferung-und-pruefgrenzen`); 37 GitHub-only-Deep-Links auf CHANGELOG-Anker zu reinen Dateilinks zurückgebaut; 162 relative Links an die neue Struktur angepasst; zuvor verwaiste Dokumente (Tailscale, Caddy, Peer-Reviews) sind jetzt im Index bzw. Archiv erreichbar.
+- **Code-Referenzen:** `trading/views.py` rendert das Handbuch von `docs/manual/MANUAL.md` (alte Pfade bleiben als Fallback); Kommentare in `scripts/setup_local.sh`, `tests/test_compose_security.sh` und sechs Test-Docstrings auf Archiv-/Findingspfade nachgezogen.
+- **Namensregeln:** `SEC-06-rule-lifecycle-authz.md` → `SEC-06-content-type-nosniff.md` (Dateiname entspricht dem im Dokument erklärten Befund).
+- **Werkzeuge:** neuer Doku-Wächter `scripts/check_docs.py` (Links, Anker, Orphans, Namenskonventionen, Duplikat-/Versions-Hinweise), versionierte CI-Definition `ci/quality.yml` (vom Maintainer nach `.github/workflows/` zu übernehmen – die GitHub-App besitzt keine `workflows`-Push-Rechte), `CONTRIBUTING.md` (Struktur-/Duplikat-/Namensregeln, Audit-Zyklen) und `patches/` als Peer-Review-Patch-Eingang (`inbox/` → `accepted/`/`done/`, Review-Vorlage).
+- **Konfigurations-Template:** `config.template` heißt jetzt `config.template.env` (Endung = Format); `Dockerfile`-COPY, `.gitignore`-Negation und beide Shell-Prüfungen (`test_compose_security.sh`, `test_config_generation.sh`) nachgezogen; historische CHANGELOG-/Fundstellen-Texte bleiben bewusst im Wortlaut.
+- Keine Code-, Settings-, Modell- oder Migrationsänderung; `/help/`-Auslieferung, Tests und Docker-Stack unverändert gültig (330 Django-/Python-Tests und 8/8 Shell-Tests grün vor und nach der Umstellung).
+
 Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [2.4.19] – 2026-09-08
@@ -7,10 +20,10 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Konsistenz
 
 - **Reines Dokumentations-Release:** Der Code-Stand ist unverändert zu 2.4.18 (330 Django-/Python-Tests). Zentrale `VERSION` auf **2.4.19** erhöht; Root-/docs-README, Handbuch, lokale Versionsangabe und der Konfigurationsstand aktualisiert. `/health/` meldet ab diesem Release **2.4.19**.
-- **Audit-Status in `SECURITY_AUDIT.md` nachgezogen:** Die Abschnitte §2.1 (Rate-Limiting), §2.2 (ALLOWED_HOSTS-Wildcard) und §2.3 (CSP) waren als offene Befunde formuliert, obwohl die Umsetzungen bereits in **2.4.1–2.4.3** ausgeliefert wurden – die Audit-Datei entstand am selben Tag wie diese Fixes und wurde seither nur für jüngere Releases gepflegt. Sie tragen jetzt denselben Statusaufbau wie die übrigen Abschnitte („Fixed in X.Y.Z“ mit Umgesetzt-/Nachweis-Block, historischer Befund bleibt nachvollziehbar). Ebenfalls ergänzt: **§4.6 „Fixed in 2.4.18“** mit Verweis auf [PERF-21](PERF-21-info-api-db-aggregation.md) und [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26) – PR #26 hatte den Changelog, aber nicht die Audit-Datei aktualisiert. Kopfzeile §2.5 nennt jetzt korrekt die letzte Nachprüfung in 2.4.16 (der Absatz dazu stand bereits im Text).
+- **Audit-Status in `SECURITY_AUDIT.md` nachgezogen:** Die Abschnitte §2.1 (Rate-Limiting), §2.2 (ALLOWED_HOSTS-Wildcard) und §2.3 (CSP) waren als offene Befunde formuliert, obwohl die Umsetzungen bereits in **2.4.1–2.4.3** ausgeliefert wurden – die Audit-Datei entstand am selben Tag wie diese Fixes und wurde seither nur für jüngere Releases gepflegt. Sie tragen jetzt denselben Statusaufbau wie die übrigen Abschnitte („Fixed in X.Y.Z“ mit Umgesetzt-/Nachweis-Block, historischer Befund bleibt nachvollziehbar). Ebenfalls ergänzt: **§4.6 „Fixed in 2.4.18“** mit Verweis auf [PERF-21](findings/PERF-21-info-api-db-aggregation.md) und [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26) – PR #26 hatte den Changelog, aber nicht die Audit-Datei aktualisiert. Kopfzeile §2.5 nennt jetzt korrekt die letzte Nachprüfung in 2.4.16 (der Absatz dazu stand bereits im Text).
 - **Empfehlungs- und Checklisten-Status in `SECURITY_AUDIT.md` vervollständigt:** §5-Tabelle markiert die inzwischen umgesetzten Maßnahmen 1–3, 5, 6 und 12 mit Release-Bezug und ergänzt Zeile 14 für §4.6; die Komplett-Checkliste (§6) hakt Rate-Limiting, ALLOWED_HOSTS, CSP, Race-Condition, CSV-Export, HSTS-Produktionskonfiguration und DB-Aggregation ab (inkl. Doppeleintrag Cache-Control bereinigt).
 - **Prompt-Status in `ARENA_AI_PROMPTS.md` ergänzt:** Die Prompts 1–3 erhalten Statusblöcke (Fixed in 2.4.1/2.4.2/2.4.3 mit Verweisen auf [Changelog](CHANGELOG.md), Testdateien und Umsetzungsabweichungen); die Zusammenfassungstabelle markiert alle umgesetzten Prompts 1–12, 14, 17–21 einheitlich mit ✅-Release. Der fehlerhafte Changelog-Anker `#242418--2026-09-08` (Prompts-Datei und PERF-21-Nachweis) ist zu `#2418--2026-09-08` korrigiert.
-- **READMEs vervollständigt:** Root-`README.md` und `docs/README.md` enthalten jetzt den fehlenden Versions-Bullet für 2.4.18 (info_api-Kennzahlen per DB-Aggregation, [PERF-21](PERF-21-info-api-db-aggregation.md)); das Root-README verlinkt das PERF-21-Finding in der Dokumentationsliste, `docs/README.md` nimmt die neuen Regressionstest-Module `test_module_exports` (2.4.17) und `test_info_api_metrics` (2.4.18) in den gezielten Testbefehl auf.
+- **READMEs vervollständigt:** Root-`README.md` und `docs/README.md` enthalten jetzt den fehlenden Versions-Bullet für 2.4.18 (info_api-Kennzahlen per DB-Aggregation, [PERF-21](findings/PERF-21-info-api-db-aggregation.md)); das Root-README verlinkt das PERF-21-Finding in der Dokumentationsliste, `docs/README.md` nimmt die neuen Regressionstest-Module `test_module_exports` (2.4.17) und `test_info_api_metrics` (2.4.18) in den gezielten Testbefehl auf.
 - Keine Code-, Settings-, Modell- oder Migrationsänderung, keine neuen Umgebungsvariablen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig; nach dem Deploy `/health/` auf **2.4.19** prüfen. Auslieferung über [PR #27](https://github.com/RG4all/t-bot-lokal/pull/27).
 
 ## [2.4.18] – 2026-09-08
@@ -27,12 +40,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **10 neue Regressionstests** in `trading/tests/test_info_api_metrics.py` (alle über den echten Middleware-Stack mit deaktiviertem Passphrase-Gate, analog zu `test_cache_control`): Verhaltensgleichheit der DB-Aggregation mit `calculate_performance_metrics()` über dasselbe Fenster (leere Historie, nur Käufe, nur Gewinn-Verkäufe, nur Verlust-Verkäufe, gemischt); Fensterbegrenzung – mit 2.600 Logs (600 alte Gewinne, 2.000 neue Verluste) liefert die Aggregation `win_rate == 0` und nicht die Gesamthistorie; `limit`-Parameter wird respektiert; `info_api` liefert dieselben Kennzahlen wie vor dem Fix (inkl. verschachteltem `metrics`-Objekt).
 - **Angriffs- und Randvektoren (Rot→Grün):** Ein echter Negativtest patcht `calculate_performance_metrics` auf einen Abbruch; vor dem Fix lieferte `info_api` dadurch HTTP 500, nach dem Fix ignoriert `info_api` den Patch und liefert HTTP 200 – das beweist, dass die Metrik nicht mehr über den Python-Pfad berechnet wird. Division-durch-Null-Vektoren sind abgedeckt: nur Gewinne bzw. nur Verluste ergeben `risk_reward == 0` und `profit_factor == 0` ohne Exception, die Antwort enthält keine `None`-Werte.
 - **330 Django-/Python-Tests** (10 neue + 320 bestehende) bestanden; Systemcheck, Migrationsprüfung (`makemigrations --check`), `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright`/mypy nicht ausgeführt (Node nicht eingerichtet, django-stubs nicht in `requirements.txt`), das Kriterium der statischen Prüfung ist über den ast-basierten Type-Hint-Test (`test_view_type_hints`) erfüllt, der `calculate_performance_metrics` weiterhin mit der verankerten Signatur prüft.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](PERF-21-info-api-db-aggregation.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26).
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](findings/PERF-21-info-api-db-aggregation.md#auslieferung-und-prüfgrenzen) sind dokumentiert. Auslieferung über [PR #26](https://github.com/RG4all/t-bot-lokal/pull/26).
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.18** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält weiterhin keine separate Paketversion.
-- Audit §4.6 und Prompt 21 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](PERF-21-info-api-db-aggregation.md) ergänzt. [ARENA_AI_PROMPTS.md](ARENA_AI_PROMPTS.md) trägt den Status für Prompt 21.
+- Audit §4.6 und Prompt 21 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](findings/PERF-21-info-api-db-aggregation.md) ergänzt. [ARENA_AI_PROMPTS.md](archive/ARENA_AI_PROMPTS_2026-09-07.md) trägt den Status für Prompt 21.
 - Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.18** prüfen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig.
 
 ## [2.4.17] – 2026-09-08
@@ -48,12 +61,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **11 neue Regressionstests** in `trading/tests/test_module_exports.py`: `__all__` als expliziter Vertrag (exakt die zwölf öffentlichen Module, keine internen Module), Modul-Docstring, explizit gebundene Import-sichere Module, keine Eager-Importe der Django-Module (verhindert `AppRegistryNotReady`), PEP-562-Auflösung der Django-Module, `from trading import *` exportiert exakt den öffentlichen Vertrag und kein `import *` im `__init__`. **Rot → grün:** Gegen den Ausgangsstand (leeres `__init__.py`) scheitern sie mit 4 Failures und 4 Errors; nach dem Fix sind alle grün.
 - **Angriffs- und Regressionsvektoren:** Stern-Import nach dem Laden interner Module leakt keine `admin`/`middleware`/`passphrase`/`urls` mehr; ein neues öffentliches Modul ohne `__all__`-Eintrag fällt automatisch auf; ein versehentlich exportiertes internes Modul fällt über den Mengenvergleich auf.
 - **320 Django-/Python-Tests** (11 neue + 309 bestehende) bestanden; Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und Ruff bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright` nicht ausgeführt (Node nicht eingerichtet).
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](CODE-20-module-exports.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #25](https://github.com/RG4all/t-bot-lokal/pull/25).
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden; [CI-Freigabe und Prüfgrenzen](findings/CODE-20-module-exports.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #25](https://github.com/RG4all/t-bot-lokal/pull/25).
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.17** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält weiterhin keine separate Paketversion.
-- Audit §4.5 und Prompt 20 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](CODE-20-module-exports.md) ergänzt.
+- Audit §4.5 und Prompt 20 sind **Fixed**; [Finding mit Root Cause, Testnachweis, Negativkontrolle und Prüfgrenzen](findings/CODE-20-module-exports.md) ergänzt.
 - Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.17** prüfen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig.
 
 ## [2.4.16] – 2026-09-08
@@ -73,12 +86,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **Zwei Bestandstests angepasst,** die die untypisierte Signatur als String suchten (`test_cache_control`, `test_session_invalidate`). Beide prüfen jetzt signaturunabhängig per Regex weiter, ohne an Schärfe zu verlieren – Parametername und die Prüfung auf `logout(request)`/`request.session.flush()` bleiben verbindlich.
 - **309 Django-/Python-Tests** (30 neue + 279 bestehende), **mypy ohne Befund**, **8/8 Shell-Testgruppen**, Ruff 0.16.6, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen; `pyright` nicht ausgeführt (Node nicht eingerichtet), das Kriterium ist über mypy erfüllt.
 - **SEC-05- und SEC-06-Nachprüfung:** Alle 11 CSRF-Cookie-Tests (`CSRF_COOKIE_HTTPONLY = True`) und 10 nosniff-Tests (`SECURE_CONTENT_TYPE_NOSNIFF = True`) bestehen unverändert. Ein Smoke-Test mit tatsächlich geladenen Produktions-/Render-Settings bestätigt `nosniff` auf `/health/`, `/gate/`, dem `/dashboard/`-Redirect und der WhiteNoise-Auslieferung sowie `HttpOnly`+`Secure` am CSRF-Cookie. Beide bleiben **Fixed**.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](CODE-19-view-type-hints.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #24](https://github.com/RG4all/t-bot-lokal/pull/24).
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](findings/CODE-19-view-type-hints.md#ci-und-auslieferung) sind dokumentiert. Auslieferung über [PR #24](https://github.com/RG4all/t-bot-lokal/pull/24).
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.16** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält Lint- und ab jetzt Typprüfungs-Konfiguration, weiterhin keine separate Paketversion.
-- Audit §4.4 und Prompt 19 sind **Fixed**; [Finding mit Fix-Commit, Negativkontrolle und Prüfgrenzen](CODE-19-view-type-hints.md) ergänzt. [SEC-06](SEC-06-rule-lifecycle-authz.md) trägt die Nachprüfung für 2.4.16.
+- Audit §4.4 und Prompt 19 sind **Fixed**; [Finding mit Fix-Commit, Negativkontrolle und Prüfgrenzen](findings/CODE-19-view-type-hints.md) ergänzt. [SEC-06](findings/SEC-06-content-type-nosniff.md) trägt die Nachprüfung für 2.4.16.
 - **Prüfgrenze:** Die Typprüfung deckt bewusst nur `trading/views.py` ab; die übrigen Module bleiben unannotiert und ausgenommen (bei einem Probelauf ohne Override wurden dort 6 Altbefunde sichtbar). Annotationen sind keine Laufzeitprüfung – sie wirken nur, wenn mypy tatsächlich läuft; deshalb greift der zusätzliche `ast`-basierte Test auch ohne installiertes mypy.
 - Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.16** prüfen. Bestehende Konfigurationen, laufende Bots und gespeicherte Backtests bleiben unverändert gültig.
 
@@ -97,12 +110,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **Numerische Reproduktion:** deterministischer Alt-/Neu-Vergleich über 3.000 Preisreihen (Null-Vorpreise, `None`-Preise, Float-/String-Mischtypen, Extremwerte um 10³⁰) – **16.693 Vergleichsfälle, 0 Abweichungen**; Backtest-Reports einer 2.000-Punkte-Reihe mit Defekt-Ticks über drei Schwellwert-Raster sind vor und nach dem Refactoring **byte-identisch** (Endkapital, Rendite, Trades, Gebühren, Drawdown, Equity-Kurve).
 - **279 Django-/Python-Tests** (30 neue + 249 bestehende), **8/8 Shell-Testgruppen**, Ruff 0.16.6, ShellCheck 0.11.0, Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und die Ressourcen-Probe lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
 - **SEC-05-Nachprüfung:** Alle 11 CSRF-Cookie-Tests (`CSRF_COOKIE_HTTPONLY = True`) bestehen unverändert; SEC-05 bleibt Fixed.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](CODE-18-indicator-dedup.md#ci-und-auslieferung) sind dokumentiert.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](findings/CODE-18-indicator-dedup.md#ci-und-auslieferung) sind dokumentiert.
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.15** erhöht; Root-/docs-README, Handbuch, Backtesting-Kapitel und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
-- Audit §4.3 und Prompt 18 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md) ergänzt. Handbuch §6 und Backtesting-Kapitel verweisen jetzt auf `trading/indicators.py` als Maß aller Formeln und erklären die beiden Präzisionsstufen.
+- Audit §4.3 und Prompt 18 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](findings/CODE-18-indicator-dedup.md) ergänzt. Handbuch §6 und Backtesting-Kapitel verweisen jetzt auf `trading/indicators.py` als Maß aller Formeln und erklären die beiden Präzisionsstufen.
 - Keine neuen Umgebungsvariablen, keine Migration. Nach dem Deploy `/health/` auf **2.4.15** prüfen. Bestehende `DataLog`-Zeilen und laufende Bot-Konfigurationen bleiben gültig; Backtests müssen nicht neu gestartet werden, ihre Ergebnisse sind reproduzierbar.
 
 ## [2.4.14] – 2026-09-08
@@ -118,12 +131,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - **7 neue Regressionstests** in `trading/tests/test_db_trim_datalog.py`: Behaltenslogik (nur die neuesten `max_rows` Zeilen bleiben), Grenzfälle (genau/weniger als `max_rows`), Scoping auf Konfiguration+Symbol, Chargengrößen-Nachweis per Transaktions-Probe (`[1000, 1000, 500]` bei 2.500 Alt-Zeilen), Abbruch bei leeren Deletes und No-op bei ungültigem `max_rows`. **Rot → grün:** Am Ausgangsstand fand der Batch-Nachweis genau eine Transaktion über alle 2.500 Zeilen (`[2500]`), und negatives `max_rows` endete mit `ValueError: Negative indexing is not supported.`
 - **249 Django-/Python-Tests** (7 neue + 242 bestehende), **8/8 Shell-Testgruppen**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
 - **SEC-05-Nachprüfung:** Alle 11 CSRF-Cookie-Tests (`CSRF_COOKIE_HTTPONLY = True`) bestehen unverändert; SEC-05 bleibt Fixed.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](PERF-17-db-trim-batch-delete.md#ci-und-auslieferung) sind dokumentiert.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](findings/PERF-17-db-trim-batch-delete.md#ci-und-auslieferung) sind dokumentiert.
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.14** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert.
-- Audit §4.2 und Prompt 17 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md) ergänzt.
+- Audit §4.2 und Prompt 17 sind **Fixed**; [Finding mit Fix-Commit und Prüfgrenzen](findings/PERF-17-db-trim-batch-delete.md) ergänzt.
 - Keine neuen Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf **2.4.14** prüfen; Datenbank-Historien werden ab dem nächsten regulären Trim-Zyklus batchweise gekürzt, ein manueller Eingriff ist nicht nötig.
 
 ## [2.4.13] – 2026-09-08
@@ -137,12 +150,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 - **15 neue Regressionstests** in `trading/tests/test_report_csv.py`: Standard-Textpuffer, zeilenweise Ausgabe ohne Datenreste, verzögerter Datenbankzugriff über die 1.000er-Grenze, Präzision, Zeitzone, CSV-Sonderzeichen, Pufferfreigabe sowie Login-, Methoden-, Eigentümer- und Dateinamensgrenzen. **Rot → grün:** fünf Tests am Ausgangsstand fehlgeschlagen (sieben Assertions). Negativkontrollen für fehlendes Zurücksetzen, Kürzen und Schließen des Puffers werden erkannt.
 - **242 Django-/Python-Tests**, **8/8 Shell-Testgruppen**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` lokal bestanden. Docker-/Compose-Laufzeitprüfungen mangels Docker übersprungen.
-- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](BUG-14-csv-echo-true-stream.md#ci-und-auslieferung) sind dokumentiert.
+- Auslieferung mit ausdrücklich freigegebenen lokalen Prüfnachweisen: kein versionierter GitHub-Actions-Anwendungstestworkflow vorhanden. Dependency Graph ist kein Anwendungstestnachweis; [CI-Freigabe und Prüfgrenzen](findings/BUG-14-csv-echo-true-stream.md#ci-und-auslieferung) sind dokumentiert.
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.13** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration, keine separate Paketversion.
-- Audit §3.3 und Prompt 14 sind **Fixed**; [Finding mit Fix-Commit](BUG-14-csv-echo-true-stream.md) ergänzt.
+- Audit §3.3 und Prompt 14 sind **Fixed**; [Finding mit Fix-Commit](findings/BUG-14-csv-echo-true-stream.md) ergänzt.
 - Keine neuen Abhängigkeiten, Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf **2.4.13** prüfen; CSV-Importe müssen nicht angepasst werden.
 
 ## [2.4.12] – 2026-09-08
@@ -160,7 +173,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.12** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
-- Audit §3.1 und Prompt 12 sind **Fixed**; [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md) ergänzt.
+- Audit §3.1 und Prompt 12 sind **Fixed**; [Finding mit Fix-Commit](findings/BUG-12-race-condition-bot-start-stop.md) ergänzt.
 - Keine neuen Umgebungsvariablen oder Migrationen. Nach dem Deploy `/health/` auf 2.4.12 prüfen; laufende Bots verhalten sich für Aufrufer unverändert, doppelte Threads derselben Konfiguration entstehen nicht mehr durch verschachtelte Lock-Prüfung.
 
 ## [2.4.11] – 2026-09-08
@@ -177,13 +190,13 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 - Neue Shell-Testgruppe `tests/test_compose_security.sh` (25 Assertions): Pflicht-Interpolation für alle drei Secrets, keine `${VAR:-...}`-Fallbacks, keine öffentlichen Standard-Passwörter in den 13 ausgelieferten Konfigurations-/Skriptdateien, leere Platzhalter in den Env-Beispielen; optional prüft sie mit Docker, dass `docker compose config` ohne Secrets scheitert und mit Secrets auflöst (ohne Docker übersprungen).
 - `tests/test_setup_local.sh` erweitert (Rot → grün): zufälliges DB-Passwort statt öffentlichem Standard, Erhalt beim Retuning, unterschiedliche Passwörter pro Setup. Vor dem Fix schlugen 3 von 9 Assertions in dieser Gruppe und 7 Assertions in der neuen Compose-Gruppe fehl.
 - **8/8 Shell-Testgruppen** (inkl. neuer Gruppe), **210 Django-/Python-Tests**, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic` und `pip check` bestanden.
-- Auslieferung mit lokalen Prüfnachweisen ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; Docker/Compose steht für den Interpolationstest lokal nicht zur Verfügung, die Prüfung ist dort statisch ([SEC-12](SEC-12-docker-default-passwords.md)).
+- Auslieferung mit lokalen Prüfnachweisen ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; Docker/Compose steht für den Interpolationstest lokal nicht zur Verfügung, die Prüfung ist dort statisch ([SEC-12](findings/SEC-12-docker-default-passwords.md)).
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.11** erhöht; Root-/docs-README, Handbuch, lokale Entwicklungsdoku und FAQ aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
-- Audit §2.12 und Prompt 11 sind **Fixed**; [SEC-12 mit Fix-Commit und Prüfgrenzen](SEC-12-docker-default-passwords.md) ergänzt.
-- Upgrade ohne Datenverlust: bestehende `.env.local`-Dateien bleiben nutzbar. Wer noch das frühere öffentliche DB-Passwort verwendet, rotiert es wie in der [FAQ](FAQ.md#8-passwoerter-aendern--secret-rotation) beschrieben (`--reset-db` löscht die lokale Datenbank). Manuelles Compose benötigt jetzt zwingend gesetzte `SECRET_KEY`-, `PASSPHRASE`- und `POSTGRES_PASSWORD`-Werte.
+- Audit §2.12 und Prompt 11 sind **Fixed**; [SEC-12 mit Fix-Commit und Prüfgrenzen](findings/SEC-12-docker-default-passwords.md) ergänzt.
+- Upgrade ohne Datenverlust: bestehende `.env.local`-Dateien bleiben nutzbar. Wer noch das frühere öffentliche DB-Passwort verwendet, rotiert es wie in der [FAQ](operations/FAQ.md#8-passwoerter-aendern--secret-rotation) beschrieben (`--reset-db` löscht die lokale Datenbank). Manuelles Compose benötigt jetzt zwingend gesetzte `SECRET_KEY`-, `PASSPHRASE`- und `POSTGRES_PASSWORD`-Werte.
 
 ## [2.4.10] – 2026-09-08
 
@@ -198,12 +211,12 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 - 25 neue Regressionstests in `trading/tests/test_error_disclosure.py`: Rot am Ausgangsstand, grün mit Fix. Abdeckung umfasst Flash-Cookies, HTTP-/JSON-Antworten, Fehlertypen und Exception-Ketten, Teilausfälle, Log-Persistenzfehler, alte Diagnosedaten sowie Eigentümer-/Staff-/CSRF-Grenzen.
 - **210 Django-/Python-Tests**, 7/7 Shell-Testgruppen, Ruff, ShellCheck, Systemcheck, Migrationsprüfung, `collectstatic`, `pip check` und `pip-audit` lokal bestanden.
-- Auslieferung mit ausdrücklich genehmigten lokalen Prüfnachweisen, ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; [CI-Ausnahme und Prüfgrenzen](SEC-10-information-disclosure.md#ci-und-auslieferung) sind dokumentiert.
+- Auslieferung mit ausdrücklich genehmigten lokalen Prüfnachweisen, ohne neuen GitHub-Actions-Testworkflow: Der GitHub-App fehlt die Berechtigung für Workflow-Änderungen. Kein erfolgreicher GitHub-Anwendungstest-CI-Lauf wird behauptet; [CI-Ausnahme und Prüfgrenzen](findings/SEC-10-information-disclosure.md#ci-und-auslieferung) sind dokumentiert.
 
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.10** erhöht; Root-/docs-README, Handbuch und lokale Versionsangabe aktualisiert. `pyproject.toml` enthält nur Lint-Konfiguration und keine separate Paketversion.
-- Audit §2.10 und Prompt 10 sind **Fixed**; [SEC-10 mit Fix-Commit und SEC-05-Nachprüfung](SEC-10-information-disclosure.md) ergänzt.
+- Audit §2.10 und Prompt 10 sind **Fixed**; [SEC-10 mit Fix-Commit und SEC-05-Nachprüfung](findings/SEC-10-information-disclosure.md) ergänzt.
 - Keine neue Runtime-Abhängigkeit, keine Datenbankmigration und keine neuen Umgebungsvariablen. Server-Logs privat halten; nach dem Deploy `/health/` auf 2.4.10 und die getrennte Fehler-Log-Anzeige für normale/Staff-Konten prüfen.
 
 ## [2.4.9] – 2026-09-08
@@ -224,7 +237,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.9** erhöht; Sicherheitsabschnitte in beiden READMEs und im Handbuch ergänzt.
-- Befund §2.9 im Security-Audit und Prompt 9 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-09](SEC-09-permissions-policy.md) ergänzt.
+- Befund §2.9 im Security-Audit und Prompt 9 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-09](findings/SEC-09-permissions-policy.md) ergänzt.
 - Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Antworten eines vorgeschalteten Reverse-Proxys/CDNs werden von Django nicht automatisch mit dem Header versehen; dort bei Bedarf eine entsprechende Konfiguration ergänzen.
 
 ## [2.4.8] – 2026-09-07
@@ -245,7 +258,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.8** erhöht; Sicherheitsabschnitte in beiden READMEs und im Handbuch ergänzt.
-- Befund §2.8 im Security-Audit und Prompt 8 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-08](SEC-08-cache-control-api.md) ergänzt.
+- Befund §2.8 im Security-Audit und Prompt 8 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-08](findings/SEC-08-cache-control-api.md) ergänzt.
 - Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Antworten eines vorgeschalteten Reverse-Proxys/CDNs werden von Django nicht automatisch mit den Headern versehen; dort bei Bedarf eine entsprechende no-cache-Konfiguration ergänzen.
 
 ## [2.4.7] – 2026-09-07
@@ -265,7 +278,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.7** erhöht; relevante Sicherheitsabschnitte in beiden READMEs aktualisiert.
-- Befund §2.7 im Security-Audit und Prompt 7 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-07](SEC-07-session-lifetime-invalidation.md) ergänzt.
+- Befund §2.7 im Security-Audit und Prompt 7 in `ARENA_AI_PROMPTS.md` als **Fixed** markiert; [Finding-Nachweis SEC-07](findings/SEC-07-session-lifetime-invalidation.md) ergänzt.
 - Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Nach dem Deploy die Session-Einstellungen über den öffentlichen HTTPS-Endpunkt (bzw. den vorgeschalteten Proxy) prüfen; Cookie-Flags wie `HttpOnly` und `SameSite` bleiben unverändert wirksam.
 
 ## [2.4.6] – 2026-09-07
@@ -286,7 +299,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Dokumentation und Upgrade
 
 - Zentrale `VERSION` auf **2.4.6** erhöht; aktuelle Versionsangaben und Sicherheitsabschnitte in beiden READMEs, Handbuch und lokaler Anleitung aktualisiert. `pyproject.toml` enthält nur Ruff-Konfiguration, keine separate Paketversion.
-- Audit §2.6 und Prompt 6 als **Fixed** dokumentiert; [Finding-Nachweis mit Fix-Commit und SEC-05-Nachprüfung](SEC-06-rule-lifecycle-authz.md) ergänzt. Der vorgegebene Finding-Dateiname wird dort ausdrücklich dem nosniff-Finding zugeordnet, nicht einem anderen Autorisierungsbefund.
+- Audit §2.6 und Prompt 6 als **Fixed** dokumentiert; [Finding-Nachweis mit Fix-Commit und SEC-05-Nachprüfung](findings/SEC-06-content-type-nosniff.md) ergänzt. Der vorgegebene Finding-Dateiname wird dort ausdrücklich dem nosniff-Finding zugeordnet, nicht einem anderen Autorisierungsbefund.
 - Keine neuen Umgebungsvariablen oder Migrationen erforderlich. Nach dem Deploy den Header auch über den tatsächlichen Reverse-Proxy/CDN prüfen; außerhalb von Django erzeugte Antworten benötigen dort eine entsprechende Header-Konfiguration.
 
 ## [2.4.5] – 2026-09-07
@@ -325,7 +338,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Tests und Dokumentation
 
 - Startmatrix für lokale Entwicklung/Produktion/Render, Generierung und Logging, Gate/CSRF/Unicode, Rotation und WebSocket-Autorisierung, Rate-Limit-Parallelität/Proxy-Spoofing, CSP-Nonces und Setup-Idempotenz regressionsgetestet.
-- Beide READMEs, Env-Beispiele, Konfigurationstemplate, Handbuch/API-Zugriff, lokale Anleitung, FAQ, historische Review-Verweise und Prompt-Status aktualisiert. [Security-Review 2.4.4](SECURITY_REVIEW_2.4.4.md) enthält nach Priorität bewertete Befunde, False Positives, Testprotokoll und Prüfgrenzen.
+- Beide READMEs, Env-Beispiele, Konfigurationstemplate, Handbuch/API-Zugriff, lokale Anleitung, FAQ, historische Review-Verweise und Prompt-Status aktualisiert. [Security-Review 2.4.4](security/SECURITY_REVIEW_2.4.4.md) enthält nach Priorität bewertete Befunde, False Positives, Testprotokoll und Prüfgrenzen.
 
 ### Upgrade-Hinweise
 
@@ -369,7 +382,7 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 ### Help-Seite, adaptive Backtests und geprüfte Marktvorlagen
 
 - Der Hilfe-Link im Menü zeigt zuverlässig das gecachte Handbuch. Die Markdown-Kompilierung wird mit einem thread-sicheren Einmal-Cache geschützt; alle Fragment-Ziele der integrierten Hilfe wurden geprüft.
-- Neues ausführliches Kapitel [`backtesting.md`](backtesting.md) mit Formeln, Templates, Ressourcenbudget, Laufzeitschätzung, Datenqualität und Risikohinweisen.
+- Neues ausführliches Kapitel [`backtesting.md`](manual/BACKTESTING.md) mit Formeln, Templates, Ressourcenbudget, Laufzeitschätzung, Datenqualität und Risikohinweisen.
 - Docker startet lokal ohne Passphrase-Gate und verwendet den Standard-Port `8369`. Compose übernimmt nun auch die ermittelten Speichergrenzen.
 - `trading.resource_optimizer` liest CPU, RAM, cgroup-Limits und freien Speicher und leitet daraus sichere Preispunkt-, Raster- und Kombinationsgrenzen ab. Hard-Limits werden im Formular und im Worker erneut geprüft.
 - Backtesting bietet Schnellprüfung, Ausgewogen und Feinoptimierung, eine variable Preispunktzahl, ein variables Kombinations-Hard-Limit und eine sichtbare Laufzeitschätzung.

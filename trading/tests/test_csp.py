@@ -4,7 +4,7 @@ Tests für die Content-Security-Policy (CSP) Header.
 Stellt sicher dass CSP-Header korrekt gesetzt sind und keine
 externen Domains erlaubt sind.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 3.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 3.
 """
 
 import re

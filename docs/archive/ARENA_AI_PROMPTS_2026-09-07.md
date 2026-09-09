@@ -1,5 +1,8 @@
 # Arena.ai Agent Prompts – t-bot-lokal Security Audit
 
+> **Archiv – Stand 2026-09-08.** Promptsammlung des Security-Audits; alle Prompts sind
+> als Fixed dokumentiert, die Umsetzungsbelege stehen in den [Findings](../README.md#findings).
+> Kein Pflegeobjekt; Ausgangspunkt war die archivierte SECURITY_AUDIT.md (same directory).
 Generiert am: 07. September 2026 · Statusstand: 08. September 2026 (Release 2.4.19)  
 Basiert auf: SECURITY_AUDIT.md  
 Jeder Prompt ist eigenständig und PR-ready.
@@ -12,7 +15,7 @@ Jeder Prompt ist eigenständig und PR-ready.
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading/views.py` (Zeilen 250–306), `trading/middleware.py`
 
-**Status: Fixed in 2.4.1.** Die eigene Middleware `RateLimitMiddleware` in `trading/rate_limit.py` begrenzt Auth-POSTs auf `/login/`, `/gate/`, `/register/` und `/admin/login/` auf **5 Versuche pro IP und 15 Minuten pro Web-Prozess** – inklusive erfolgreicher POSTs (atomare Reservierung unter `threading.Lock`, begrenzter Speicher für 10.000 IPs). Bei Überschreitung antwortet sie mit HTTP 429 und `Retry-After`. Forwarded-Header werden nur über die explizite Allowlist `RATE_LIMIT_TRUSTED_PROXIES` (CIDR-Netze) vertraut; ohne Allowlist zählt `REMOTE_ADDR`. Registriert ist sie in `MIDDLEWARE` (`trading.rate_limit.RateLimitMiddleware`). **11 Regressionstests** in `trading/tests/test_rate_limit.py` (Limit, Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs, Integration). Hinweis: Der historische Vorschlag platzierte die Middleware in `trading/middleware.py`; umgesetzt wurde ein eigenes Modul mit Proxy-Allowlist. Siehe [Changelog 2.4.1](CHANGELOG.md#241--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.1.** Die eigene Middleware `RateLimitMiddleware` in `trading/rate_limit.py` begrenzt Auth-POSTs auf `/login/`, `/gate/`, `/register/` und `/admin/login/` auf **5 Versuche pro IP und 15 Minuten pro Web-Prozess** – inklusive erfolgreicher POSTs (atomare Reservierung unter `threading.Lock`, begrenzter Speicher für 10.000 IPs). Bei Überschreitung antwortet sie mit HTTP 429 und `Retry-After`. Forwarded-Header werden nur über die explizite Allowlist `RATE_LIMIT_TRUSTED_PROXIES` (CIDR-Netze) vertraut; ohne Allowlist zählt `REMOTE_ADDR`. Registriert ist sie in `MIDDLEWARE` (`trading.rate_limit.RateLimitMiddleware`). **11 Regressionstests** in `trading/tests/test_rate_limit.py` (Limit, Retry-After, GET-Ausnahme, X-Forwarded-For, Counter-Reset, unabhängige IPs, Integration). Hinweis: Der historische Vorschlag platzierte die Middleware in `trading/middleware.py`; umgesetzt wurde ein eigenes Modul mit Proxy-Allowlist. Siehe [Changelog 2.4.1](../CHANGELOG.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -130,7 +133,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 61, 71–72)
 
-**Status: Fixed in 2.4.2.** Der DEBUG-Pfad `ALLOWED_HOSTS.append("*")` ist entfernt; es gilt eine explizite Liste lokaler Hosts (`localhost`, `127.0.0.1`, `tbot.local`, `[::1]`), ergänzt um `RENDER_EXTERNAL_HOSTNAME` auf Render sowie optional `DJANGO_ALLOWED_HOSTS`. Ein Quellcode-Scan stellt sicher, dass `"*"` nirgends (auch nicht bedingt) ergänzt wird. **6 Regressionstests** in `trading/tests/test_settings.py` prüfen das Fehlen des Wildcards, die vorhandenen lokalen Hosts und den Source-Scan. Siehe [Changelog 2.4.2](CHANGELOG.md#242--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.2.** Der DEBUG-Pfad `ALLOWED_HOSTS.append("*")` ist entfernt; es gilt eine explizite Liste lokaler Hosts (`localhost`, `127.0.0.1`, `tbot.local`, `[::1]`), ergänzt um `RENDER_EXTERNAL_HOSTNAME` auf Render sowie optional `DJANGO_ALLOWED_HOSTS`. Ein Quellcode-Scan stellt sicher, dass `"*"` nirgends (auch nicht bedingt) ergänzt wird. **6 Regressionstests** in `trading/tests/test_settings.py` prüfen das Fehlen des Wildcards, die vorhandenen lokalen Hosts und den Source-Scan. Siehe [Changelog 2.4.2](../CHANGELOG.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -185,7 +188,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** HIGH – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`, `requirements.txt`
 
-**Status: Fixed in 2.4.3.** `django-csp==3.8` ist in `requirements.txt`; die App `csp` und `csp.middleware.CSPMiddleware` sind in `settings.py` registriert (nach der `SecurityMiddleware`). Die neun CSP-Direktiven sind strikt auf lokale Ressourcen ausgerichtet; Skripte kommen nur von `'self'` – ohne `unsafe-inline`, dafür mit frischer Request-Nonce (`CSP_INCLUDE_NONCE_IN = ("script-src",)`) für markierte Template-Skripte. Externe Domains (auch CDNs) sind nicht erlaubt – das weicht bewusst vom historischen Vorschlag ab, der `https://cdn.plot.ly` in `CSP_SCRIPT_SRC` vorsah; alle Assets liegen lokal unter `/static/`. **12 Regressionstests** in `trading/tests/test_csp.py` prüfen Einstellungen, präsente CSP-Header und das Fehlen externer Domains. Siehe [Changelog 2.4.3](CHANGELOG.md#243--2026-09-07). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.3.** `django-csp==3.8` ist in `requirements.txt`; die App `csp` und `csp.middleware.CSPMiddleware` sind in `settings.py` registriert (nach der `SecurityMiddleware`). Die neun CSP-Direktiven sind strikt auf lokale Ressourcen ausgerichtet; Skripte kommen nur von `'self'` – ohne `unsafe-inline`, dafür mit frischer Request-Nonce (`CSP_INCLUDE_NONCE_IN = ("script-src",)`) für markierte Template-Skripte. Externe Domains (auch CDNs) sind nicht erlaubt – das weicht bewusst vom historischen Vorschlag ab, der `https://cdn.plot.ly` in `CSP_SCRIPT_SRC` vorsah; alle Assets liegen lokal unter `/static/`. **12 Regressionstests** in `trading/tests/test_csp.py` prüfen Einstellungen, präsente CSP-Header und das Fehlen externer Domains. Siehe [Changelog 2.4.3](../CHANGELOG.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -247,7 +250,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 384–391)
 
-**Status: umgesetzt in 2.4.4.** Die Nachprüfung ergänzt den ursprünglichen Vorschlag um einen `DEBUG=False`-Startabbruch, private Signierschlüssel, einen aktiven Produktions-Gate und rotationsgebundene Session-Nachweise. Zufällige Secrets allein erkennen keine Produktionsumgebung. Siehe [Security-Review](SECURITY_REVIEW_2.4.4.md).
+**Status: umgesetzt in 2.4.4.** Die Nachprüfung ergänzt den ursprünglichen Vorschlag um einen `DEBUG=False`-Startabbruch, private Signierschlüssel, einen aktiven Produktions-Gate und rotationsgebundene Session-Nachweise. Zufällige Secrets allein erkennen keine Produktionsumgebung. Siehe [Security-Review](../security/SECURITY_REVIEW_2.4.4.md).
 
 ### Ursprünglicher Arena.ai Agenten-Prompt mit korrigiertem Zielcode
 
@@ -316,7 +319,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 162–163)
 
-**Status: umgesetzt in 2.4.5.** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` nach der Session-Cookie-Konfiguration und ist unabhängig vom `DEBUG`-Modus aktiv. Das `csrftoken`-Cookie wird mit `HttpOnly` gesetzt; die App-Skripte beziehen das Token unverändert aus dem `{% csrf_token %}`-Formularfeld. `trading/tests/test_csrf_cookie.py` (7 Tests mit erzwungener CSRF-Prüfung) reproduzierte den Vorzustand (rot) und sichert den Fix ab. Nachgeprüft in **2.4.6** mit nun 11 Tests, tatsächlich verwendetem Formular-Token und zusätzlichen Cookie-/Origin-Negativtests. HttpOnly schützt nur den Cookie-Zugriff, nicht allgemein vor XSS; das DOM-Token bleibt sichtbar. Siehe [Changelog](CHANGELOG.md), [Audit §2.5](SECURITY_AUDIT.md) und [Nachweis](SEC-06-rule-lifecycle-authz.md#sec-05-nachprüfung).
+**Status: umgesetzt in 2.4.5.** `CSRF_COOKIE_HTTPONLY = True` steht in `settings.py` nach der Session-Cookie-Konfiguration und ist unabhängig vom `DEBUG`-Modus aktiv. Das `csrftoken`-Cookie wird mit `HttpOnly` gesetzt; die App-Skripte beziehen das Token unverändert aus dem `{% csrf_token %}`-Formularfeld. `trading/tests/test_csrf_cookie.py` (7 Tests mit erzwungener CSRF-Prüfung) reproduzierte den Vorzustand (rot) und sichert den Fix ab. Nachgeprüft in **2.4.6** mit nun 11 Tests, tatsächlich verwendetem Formular-Token und zusätzlichen Cookie-/Origin-Negativtests. HttpOnly schützt nur den Cookie-Zugriff, nicht allgemein vor XSS; das DOM-Token bleibt sichtbar. Siehe [Changelog](../CHANGELOG.md), [Audit §2.5](SECURITY_AUDIT_2026-09-07.md) und [Nachweis](../findings/SEC-06-content-type-nosniff.md#sec-05-nachprüfung).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -343,7 +346,7 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "fix(security): set CSRF_COOKIE_HTTPONLY=True"
 ```
 
-**Nachprüfung 2.4.10:** SEC-05 bleibt **Fixed**; alle 11 Tests bestanden erneut. Eine gezielte Testprozess-Mutation mit deaktiviertem HttpOnly wird erkannt. [Nachweis](SEC-10-information-disclosure.md#sec-05-nachprüfung).
+**Nachprüfung 2.4.10:** SEC-05 bleibt **Fixed**; alle 11 Tests bestanden erneut. Eine gezielte Testprozess-Mutation mit deaktiviertem HttpOnly wird erkannt. [Nachweis](../findings/SEC-10-information-disclosure.md#sec-05-nachprüfung).
 
 ---
 
@@ -353,7 +356,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`
 
-**Status: Fixed in 2.4.6.** `SECURE_CONTENT_TYPE_NOSNIFF = True` ist explizit und DEBUG-/Render-unabhängig gesetzt. Die vorhandene `SecurityMiddleware` bleibt an erster Stelle; 10 Regressionstests prüfen Settings und ausgelieferte Header einschließlich Fehlern, Downloads und WhiteNoise. **Korrektur des historischen Prompts:** Django 5.2.17 aktiviert nosniff schon per Default; es fehlte die explizite Projektkonfiguration, nicht der Header im geprüften Standard-Stack. [Finding und Fix-Commit](SEC-06-rule-lifecycle-authz.md), [Audit §2.6](SECURITY_AUDIT.md).
+**Status: Fixed in 2.4.6.** `SECURE_CONTENT_TYPE_NOSNIFF = True` ist explizit und DEBUG-/Render-unabhängig gesetzt. Die vorhandene `SecurityMiddleware` bleibt an erster Stelle; 10 Regressionstests prüfen Settings und ausgelieferte Header einschließlich Fehlern, Downloads und WhiteNoise. **Korrektur des historischen Prompts:** Django 5.2.17 aktiviert nosniff schon per Default; es fehlte die explizite Projektkonfiguration, nicht der Header im geprüften Standard-Stack. [Finding und Fix-Commit](../findings/SEC-06-content-type-nosniff.md), [Audit §2.6](SECURITY_AUDIT_2026-09-07.md).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -388,7 +391,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py` (Zeilen 157–163)
 
-**Status: Fixed in 2.4.7.** `SESSION_COOKIE_AGE = 60 * 60 * 8` und `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` sind DEBUG-/Render-unabhängig in `settings.py` gesetzt. `logout_view` in `trading/views.py` ruft nach `logout(request)` explizit `request.session.flush()` auf, sodass Session-Daten geleert und der Key rotiert werden. Die Passphrase-Freigabe wird dabei ebenfalls ungültig, sodass nach Logout eine erneute Gate-/Login-Authentifizierung erforderlich ist. **11 Regressionstests** in `trading/tests/test_session_invalidate.py` prüfen Settings, DEBUG-/Render-Matrix, Quellcode, POST-Logout-Anonymisierung, CSRF und POST-Only; bestehende 154 Tests bleiben grün. [Finding und Fix-Dokumentation](SEC-07-session-lifetime-invalidation.md), [Audit §2.7](SECURITY_AUDIT.md).
+**Status: Fixed in 2.4.7.** `SESSION_COOKIE_AGE = 60 * 60 * 8` und `SESSION_EXPIRE_AT_BROWSER_CLOSE = True` sind DEBUG-/Render-unabhängig in `settings.py` gesetzt. `logout_view` in `trading/views.py` ruft nach `logout(request)` explizit `request.session.flush()` auf, sodass Session-Daten geleert und der Key rotiert werden. Die Passphrase-Freigabe wird dabei ebenfalls ungültig, sodass nach Logout eine erneute Gate-/Login-Authentifizierung erforderlich ist. **11 Regressionstests** in `trading/tests/test_session_invalidate.py` prüfen Settings, DEBUG-/Render-Matrix, Quellcode, POST-Logout-Anonymisierung, CSRF und POST-Only; bestehende 154 Tests bleiben grün. [Finding und Fix-Dokumentation](../findings/SEC-07-session-lifetime-invalidation.md), [Audit §2.7](SECURITY_AUDIT_2026-09-07.md).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -444,7 +447,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Security  
 **Betroffene Dateien:** `trading/views.py`
 
-**Status: Fixed in 2.4.8.** Der Decorator `no_cache_json` in `trading/views.py` setzt `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache` auf allen zehn API-Endpunkten (inklusive `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api` und `server_resources_api`). Der Decorator ist als innerster Decorator platziert und erfasst damit auch Fehlerantworten (400/503). **9 Regressionstests** in `trading/tests/test_cache_control.py` prüfen Quellcode und ausgelieferte Header über den echten Middleware-Stack; bestehende 165 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](SEC-08-cache-control-api.md), [Audit §2.8](SECURITY_AUDIT.md).
+**Status: Fixed in 2.4.8.** Der Decorator `no_cache_json` in `trading/views.py` setzt `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` und `Pragma: no-cache` auf allen zehn API-Endpunkten (inklusive `symbol_suggestions_api`, `market_opportunities_api`, `backtesting_status_api`, `backtesting_estimate_api` und `server_resources_api`). Der Decorator ist als innerster Decorator platziert und erfasst damit auch Fehlerantworten (400/503). **9 Regressionstests** in `trading/tests/test_cache_control.py` prüfen Quellcode und ausgelieferte Header über den echten Middleware-Stack; bestehende 165 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](../findings/SEC-08-cache-control-api.md), [Audit §2.8](SECURITY_AUDIT_2026-09-07.md).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -512,7 +515,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** LOW – Security  
 **Betroffene Dateien:** `trading_bot_project/settings.py`
 
-**Status: Fixed in 2.4.9.** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation. Die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (direkt nach der `SecurityMiddleware`) setzt den `Permissions-Policy`-Header aus dieser Einstellung auf jeder Antwort, da Django selbst keinen solchen Header erzeugt. **11 Regressionstests** in `trading/tests/test_permissions_policy.py` prüfen Settings und ausgelieferte Header über den echten Middleware-Stack; bestehende 174 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](SEC-09-permissions-policy.md), [Audit §2.9](SECURITY_AUDIT.md).
+**Status: Fixed in 2.4.9.** Die zentrale Einstellung `SECURE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"` in `trading_bot_project/settings.py` deaktiviert Kamera, Mikrofon und Geolokation. Die neue Middleware `trading.middleware.PermissionsPolicyMiddleware` (direkt nach der `SecurityMiddleware`) setzt den `Permissions-Policy`-Header aus dieser Einstellung auf jeder Antwort, da Django selbst keinen solchen Header erzeugt. **11 Regressionstests** in `trading/tests/test_permissions_policy.py` prüfen Settings und ausgelieferte Header über den echten Middleware-Stack; bestehende 174 Tests bleiben grün. SEC-05 (`CSRF_COOKIE_HTTPONLY`) wurde erneut nachgeprüft. [Finding und Fix-Nachweis](../findings/SEC-09-permissions-policy.md), [Audit §2.9](SECURITY_AUDIT_2026-09-07.md).
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -554,7 +557,7 @@ VALIDIERUNGSKRITERIEN:
 
 ## Prompt 10: Information Disclosure
 
-**Status: Fixed in 2.4.10.** Technische Fehler werden in `trading/views.py` und den direkt beteiligten Ausgabewegen nicht mehr in Flash-/JSON-/Report-Meldungen übernommen; `logger.exception` erhält die Diagnose. Teilfehler und gespeicherte Backtest-Fehler sind eingeschlossen. Das Fehler-Log zeigt technische Details nur Staff-Konten unter Beibehaltung der Eigentümerprüfung, auch für alte Einträge. 25 neue Regressionstests (Rot → grün), insgesamt 210 Django-/Python-Tests bestanden. SEC-05 wurde mit allen 11 Tests und einer HttpOnly-Negativkontrolle erneut geprüft. [Finding mit Fix-Commit und Prüfgrenzen](SEC-10-information-disclosure.md), [Audit §2.10](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.10.** Technische Fehler werden in `trading/views.py` und den direkt beteiligten Ausgabewegen nicht mehr in Flash-/JSON-/Report-Meldungen übernommen; `logger.exception` erhält die Diagnose. Teilfehler und gespeicherte Backtest-Fehler sind eingeschlossen. Das Fehler-Log zeigt technische Details nur Staff-Konten unter Beibehaltung der Eigentümerprüfung, auch für alte Einträge. 25 neue Regressionstests (Rot → grün), insgesamt 210 Django-/Python-Tests bestanden. SEC-05 wurde mit allen 11 Tests und einer HttpOnly-Negativkontrolle erneut geprüft. [Finding mit Fix-Commit und Prüfgrenzen](../findings/SEC-10-information-disclosure.md), [Audit §2.10](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 **Prompt-Titel:** `[InformationDisclosureErrors] – Arena.ai Agent Prompt`  
 **Severity & Kategorie:** LOW – Security  
@@ -612,7 +615,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** LOW – Security  
 **Betroffene Dateien:** `docker-compose.yml` (Zeilen 11, 54)
 
-**Status: Fixed in 2.4.11.** `PASSPHRASE` und `SECRET_KEY` waren bereits seit 2.4.4 Pflichtwerte; ab 2.4.11 gilt dies auch für `POSTGRES_PASSWORD` – im `postgres`-Service und in der `DATABASE_URL` des App-Environment. `${POSTGRES_PASSWORD:?...}` bricht die Compose-Interpolation ab, wenn das Secret fehlt oder leer ist; der öffentliche Default `tbot-local-password` ist aus allen ausgelieferten Dateien entfernt. `scripts/setup_local.sh` erzeugt das lokale DB-Passwort zufällig in `.env.local` (Modus 0600), bewahrt es beim Retuning und erkennt den früher öffentlichen Wert per SHA-256-Vergleich für einen Rotationshinweis, ohne ihn erneut zu veröffentlichen. Abweichung vom historischen Prompt: Die Env-Beispiele halten Secrets als **leere Platzhalter** fest (statt `change-me`-Werten), damit das unveränderte Kopieren sicher fehlschlägt. **Neue Shell-Testgruppe** `tests/test_compose_security.sh` (25 Assertions) plus erweiterte `tests/test_setup_local.sh`; beide waren vor dem Fix rot. Docker steht lokal nicht zur Verfügung, daher ist die Laufzeit-Interpolationsprüfung statisch bzw. optional. [Finding mit Fix-Commit](SEC-12-docker-default-passwords.md), [Audit §2.12](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.11.** `PASSPHRASE` und `SECRET_KEY` waren bereits seit 2.4.4 Pflichtwerte; ab 2.4.11 gilt dies auch für `POSTGRES_PASSWORD` – im `postgres`-Service und in der `DATABASE_URL` des App-Environment. `${POSTGRES_PASSWORD:?...}` bricht die Compose-Interpolation ab, wenn das Secret fehlt oder leer ist; der öffentliche Default `tbot-local-password` ist aus allen ausgelieferten Dateien entfernt. `scripts/setup_local.sh` erzeugt das lokale DB-Passwort zufällig in `.env.local` (Modus 0600), bewahrt es beim Retuning und erkennt den früher öffentlichen Wert per SHA-256-Vergleich für einen Rotationshinweis, ohne ihn erneut zu veröffentlichen. Abweichung vom historischen Prompt: Die Env-Beispiele halten Secrets als **leere Platzhalter** fest (statt `change-me`-Werten), damit das unveränderte Kopieren sicher fehlschlägt. **Neue Shell-Testgruppe** `tests/test_compose_security.sh` (25 Assertions) plus erweiterte `tests/test_setup_local.sh`; beide waren vor dem Fix rot. Docker steht lokal nicht zur Verfügung, daher ist die Laufzeit-Interpolationsprüfung statisch bzw. optional. [Finding mit Fix-Commit](../findings/SEC-12-docker-default-passwords.md), [Audit §2.12](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -664,7 +667,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** MEDIUM – Bug  
 **Betroffene Dateien:** `trading/trading_bot.py` (Zeilen 810–817)
 
-**Status: Fixed in 2.4.12.** `TradingBotManager` besitzt `_is_running_unlocked()` ohne Lock-Acquisition. Die öffentliche `is_running()` umschließt sie mit `self._lock`. `start_bot()` und `stop_bot()` rufen die unlocked-Variante unter dem bereits gehaltenen Lock auf – keine verschachtelte Lock-Acquisition mehr. Views bleiben bei der öffentlichen API. **16 Regressionstests** in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf nicht-reentrantem `Lock`). [Finding mit Fix-Commit](BUG-12-race-condition-bot-start-stop.md), [Audit §3.1](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.12.** `TradingBotManager` besitzt `_is_running_unlocked()` ohne Lock-Acquisition. Die öffentliche `is_running()` umschließt sie mit `self._lock`. `start_bot()` und `stop_bot()` rufen die unlocked-Variante unter dem bereits gehaltenen Lock auf – keine verschachtelte Lock-Acquisition mehr. Views bleiben bei der öffentlichen API. **16 Regressionstests** in `trading/tests/test_bot_start_stop.py`; 7 davon am Ausgangsstand rot (inkl. Deadlock auf nicht-reentrantem `Lock`). [Finding mit Fix-Commit](../findings/BUG-12-race-condition-bot-start-stop.md), [Audit §3.1](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -881,7 +884,7 @@ VALIDIERUNGSKRITERIEN:
 **Severity & Kategorie:** LOW – Bug  
 **Betroffene Dateien:** `trading/views.py` (`generate_report_csv`; historische Zeilen 1136–1138)
 
-**Status: Fixed in 2.4.13.** `_CsvEcho` ist entfernt; der CSV-Generator verwendet einen wiederverwendeten `io.StringIO(newline="")`-Puffer mit `getvalue()`, `seek(0)` und `truncate(0)`. Ein Context-Manager gibt ihn auch bei Fehler oder Stream-Abbruch frei. Format, BOM, Datenbank-Batching und Zugriffsregeln bleiben unverändert. **15 Regressionstests**, fünf davon am Ausgangsstand rot, insgesamt **242 Django-/Python-Tests** grün. Einordnung: Das Echo-Muster war für `csv.writer` gültig; der Wechsel ist ein Kompatibilitäts-Refactoring, keine Behebung des separaten synchronen Iterator-Pufferns unter ASGI. [Finding mit Fix-Commit und Prüfgrenzen](BUG-14-csv-echo-true-stream.md), [Audit §3.3](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+**Status: Fixed in 2.4.13.** `_CsvEcho` ist entfernt; der CSV-Generator verwendet einen wiederverwendeten `io.StringIO(newline="")`-Puffer mit `getvalue()`, `seek(0)` und `truncate(0)`. Ein Context-Manager gibt ihn auch bei Fehler oder Stream-Abbruch frei. Format, BOM, Datenbank-Batching und Zugriffsregeln bleiben unverändert. **15 Regressionstests**, fünf davon am Ausgangsstand rot, insgesamt **242 Django-/Python-Tests** grün. Einordnung: Das Echo-Muster war für `csv.writer` gültig; der Wechsel ist ein Kompatibilitäts-Refactoring, keine Behebung des separaten synchronen Iterator-Pufferns unter ASGI. [Finding mit Fix-Commit und Prüfgrenzen](../findings/BUG-14-csv-echo-true-stream.md), [Audit §3.3](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -1144,8 +1147,8 @@ ORM-API. Zusätzlich ist `max_rows < 1` ein sicheres No-op statt einer
 (eine Transaktion über alle 2.500 Zeilen statt `[1000, 1000, 500]`;
 `ValueError` bei negativem `max_rows`), insgesamt **249 Django-/Python-Tests**
 grün; SEC-05 mit allen 11 CSRF-Cookie-Tests erneut nachgeprüft.
-[Finding mit Fix-Commit und Prüfgrenzen](PERF-17-db-trim-batch-delete.md),
-[Audit §4.2](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den
+[Finding mit Fix-Commit und Prüfgrenzen](../findings/PERF-17-db-trim-batch-delete.md),
+[Audit §4.2](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den
 historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
@@ -1241,8 +1244,8 @@ Listendefinition stillschweigend mit `prices[-1]`). **30 Regressionstests** in
 Altformel über 60 Preispunkte), 16.693 deterministische Alt-/Neu-Vergleichsfälle
 ohne Abweichung, Backtest-Reports byte-identisch, insgesamt **279
 Django-/Python-Tests** grün; SEC-05 mit allen 11
-CSRF-Cookie-Tests erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](CODE-18-indicator-dedup.md),
-[Audit §4.3](SECURITY_AUDIT.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
+CSRF-Cookie-Tests erneut nachgeprüft. [Finding mit Fix-Commit und Prüfgrenzen](../findings/CODE-18-indicator-dedup.md),
+[Audit §4.3](SECURITY_AUDIT_2026-09-07.md). Der folgende Prompt beschreibt den historischen Ausgangsbefund.
 
 ### Der vollständige Arena.ai Agenten-Prompt
 
@@ -1481,7 +1484,7 @@ Beim Annotieren wurden drei latente Randpfade sichtbar und gehärtet – 26 ORM-
 auf dem untypisierten `request.user` laufen jetzt über `_authenticated_user()`,
 das Gate weist ein leeres Secret ab, und `_equity_svg` überspringt Punkte ohne
 Wert. Keiner war im ausgelieferten Stand erreichbar. Nachweis, Negativkontrolle
-und Prüfgrenzen: [CODE-19](CODE-19-view-type-hints.md).
+und Prüfgrenzen: [CODE-19](../findings/CODE-19-view-type-hints.md).
 
 ---
 
@@ -1575,8 +1578,8 @@ gebunden; die Django-Module (`trading_bot`, `views`, `models`, `tasks`,
 `forms`, `worker_status`) werden per PEP-562-`__getattr__` erst beim ersten
 Zugriff geladen. `trading/tests/test_module_exports.py` (11 Tests) sichert den
 Vertrag, den Stern-Import und die App-Population ab. Siehe
-[CODE-20](CODE-20-module-exports.md), [Changelog](CHANGELOG.md#2417--2026-09-08)
-und [Audit §4.5](SECURITY_AUDIT.md#45-technologische-schuld--fehlende-__all__-exports--fixed-in-2417).
+[CODE-20](../findings/CODE-20-module-exports.md), [Changelog](../CHANGELOG.md)
+und [Audit §4.5](SECURITY_AUDIT_2026-09-07.md#45-technologische-schuld--fehlende-__all__-exports--fixed-in-2417).
 
 ---
 
@@ -1699,7 +1702,7 @@ VALIDIERUNGSKRITERIEN:
 - [ ] PR-Commit-Message: "perf(views): optimize info_api with DB aggregation"
 ```
 
-**Status: Fixed in 2.4.18.** `info_api` berechnet die Performance-Kennzahlen seit 2.4.18 über `_calculate_metrics_from_db()` direkt im DBMS (`aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern) statt aller Logs in Python. Die Skalarmathematik läuft bewusst in Python, weil eine reine `Sum(...) / Count(...)`-Division auf PostgreSQL als Ganzzahldivision falsche Werte liefern würde; das Ergebnis bleibt so backend-unabhängig und bitgenau zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`) und API-Antwort sind unverändert. Details, Testnachweis (Rot→Grün) und Prüfgrenzen: [PERF-21](PERF-21-info-api-db-aggregation.md); Release-Nachweis: [CHANGELOG.md](CHANGELOG.md#2418--2026-09-08).
+**Status: Fixed in 2.4.18.** `info_api` berechnet die Performance-Kennzahlen seit 2.4.18 über `_calculate_metrics_from_db()` direkt im DBMS (`aggregate()` mit `Count`/`Sum`/`Max`/`Min` und `Q`-Filtern) statt aller Logs in Python. Die Skalarmathematik läuft bewusst in Python, weil eine reine `Sum(...) / Count(...)`-Division auf PostgreSQL als Ganzzahldivision falsche Werte liefern würde; das Ergebnis bleibt so backend-unabhängig und bitgenau zu `calculate_performance_metrics()`. Fensterbegrenzung (`[:_MAX_LOG_ROWS]`) und API-Antwort sind unverändert. Details, Testnachweis (Rot→Grün) und Prüfgrenzen: [PERF-21](../findings/PERF-21-info-api-db-aggregation.md); Release-Nachweis: [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 

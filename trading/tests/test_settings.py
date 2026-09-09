@@ -4,7 +4,7 @@ Tests für die ALLOWED_HOSTS-Sicherheitskonfiguration.
 Stellt sicher dass kein Wildcard (*) in ALLOWED_HOSTS verwendet wird
 und dass nur explizite lokale Entwicklungshosts erlaubt sind.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 2.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 2.
 """
 
 from django.test import TestCase

@@ -132,10 +132,10 @@ des Containers nachgestellt. Ein vollständiger Containerlauf
   `POSTGRES_PASSWORD` in `.env.local` leeren, `scripts/setup_local.sh`
   erneut ausführen (neuer Zufallswert) und danach
   `scripts/setup_local.sh --reset-db --yes` – das löscht die lokale
-  Datenbank (siehe [FAQ](FAQ.md#8-passwoerter-aendern--secret-rotation)).
+  Datenbank (siehe [FAQ](../operations/FAQ.md#8-passwoerter-aendern--secret-rotation)).
 - Manuelles Compose benötigt jetzt zwingend gesetzte `SECRET_KEY`-,
   `PASSPHRASE`- und `POSTGRES_PASSWORD`-Werte in der Env-Datei
   (`.env` bzw. `--env-file`); Vorlage mit Hinweisen:
-  [`.env.docker.example`](../.env.docker.example).
+  [`.env.docker.example`](../../.env.docker.example).
 - Nach dem Deploy `/health/` auf **2.4.11** prüfen; Postgres und Redis
   veröffentlichen weiterhin keine Hostports.

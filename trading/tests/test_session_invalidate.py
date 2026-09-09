@@ -14,7 +14,7 @@ Cookie könnte bis zum Ablauf wiederverwendet werden. Die kürzere Lebensdauer,
 Session-Invalidierung bei Abmeldung und Ablauf bei Browser-Schluss verkleinern
 dieses Fenster erheblich.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 7 und SECURITY_AUDIT.md Abschnitt 2.7.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 7 und docs/archive/SECURITY_AUDIT_2026-09-07.md Abschnitt 2.7.
 """
 
 import os

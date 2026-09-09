@@ -100,11 +100,11 @@ configured_passphrase="$(grep -E '^PASSPHRASE=' "${CONFIG_FILE}" | cut -d= -f2-)
 assert_eq "${PASSPHRASE}" "${configured_passphrase}" "Explizite Passphrase bleibt erhalten"
 
 # Template-Vorlage im Repo sollte vorhanden und dokumentiert sein.
-assert_file_exists "${REPO_ROOT}/config.template" "config.template im Repo"
-if grep -q 'RENDER_SIMULATION' "${REPO_ROOT}/config.template"; then
-  pass "config.template dokumentiert RENDER_SIMULATION"
+assert_file_exists "${REPO_ROOT}/config.template.env" "config.template.env im Repo"
+if grep -q 'RENDER_SIMULATION' "${REPO_ROOT}/config.template.env"; then
+  pass "config.template.env dokumentiert RENDER_SIMULATION"
 else
-  fail "config.template: RENDER_SIMULATION fehlt"
+  fail "config.template.env: RENDER_SIMULATION fehlt"
 fi
 
 finish_test

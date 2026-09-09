@@ -1,5 +1,8 @@
 # Peer-Review der Backtesting- und 24/7-Architektur des T-Bot
 
+> **Archiv – Stand August 2026.** Externes KI-Peer-Review der (ehemaligen) BACKTESTING_STUDY;
+> die verbindliche Architekturentscheidung steht in [ADR-0001](../adr/ADR-0001-backtesting-worker-isolation.md).
+> Kein Pflegeobjekt.
 Ich habe die von dir angegebene `BACKTESTING_STUDY.md` direkt aus dem Repository geprüft und die darin beschriebene Architektur gegen die aktuellen Free-Tier-Bedingungen von Render, Railway, Cloud Run, AWS Lambda, Cloudflare Workers und Oracle Cloud abgeglichen.
 
 Der wichtigste Befund vorweg:

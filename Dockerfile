@@ -15,7 +15,7 @@ WORKDIR /app
 # Das Skript ist so gebaut, dass es in Builds ohne Root-Privilegien oder
 # ohne unterstuetzten Paketmanager nicht fehlschlaegt, sondern eine Warnung
 # ausgibt - der Build faellt dann auf die explizite apt-get-Zeile zurueck.
-COPY install.sh hardware-test.sh config.template ./
+COPY install.sh hardware-test.sh config.template.env ./
 RUN chmod +x install.sh hardware-test.sh && \
     ./install.sh --mode=container --profile=runtime --yes || \
     ( echo "Fallback: install.sh konnte nicht vollstaendig laufen, nutze apt-get direkt" \

@@ -13,7 +13,7 @@ versehentliche Entfernung des Decorators oder einer Anwendung nicht unentdeckt
 bleibt. Die Integrationstests laufen über den echten Middleware-Stack und
 prüfen die ausgelieferten Header.
 
-Basierend auf ARENA_AI_PROMPTS.md Prompt 8 und SECURITY_AUDIT.md Abschnitt 2.8.
+Basierend auf docs/archive/ARENA_AI_PROMPTS_2026-09-07.md Prompt 8 und docs/archive/SECURITY_AUDIT_2026-09-07.md Abschnitt 2.8.
 """
 
 import re

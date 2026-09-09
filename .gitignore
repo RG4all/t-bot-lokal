@@ -23,7 +23,7 @@ media/
 
 # Generierte lokale Konfiguration (install.sh / hardware-test.sh)
 config/
-!config.template
+!config.template.env
 
 # Editors / OS
 .idea/

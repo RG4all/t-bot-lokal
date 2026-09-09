@@ -1,6 +1,6 @@
 # t-bot – Benutzer- und Indikatorhandbuch
 
-**Version 2.4.19 · Stand 8. September 2026**
+**Dokumentationsstand: 8. September 2026** · die ausgelieferte Version steht in der Kopfzeile dieser Hilfeseite (Quelle: `VERSION`)
 
 [TOC]
 
@@ -196,7 +196,7 @@ Zusätzliche Absicherung: Ein Datenpunkt unterhalb von Index 2 (kein Vor- und
 Vorvorpreis) oder außerhalb der Preisreihe wird mit einem Fehler abgewiesen,
 statt – wie vor 2.4.15 – über die Listendefinition den letzten Preis zu
 verwenden und einen unsichtbar falschen Indikatorwert zu liefern. Technische
-Details und Prüfgrenzen: [CODE-18](CODE-18-indicator-dedup.md).
+Details und Prüfgrenzen: [CODE-18](../findings/CODE-18-indicator-dedup.md).
 
 ### 6.5 MVD – Verhältnis Minimum zu Maximum
 
@@ -266,7 +266,7 @@ Im Dashboard stehen drei Exportformate bereit:
 
 - **PDF**: Druckbarer Gesamtbericht mit Konfiguration, Cash, Equity, offenen Positionen, Kennzahlen, Trading-Log und eingebetteten Diagrammen.
 - **HTML**: Eigenständige Reportdatei für Offline-Betrachtung im Browser.
-- **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation. Die zwölf Spalten und die chronologische Reihenfolge (Zeitstempel, dann ID) bleiben unverändert. Ab 2.4.13 erzeugt ein wiederverwendeter `io.StringIO`-Zeilenpuffer das CSV; Sonderzeichen und eingebettete Zeilenumbrüche werden weiterhin durch `csv.writer` maskiert. [Technische Details und Streaming-Prüfgrenzen](BUG-14-csv-echo-true-stream.md).
+- **CSV**: Vollständiger Trading-Export mit UTF-8-BOM für Excel und Tabellenkalkulation. Die zwölf Spalten und die chronologische Reihenfolge (Zeitstempel, dann ID) bleiben unverändert. Ab 2.4.13 erzeugt ein wiederverwendeter `io.StringIO`-Zeilenpuffer das CSV; Sonderzeichen und eingebettete Zeilenumbrüche werden weiterhin durch `csv.writer` maskiert. [Technische Details und Streaming-Prüfgrenzen](../findings/BUG-14-csv-echo-true-stream.md).
 
 Dateinamenschema: `username_exchange_config-id_YYYYMMDD_HHMMSS.ext` (z. B. `anna_binance_5_20260820_184501.pdf`).
 
@@ -304,7 +304,7 @@ Die Seite zeigt eine grobe Laufzeit aus Symbolanzahl, Raster, Preispunkten und
 CPU-Profil. Sie ist ausdrücklich nur eine Schätzung. `/api/resources/` liefert
 den zugrunde liegenden Snapshot; Docker berücksichtigt cgroup-Limits statt
 blind die Hostressourcen zu verwenden. Eine ausführliche Erklärung steht in
-der Repository-Datei `docs/backtesting.md`; die App-Hilfe enthält die
+der Repository-Datei `docs/manual/BACKTESTING.md`; die App-Hilfe enthält die
 wesentlichen Erläuterungen ebenfalls in diesem Abschnitt.
 
 ### Isolation und Ressourcenschonung
@@ -341,7 +341,7 @@ Das Fehler-Log kann nach Konfiguration, Schweregrad, Status und Quelle gefiltert
 
 Technische Log-Meldungen, Exception-Typen und Details sind nur für Betreiberkonten (`is_staff`) sichtbar, weiterhin ausschließlich für eigene Konfigurationen. Das gilt auch für alte Einträge. Betreiber können zusätzlich die geschützten Server-Logs bzw. die vorhandene Django-Administration mit den entsprechenden Berechtigungen verwenden. Staff-Rechte nicht an normale Nutzer vergeben, um die generische Anzeige zu umgehen.
 
-Auch Flash-Meldungen, JSON-Fehler, PDF-/HTML-Reportfehler und gespeicherte Backtest-Fehler zeigen keine internen Exception-Texte mehr. Der ursprüngliche Fehler wird serverseitig mit Traceback geloggt; fällt die zusätzliche Speicherung im Fehler-Log aus, bleibt die generische Antwort erhalten. Fachliche Formularhinweise, etwa zu nicht gelisteten Symbolen aus der eigenen Eingabe, bleiben verfügbar. [Security-Nachweis SEC-10](SEC-10-information-disclosure.md).
+Auch Flash-Meldungen, JSON-Fehler, PDF-/HTML-Reportfehler und gespeicherte Backtest-Fehler zeigen keine internen Exception-Texte mehr. Der ursprüngliche Fehler wird serverseitig mit Traceback geloggt; fällt die zusätzliche Speicherung im Fehler-Log aus, bleibt die generische Antwort erhalten. Fachliche Formularhinweise, etwa zu nicht gelisteten Symbolen aus der eigenen Eingabe, bleiben verfügbar. [Security-Nachweis SEC-10](../findings/SEC-10-information-disclosure.md).
 
 Typische **technische Log-Meldungen für Betreiber**:
 
@@ -384,7 +384,7 @@ Die Hilfe-Seite (`/help/`) rendert dieses Handbuch mit Inhaltsverzeichnis, forma
 **Minimaler Ressourcenverbrauch:**
 - Das gerenderte HTML wird mittels `@lru_cache(maxsize=1)` im Arbeitsspeicher gehalten.
 - Die Markdown-Kompilierung erfolgt exakt **einmal** beim ersten Aufruf und erzeugt bei nachfolgenden Anfragen **nahezu 0 % CPU- und I/O-Last**.
-- Die Pfadsuche prüft automatisch `docs/MANUAL.md` sowie `MANUAL.md` im Projektstamm.
+- Die Pfadsuche prüft automatisch `docs/manual/MANUAL.md`, `docs/MANUAL.md` sowie `MANUAL.md` im Projektstamm (Rückwärtskompatibilität).
 
 ## 14. Render-Hinweise
 

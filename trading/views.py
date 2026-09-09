@@ -466,6 +466,7 @@ def _render_manual() -> str:
         if _MANUAL_HTML is not None:
             return _MANUAL_HTML
         candidates = (
+            settings.BASE_DIR / "docs" / "manual" / "MANUAL.md",
             settings.BASE_DIR / "docs" / "MANUAL.md",
             settings.BASE_DIR / "MANUAL.md",
         )
@@ -517,7 +518,7 @@ _render_manual.cache_clear = _clear_manual_cache  # type: ignore[method-assign]
 
 @require_GET
 def help_view(request: HttpRequest) -> HttpResponse:
-    """Zeigt das gerenderte Handbuch (``docs/MANUAL.md``) in der Oberfläche."""
+    """Zeigt das gerenderte Handbuch (``docs/manual/MANUAL.md``) in der Oberfläche."""
     return render(
         request,
         "trading/help.html",
