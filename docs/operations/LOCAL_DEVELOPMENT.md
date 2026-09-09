@@ -309,6 +309,8 @@ Die folgenden Kommandos dienen der lokalen Nachprüfung vor jedem Release; Docke
 
 ```bash
 # Shell-Skripte linten und Test-Suite ausfuehren
+# (ShellCheck 0.11.0, z. B. pip install shellcheck-py==0.11.0.1 – Distro-apt
+# liefert je nach System 0.9.0 und meldet abweichende Befunde)
 shellcheck install.sh hardware-test.sh docker-entrypoint.sh docker/*.sh scripts/*.sh tests/*.sh
 ./tests/run_tests.sh
 

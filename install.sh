@@ -163,7 +163,8 @@ ensure_privileges() {
 # Distro-Erkennung
 # ---------------------------------------------------------------------------
 # Liest /etc/os-release und extrahiert ID, ID_LIKE, PRETTY_NAME, VERSION_ID.
-# Parameter 1: optionaler Pfad zu einer os-release-Datei (fuer Tests).
+# Parameter 1: optionaler Pfad zu einer os-release-Datei (fuer Tests); im
+# Hauptablauf wird der Standard explizit gesetzt (ShellCheck SC2119/SC2120).
 detect_distro() {
   local os_release="${1:-/etc/os-release}"
   local id="" id_like="" name="" version=""
@@ -654,7 +655,7 @@ main() {
 
   ensure_privileges
   setup_logfile
-  detect_distro
+  detect_distro /etc/os-release
   print_distro_banner
   install_dependencies
   install_python_requirements
