@@ -2312,16 +2312,20 @@ def analyse_view(request: HttpRequest) -> HttpResponse:
             )
             continue
         source_config = Configuration.objects.get(id=source_config_id)
+        # W3: values_list liefert nur (timestamp, price) statt eines vollen
+        # ORM-Objekts je Zeile – bei bis zu 20k Reihen der teuerste Teil des
+        # Endpunkts. Ansonsten unveraendert: neueste Zeilen zuerst begrenzen,
+        # fuer die Analyse aufsteigend sortieren.
         rows = list(
-            DataLog.objects.filter(configuration_id=source_config_id, symbol=symbol).order_by(
-                "-timestamp", "-id"
-            )[:20_000]
+            DataLog.objects.filter(configuration_id=source_config_id, symbol=symbol)
+            .order_by("-timestamp", "-id")
+            .values_list("timestamp", "price")[:_MAX_ANALYSIS_ROWS]
         )
         rows.reverse()
         closes_by_bucket: dict[int, float] = {}
-        for row in rows:
-            bucket = int(row.timestamp.timestamp()) // bucket_size
-            closes_by_bucket[bucket] = float(row.price)
+        for timestamp, price in rows:
+            bucket = int(timestamp.timestamp()) // bucket_size
+            closes_by_bucket[bucket] = float(price)
         closes = list(closes_by_bucket.values())
         if len(closes) < 16:
             analysis_results.append(
