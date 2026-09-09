@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import wraps
 
@@ -39,6 +40,11 @@ logger = logging.getLogger("trading")
 # EIGHT_PLACES (8 Nachkommastellen) kommt aus trading.indicators und ist die
 # einzige Rundungspräzision von Indikatoren, Ordergrößen und DataLog-Feldern.
 _MAX_DECIMAL = Decimal("999999999999.99999999")
+# O8: Zeitfenster, in dem der Webprozess auf die Fertigstellung des
+# manuellen Verkaufs in der Bot-Loop wartet. Ein Timeout ist kein Fehler:
+# Der Auftrag bleibt in der Loop-Queue und wird ausgefuehrt; er darf also
+# weder als Fehlermeldung noch als kritischer ErrorLog enden.
+MANUAL_SELL_TIMEOUT_SECONDS = 10.0
 # Maximale Zeilenzahl je Lösch-Charge in db_trim_datalog: Hält jede einzelne
 # DELETE-Transaktion kurz, damit bei großen Tabellen keine langen
 # Datenbank-Locks entstehen.
@@ -993,7 +999,15 @@ class TradingBotManager:
         if not bot or not bot.is_alive() or bot.loop is None:
             raise ValueError("Bot läuft nicht; manueller Verkauf ist nicht möglich")
         future = asyncio.run_coroutine_threadsafe(bot.manual_sell(symbol), bot.loop)
-        return future.result(timeout=10)
+        try:
+            future.result(timeout=MANUAL_SELL_TIMEOUT_SECONDS)
+        except FuturesTimeoutError:
+            # O8: Auftrag bleibt in der Queue der Bot-Loop; die Ausfuehrung
+            # folgt spaetestens im naechsten Tick. "delayed" statt Fehler, weil
+            # ein Abbruch hier die Position langere Zeit offen hielte und der
+            # Nutzer einen fehlgeschlagenen Verkauf annaehme, der langst laeuft.
+            return "delayed"
+        return "ok"
 
     def open_symbols(self, config_id):
         with self._lock:

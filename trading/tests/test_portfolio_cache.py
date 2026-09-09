@@ -68,7 +68,7 @@ class PortfolioCacheTests(TestCase):
         self.assertEqual(len(baseline["positions"]), 1)
         # Die Bot-Loop hat den Sell bereits geschrieben, als der POST eintraf.
         _log(self.config, "sell", 110, pl_nominal=9)
-        with patch.object(views.bot_manager, "manual_sell", return_value=None):
+        with patch.object(views.bot_manager, "manual_sell", return_value="ok"):
             response = self.client.post(
                 f"/api/manual_sell/{self.config.id}/", {"symbol": "BTC/USDT"}
             )

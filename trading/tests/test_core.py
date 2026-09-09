@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import threading
 import time
+from concurrent.futures import TimeoutError
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -822,6 +823,25 @@ class TradingBotTests(TransactionTestCase):
         self.assertIn("BTC/USDT", bot.positions)
         self.assertEqual(len(bot.pending_trading_logs), 1)
         self.assertEqual(bot.pending_trading_logs[0]["action"], "buy")
+
+    def test_manual_sell_timeout_is_reported_as_delayed_not_error(self):
+        """O8: Wartezeit-Timeout laesst den Verkauf eingeplant, nicht gescheitert sein."""
+        loop = SimpleNamespace()
+        from trading.trading_bot import TradingBotManager
+
+        bot = SimpleNamespace(is_alive=lambda: True, loop=loop, manual_sell=lambda symbol: None)
+        manager = TradingBotManager()
+        manager.bots[self.config.id] = bot
+        self.addCleanup(manager.bots.pop, self.config.id, None)
+        with (
+            patch("trading.trading_bot.asyncio.run_coroutine_threadsafe") as run,
+            patch("trading.trading_bot.MANUAL_SELL_TIMEOUT_SECONDS", 0.01),
+        ):
+            run.return_value.result.side_effect = TimeoutError("abgelaufen")
+            self.assertEqual(manager.manual_sell(self.config.id, "BTC/USDT"), "delayed")
+            run.return_value.result.side_effect = None
+            run.return_value.result.return_value = None
+            self.assertEqual(manager.manual_sell(self.config.id, "BTC/USDT"), "ok")
 
     def test_kill_switch_uses_fresh_ticker_and_closes_every_position(self):
         bot = TradingBot(self.config)

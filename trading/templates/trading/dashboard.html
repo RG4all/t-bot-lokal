@@ -303,7 +303,10 @@
         button.disabled = true;
         try {
             const body = new URLSearchParams({symbol});
-            await requestJson("{% url 'manual_sell' config.id %}", {method: "POST", headers: {"X-CSRFToken": csrfToken, "Content-Type": "application/x-www-form-urlencoded"}, body});
+            const result = await requestJson("{% url 'manual_sell' config.id %}", {method: "POST", headers: {"X-CSRFToken": csrfToken, "Content-Type": "application/x-www-form-urlencoded"}, body});
+            if (result && result.status === "delayed") {
+                alert("Der Verkauf ist eingeplant – die Bot-Loop arbeitet ihn gleich ab. Die Ansicht aktualisiert sich automatisch.");
+            }
             await Promise.all([updateLogs(), updateInfo(), updateChart(symbol)]);
         } catch (error) {
             alert("Verkauf fehlgeschlagen: " + error.message);

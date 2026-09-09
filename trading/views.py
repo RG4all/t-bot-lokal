@@ -1373,9 +1373,11 @@ def manual_sell_view(request: HttpRequest, config_id: int) -> JsonResponse:
     if symbol not in _symbols(config):
         return JsonResponse({"status": "error", "message": "Ungültiges Symbol"}, status=400)
     try:
-        bot_manager.manual_sell(config.id, symbol)
+        status = bot_manager.manual_sell(config.id, symbol)
         _invalidate_portfolio_cache(config.id)
-        return JsonResponse({"status": "ok"})
+        # "delayed" (O8) ist erfolgreich eingeplant: Der naechste Poll zeigt den
+        # Verkauf; kein Grund fuer eine Fehlerbehandlung im Frontend.
+        return JsonResponse({"status": status})
     except Exception as exc:
         logger.exception("Manueller Verkauf für %s/%s fehlgeschlagen", config.id, symbol)
         _record_view_error(
