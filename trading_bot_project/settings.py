@@ -441,6 +441,11 @@ DB_RECONNECT_BASE_DELAY = env_float("DB_RECONNECT_BASE_DELAY", 1.0)
 DB_RECONNECT_MAX_DELAY = env_float("DB_RECONNECT_MAX_DELAY", 30.0)
 DB_CIRCUIT_BREAKER_SECONDS = env_int("DB_CIRCUIT_BREAKER_SECONDS", 300, minimum=30)
 BOT_DB_WORKERS = env_int("BOT_DB_WORKERS", 1, minimum=1)
+# Siehe trading/test_runner.py: Prozess-Caches (Portfolio, Scanner) werden
+# vor jedem Testfall geleert, damit die Suite reproduzierbar
+# unabhaengig von Ausfuehrungsreihenfolge und PK-Wiederverwendung ist.
+TEST_RUNNER = "trading.test_runner.CacheClearingDiscoverRunner"
+
 MAX_DATA_LOGS_PER_SYMBOL = env_int("MAX_DATA_LOGS_PER_SYMBOL", 20_000, minimum=1_000)
 DATA_LOG_CLEANUP_EVERY = env_int("DATA_LOG_CLEANUP_EVERY", 500, minimum=10)
 DATA_LOG_WRITE_INTERVAL_SECONDS = env_int("DATA_LOG_WRITE_INTERVAL_SECONDS", 10, minimum=2)

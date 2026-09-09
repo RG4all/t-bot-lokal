@@ -886,6 +886,22 @@ def scan_market_opportunities(
     return result
 
 
+def _reset_process_state_for_tests() -> None:
+    """Leert Scanner-Caches und Refresh-Drossel (Test-Hermetizitaet).
+
+    Die Modul-globalen Zaehler (TTL/LRU-Caches, ``_LAST_FORCED``) ueberleben
+    Django-Testfaelle, weil nur die DB zurueckgerollt wird; ohne Reset haengt
+    das Verhalten eines Tests an der Ausfuehrungsreihenfolge. Produktionscode
+    ruft den Hook nie auf.
+    """
+    with _CACHE_LOCK:
+        _CACHE.clear()
+    with _MARKET_CAP_CACHE_LOCK:
+        _MARKET_CAP_CACHE.clear()
+    with _FORCE_THROTTLE_LOCK:
+        _LAST_FORCED.clear()
+
+
 def get_top_gainers(exchange_id: str, market: str = "spot", *, refresh: bool = False):
     """Kompatibler Helfer für Integrationen, die nur Gainer benötigen."""
     return scan_market_opportunities(exchange_id, market, refresh=refresh)["gainers"]

@@ -549,7 +549,7 @@ class ScannerCacheTests(SimpleTestCase):
 
         # Anderer Exchange-Schluessel hat ein eigenes Drosselfenster.
         with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
-            scan_market_opportunities("kraken", "spot", refresh=True)
+            scan_market_opportunities("bybit", "spot", refresh=True)
         self.assertEqual(len(calls), 2)
 
         # Nach Ablauf des Fensters (hier simuliert: Zeitstempel zuruecksetzen)
