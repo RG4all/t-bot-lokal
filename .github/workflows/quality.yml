@@ -1,5 +1,8 @@
-# Copieren nach .github/workflows/quality.yml (diese GitHub-App hat keine workflows-Push-Rechte;
-# der Maintainer uebernimmt diese Datei mit seinen Rechten, siehe ci/README.md).
+# Qualitaets-Gate fuer t-bot-lokal: laeuft bei jedem Push und Pull Request.
+# Einzige Quelle ist diese Datei unter .github/workflows/. Die bis 2.4.19
+# gefuehrte Referenzkopie ci/quality.yml wurde mit Release 2.4.20 aufgeloest,
+# nachdem die GitHub-App die workflows-Push-Berechtigung erhalten hat
+# (siehe docs/CHANGELOG.md 2.4.20 und docs/README.md).
 name: quality
 
 on:
