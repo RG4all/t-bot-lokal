@@ -21,7 +21,7 @@ import os
 import re
 import sys
 
-SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "static", "__pycache__"}
+SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "static", "staticfiles", "__pycache__"}
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 VERSION_RE = re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?![\w.])")
