@@ -54,7 +54,7 @@ _ESTABLISHED_UTILITY_ASSETS = {
 # enthalten benutzergewaehlte Float-Filter; ohne Eviction wuechse das Dict
 # im langlebigen Webprozess (512-MB-Limit inkl. Bots!) monoton. Der Lock wird
 # bewusst nur fuer Dict-Zugriffe gehalten, nie ueber Netzwerk-I/O.
-_CACHE: "OrderedDict[tuple, tuple[float, dict]]" = OrderedDict()
+_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 60
 _CACHE_MAX_ENTRIES = 32
@@ -457,7 +457,7 @@ _COINGECKO_IDS = {
 # Gleiches Muster wie _CACHE (K3/PERF-24): gedeckelter LRU, da die Schluessel
 # aus den auf der Exchange gefundenen Assets resultieren und nicht hart
 # begrenzt sind.
-_MARKET_CAP_CACHE: "OrderedDict[tuple, tuple[float, dict]]" = OrderedDict()
+_MARKET_CAP_CACHE: OrderedDict[tuple, tuple[float, dict]] = OrderedDict()
 _MARKET_CAP_CACHE_LOCK = threading.Lock()
 _MARKET_CAP_TTL_SECONDS = 300
 _MARKET_CAP_MAX_ENTRIES = 16
