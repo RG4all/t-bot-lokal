@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
 
+from trading import views
 from trading.backtest_templates import build_backtest_templates
 from trading.market_scanner import (
     MarketScannerError,
@@ -569,3 +570,33 @@ class ScannerCacheTests(SimpleTestCase):
             third = scan_market_opportunities("binance", "spot", refresh=True)
         self.assertEqual(len(calls), 3, "ausserhalb des Fensters muss der Scan erzwungen werden")
         self.assertIsNot(third, first)
+
+
+class CombinationCountTests(SimpleTestCase):
+    """O9: Die View-Zählung muss dem Decimal-Raster des Tasks exakt folgen."""
+
+    def _params(self, acc, nda, delta):
+        values = {}
+        for prefix, (start, end, step) in zip(
+            ("acc", "nda", "deltadelta"), (acc, nda, delta)
+        ):
+            values[f"{prefix}_from"] = start
+            values[f"{prefix}_to"] = end
+            values[f"{prefix}_steps"] = step
+        return values
+
+    def test_matches_task_grid_for_even_ranges(self):
+        from trading.tasks import _parameter_values
+
+        params = self._params((0.0, 0.2, 0.1), (0.0, 0.2, 0.1), (0.0, 0.2, 0.1))
+        # 3 Rasterpunkte je Achse, 2 Symbole -> 3^3 * 2.
+        self.assertEqual(views._combination_count(params, 2), 54)
+        self.assertEqual(len(_parameter_values(0.0, 0.2, 0.1)), 3)
+
+    def test_no_off_by_one_where_float_epsilon_failed(self):
+        from trading.tasks import _parameter_values
+
+        params = self._params((0.0, 0.3, 0.1), (0.0, 0.3, 0.1), (0.0, 0.3, 0.1))
+        expected = len(_parameter_values(0.0, 0.3, 0.1))
+        self.assertEqual(expected, 4, "Decimal-Raster hat 4 Punkte; der alte Float-Count: 3")
+        self.assertEqual(views._combination_count(params, 1), 4**3)

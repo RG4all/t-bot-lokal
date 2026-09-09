@@ -9,7 +9,7 @@ import time
 from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 from functools import lru_cache, wraps
 from html import escape
 from io import BytesIO
@@ -1779,13 +1779,22 @@ def generate_report_csv(request: HttpRequest, config_id: int) -> StreamingHttpRe
 
 
 def _combination_count(params: Mapping[str, Any], symbol_count: int) -> int:
-    """Zählt die Rasterkombinationen eines Backtests über alle Symbole."""
+    """Zählt die Rasterkombinationen eines Backtests über alle Symbole.
+
+    O9: Die Zählung folgt exakt der Iteration von ``trading.tasks._parameter_values``
+    (Anzahl = floor((end - start) / step) + 1) statt eines Float-Nachbaus mit Epsilon.
+    Der Nachbau zählte bei glatteiligen Schritten einen Wert zu wenig (0.0→0.3 bei
+    Schritt 0.1: 3 statt 4) und unterschlug Kombinationen gegenüber der harten Grenze,
+    die der View anschließend prüft. Die Division zweier endlicher Dezimalzahlen ist
+    selbst endlich, daher rundungsfehlerfrei.
+    """
     result = symbol_count
     for prefix in ("acc", "nda", "deltadelta"):
-        start = params[f"{prefix}_from"]
-        end = params[f"{prefix}_to"]
-        step = params[f"{prefix}_steps"]
-        result *= math.floor((end - start) / step + 1e-9) + 1
+        start = Decimal(str(params[f"{prefix}_from"]))
+        end = Decimal(str(params[f"{prefix}_to"]))
+        step = Decimal(str(params[f"{prefix}_steps"]))
+        steps = ((end - start) / step).to_integral_value(rounding=ROUND_FLOOR)
+        result *= int(steps) + 1
     return result
 
 
