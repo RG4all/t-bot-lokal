@@ -47,6 +47,7 @@ Bugfix-, Robustheits- und Wartbarkeits-Release; umgesetzt aus dem [umfassenden C
 
 - Die 500er- und Timeout-Pfade oben sind zugleich Information-Disclosure- und Self-DoS-Hebel gewesen: ORM-Diagnosen landeten im Log, billige Retry-/Refresh-Klicks trafen die eigenen Rate-Limits. Feste Fehlermeldungen, Drosseln und gedeckelte Caches schließen das; `/readyz/` gibt ausschließlich den Status nach außen.
 
+- Auslieferung über [PR #30](https://github.com/RG4all/t-bot-lokal/pull/30). Fürs Deploy gilt: einzige Migration ist 0015 (Validierungen und Choices an bestehenden Feldern), keine neuen Pflicht-Umgebungsvariablen; `prune_history` ist als optionaler Wartungsjob empfohlen (Handbuch §12, „Datenhaltung und Pflege“).
 
 ## [2.4.20] – 2026-09-09
 
