@@ -16,6 +16,7 @@ import math
 import statistics
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 
@@ -49,9 +50,14 @@ _ESTABLISHED_UTILITY_ASSETS = {
     "XLM",
     "XRP",
 }
-_CACHE = {}
+# K3/PERF-24: gedeckelter LRU statt TTL-only-dict. Die Cache-Schluessel
+# enthalten benutzergewaehlte Float-Filter; ohne Eviction wuechse das Dict
+# im langlebigen Webprozess (512-MB-Limit inkl. Bots!) monoton. Der Lock wird
+# bewusst nur fuer Dict-Zugriffe gehalten, nie ueber Netzwerk-I/O.
+_CACHE: "OrderedDict[tuple, tuple[float, dict]]" = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 60
+_CACHE_MAX_ENTRIES = 32
 
 
 class MarketScannerError(MarketDataError):
@@ -448,9 +454,13 @@ _COINGECKO_IDS = {
     "XLM": "stellar",
     "XRP": "ripple",
 }
-_MARKET_CAP_CACHE = {}
+# Gleiches Muster wie _CACHE (K3/PERF-24): gedeckelter LRU, da die Schluessel
+# aus den auf der Exchange gefundenen Assets resultieren und nicht hart
+# begrenzt sind.
+_MARKET_CAP_CACHE: "OrderedDict[tuple, tuple[float, dict]]" = OrderedDict()
 _MARKET_CAP_CACHE_LOCK = threading.Lock()
 _MARKET_CAP_TTL_SECONDS = 300
+_MARKET_CAP_MAX_ENTRIES = 16
 
 
 def _coingecko_market_caps(bases):
@@ -461,8 +471,10 @@ def _coingecko_market_caps(bases):
     now = time.monotonic()
     with _MARKET_CAP_CACHE_LOCK:
         cached = _MARKET_CAP_CACHE.get(key)
-        if cached and now - cached[0] < _MARKET_CAP_TTL_SECONDS:
-            return cached[1]
+        if cached is not None:
+            _MARKET_CAP_CACHE.move_to_end(key)
+            if now - cached[0] < _MARKET_CAP_TTL_SECONDS:
+                return cached[1]
     try:
         response = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
@@ -483,6 +495,9 @@ def _coingecko_market_caps(bases):
         values = {}
     with _MARKET_CAP_CACHE_LOCK:
         _MARKET_CAP_CACHE[key] = (now, values)
+        _MARKET_CAP_CACHE.move_to_end(key)
+        while len(_MARKET_CAP_CACHE) > _MARKET_CAP_MAX_ENTRIES:
+            _MARKET_CAP_CACHE.popitem(last=False)
     return values
 
 
@@ -831,11 +846,20 @@ def scan_market_opportunities(
     now = time.monotonic()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached and not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
-            return cached[1]
+        if cached is not None:
+            # LRU-Treffer nach hinten setzen, damit aktive Schluessel nicht
+            # evikiert werden.
+            _CACHE.move_to_end(key)
+            if not refresh and now - cached[0] < _CACHE_TTL_SECONDS:
+                return cached[1]
     result = _scan_uncached(exchange_id, market, limit=limit, **values)
     with _CACHE_LOCK:
         _CACHE[key] = (now, result)
+        _CACHE.move_to_end(key)
+        # K3/PERF-24: harte Obergrenze; aelteste Eintraege fliegen raus, statt
+        # dass der Cache nur TTL-geprueft weiterwuchert.
+        while len(_CACHE) > _CACHE_MAX_ENTRIES:
+            _CACHE.popitem(last=False)
     return result
 
 

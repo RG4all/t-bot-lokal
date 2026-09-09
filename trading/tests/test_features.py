@@ -464,3 +464,66 @@ class ScannerTests(SimpleTestCase):
             scan_market_opportunities("binance", "spot", volatility_threshold=0)
         with self.assertRaises(MarketScannerFilterError):
             scan_market_opportunities("binance", "spot", min_orderbook_depth_ratio="nan")
+
+
+class ScannerCacheTests(SimpleTestCase):
+    """K3/PERF-24: Der Scanner-Cache muss gedeckelt sein und eviktieren.
+
+    Ohne Obergrenze waechst das Dict mit benutzergewaehlten Float-Filtern als
+    Schluessel im langlebigen Webprozess monotom (Memory-Leak mit OOM-Risiko
+    fuer den gesamten Container inkl. der laufenden Bots).
+    """
+
+    def setUp(self):
+        import trading.market_scanner as scanner
+
+        self.scanner = scanner
+        self._saved_cache = dict(scanner._CACHE)
+        self._saved_market_caps = dict(scanner._MARKET_CAP_CACHE)
+        scanner._CACHE.clear()
+        scanner._MARKET_CAP_CACHE.clear()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        self.scanner._CACHE.clear()
+        self.scanner._CACHE.update(self._saved_cache)
+        self.scanner._MARKET_CAP_CACHE.clear()
+        self.scanner._MARKET_CAP_CACHE.update(self._saved_market_caps)
+
+    def test_cache_is_bounded_and_evicts_oldest_entries(self):
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append((exchange_id, market_type, tuple(sorted(filters.items()))))
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            # Mehr distincte Filter-Kombinationen als das LRU-Limit erlaubt.
+            n = self.scanner._CACHE_MAX_ENTRIES + 8
+            for index in range(n):
+                scan_market_opportunities(
+                    "binance", "spot", volatility_threshold=0.5 + index / 10
+                )
+        self.assertEqual(len(calls), n, "jede neue Kombination muss genau einmal scannen")
+        self.assertLessEqual(len(self.scanner._CACHE), self.scanner._CACHE_MAX_ENTRIES)
+        self.assertEqual(
+            len(self.scanner._CACHE),
+            self.scanner._CACHE_MAX_ENTRIES,
+            "bei Ueberschreitung muss auf das Limit verengt werden",
+        )
+
+    def test_repeated_lookup_serves_from_cache_and_keeps_key_alive(self):
+        calls = []
+
+        def fake_scan(exchange_id, market_type, limit=5, **filters):
+            calls.append(filters)
+            return {"exchange": exchange_id, "market": market_type, "gainers": [], "losers": []}
+
+        with patch.object(self.scanner, "_scan_uncached", side_effect=fake_scan):
+            first = scan_market_opportunities("binance", "spot", volatility_threshold=12.5)
+            for _ in range(3):
+                again = scan_market_opportunities(
+                    "binance", "spot", volatility_threshold=12.5
+                )
+        self.assertEqual(len(calls), 1, "TTL-treffer duerfen nicht erneut scannen")
+        self.assertEqual(first, again)
