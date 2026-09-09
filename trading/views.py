@@ -47,6 +47,7 @@ from django.views.decorators.debug import sensitive_post_parameters, sensitive_v
 from django.views.decorators.http import require_GET, require_POST
 
 from .backtest_templates import build_backtest_templates
+from .error_explanations import explain_error
 from .forms import (
     BacktestForm,
     ConfigurationForm,
@@ -109,6 +110,42 @@ _SELL_ERROR = "Verkauf fehlgeschlagen. Siehe Fehler-Log für Details."
 _KILL_SWITCH_ERROR = "Kill-Switch fehlgeschlagen. Siehe Fehler-Log für Details."
 _SCANNER_ERROR = "Marktscanner vorübergehend nicht verfügbar. Bitte später erneut versuchen."
 _REPORT_ERROR = "Report konnte nicht erstellt werden. Bitte später erneut versuchen."
+
+
+def _user_safe_bot_error(text: str, config: Configuration) -> str:
+    """Ersetzt den internen Bot-Statusfehler durch eine sichere Kurzform.
+
+    Der Bot legt ``last_error`` aus app-eigenen, beschreibbaren Meldungen an
+    (BUG-27). Dieses Mapping zeigt im Dashboard nur noch die stabile,
+    präfixbasierte Kurzform an – der rohe Text (auch bei app-eigenen
+    Meldungen) verbleibt im Fehler-Log, und jeder fremde Inhalt fällt auf
+    die generische Zeile zurück (SEC-10).
+    """
+    text = (text or "").strip()
+    if text.startswith("Konfiguration ungültig:"):
+        return (
+            f"Die Handelspaare sind bei {config.get_exchange_display()} nicht "
+            "gültig oder nicht mehr gelistet. Bitte Symbole korrigieren und "
+            "den Bot neu starten."
+        )
+    if text.startswith("Marktdaten:"):
+        return (
+            f"Kursdaten von {config.get_exchange_display()} sind derzeit nicht "
+            "verfügbar. Der Bot wiederholt den Abruf automatisch mit "
+            "wachsender Wartezeit."
+        )
+    if text.startswith("DB offline:"):
+        return (
+            "Datenbank vorübergehend nicht erreichbar; der Bot puffert Trade-"
+            "Einträge im Speicher und läuft mit den letzten Kursen weiter."
+        )
+    if text.startswith("Symbolverarbeitung"):
+        return (
+            "Die Kursdaten eines Symbols konnten im letzten Zyklus nicht "
+            "verarbeitet werden. Der Bot läuft weiter und prüft beim nächsten "
+            "Zyklus erneut."
+        )
+    return "Bot-Fehler aufgetreten. Details im Fehler-Log (Referenznummer verwenden)."
 
 
 def _record_view_error(
@@ -1015,9 +1052,12 @@ def market_opportunities_api(request: HttpRequest) -> JsonResponse:
         except MarketScannerFilterError:
             logger.exception("Ungültige Marktscanner-Parameter")
             return JsonResponse({"error": "Ungültige Scanner-Parameter."}, status=400)
-        except MarketScannerError:
+        except MarketScannerError as scanner_error:
             logger.exception("Marktscanner nicht verfügbar")
-            return JsonResponse({"error": _SCANNER_ERROR}, status=503)
+            # Nur die serverseitig formulierte Beschreibung darf ausgeliefert
+            # werden (SEC-10): App-Prosa ohne Exception-Texte und -Details.
+            safe_message = getattr(scanner_error, "user_message", None) or _SCANNER_ERROR
+            return JsonResponse({"error": safe_message}, status=503)
         if not payload.get("exchanges"):
             payload["error"] = "Keine Exchange lieferte einen belastbaren Scanner-Snapshot."
             return JsonResponse(payload, status=503)
@@ -1036,9 +1076,12 @@ def market_opportunities_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {"error": "Ungültige Scanner-Parameter.", "gainers": [], "losers": []}, status=400
         )
-    except MarketScannerError:
+    except MarketScannerError as scanner_error:
         logger.exception("Marktscanner nicht verfügbar für %s/%s", exchange, market)
-        return JsonResponse({"error": _SCANNER_ERROR, "gainers": [], "losers": []}, status=503)
+        safe_message = getattr(scanner_error, "user_message", None) or _SCANNER_ERROR
+        return JsonResponse(
+            {"error": safe_message, "gainers": [], "losers": []}, status=503
+        )
     return JsonResponse(payload)
 
 
@@ -1295,9 +1338,10 @@ def bot_status_api(request: HttpRequest) -> JsonResponse:
             config.is_running = False
             config.save(update_fields=["is_running"])
     status = dict(bot_manager.status(config.id))
-    # last_error enthält interne Diagnosen, keine freigegebene Benutzer-Meldung.
+    # last_error enthält interne Diagnosen; im Dashboard erscheint nur die
+    # sichere Präfix-Kurzform (CODE-28), fremder Inhalt fällt generisch zurück.
     if status.get("last_error"):
-        status["last_error"] = "Bot-Fehler aufgetreten. Siehe Fehler-Log für Details."
+        status["last_error"] = _user_safe_bot_error(status["last_error"], config)
     status["is_running_flag"] = config.is_running
     return JsonResponse(status)
 
@@ -1449,9 +1493,20 @@ def error_log_view(request: HttpRequest) -> HttpResponse:
         queryset = queryset.filter(source__icontains=source)
 
     page = Paginator(queryset, 100).get_page(request.GET.get("page"))
+    # CODE-28: Regelmäßige Nutzer sehen pro Eintrag eine menschenlesbare
+    # Erklärung (was/warum/was tun) mit sicheren Kontextdaten aus der
+    # Diagnose; die rohe Diagnose selbst bleibt staff-only (SEC-10).
+    annotated_errors = [
+        {
+            "error": error,
+            "explanation": explain_error(error.source, error.details),
+        }
+        for error in page.object_list
+    ]
     context = {
         "page": page,
         "errors": page.object_list,
+        "annotated_errors": annotated_errors,
         "configs": configs,
         "severity_choices": ErrorLog.SEVERITY_CHOICES,
         "filters": {
