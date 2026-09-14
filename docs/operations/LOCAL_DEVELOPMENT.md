@@ -340,4 +340,8 @@ python -m pip check
 pip-audit -r requirements.txt   # wenn pip-audit installiert ist
 python scripts/backtest_resource_probe.py
 python manage.py collectstatic --noinput
+
+# Secret-Scan (gepinntes gitleaks, SHA-256, fail-closed-Selbsttest; SEC-13)
+# Lädt das Binary einmalig in den lokalen Tool-Cache. In CI: Job "secrets".
+scripts/run_gitleaks.sh --self-test
 ```

@@ -20,7 +20,8 @@ dokumentiert.
 | `docs/CHANGELOG.md` | Release-Historie (Keep a Changelog) | jeder Release-PR |
 | `patches/` | Peer-Review-Patch-Eingang (`inbox/`→`accepted/`/`done/`) | kontinuierlich |
 | `VERSION` | Einzige Versionsquelle (Settings, UI, `/health/`) | nur Release-PR |
-| `.github/workflows/quality.yml` | Aktiver CI-Qualitäts-Gate (Doku-Wächter, Django-Tests, Shell, Ruff) | bei CI-Änderungen |
+| `.github/workflows/quality.yml` | Aktiver CI-Qualitäts-Gate (Doku-Wächter, Django-Tests, Shell, Ruff, Secret-Scan) | bei CI-Änderungen |
+| `scripts/run_gitleaks.sh` / `.gitleaks.toml` | Gepinnter Secret-Scan (fail-closed, SEC-13) | bei Scan-/Allowlist-Änderungen |
 
 ## Dateinamen
 
@@ -59,7 +60,7 @@ dokumentiert.
 3. Externe Vorschläge laufen über [`patches/README.md`](patches/README.md).
 4. Reine Umzüge: `git mv` in separatem Rename-Commit ohne Textänderungen, Linkpflege im
    Folge-Commit (hält `git log --follow` und GitHub-Rename-Erkennung intakt).
-5. **CI-Dateien:** Der Qualitäts-Gate liegt aktiv unter `.github/workflows/quality.yml` und läuft bei jedem Push/PR automatisch (Prüfumfang: Doku-Wächter, Django-Checks/-Tests, Ruff, Shell-Suite, ShellCheck, `pip check`).
+5. **CI-Dateien:** Der Qualitäts-Gate liegt aktiv unter `.github/workflows/quality.yml` und läuft bei jedem Push/PR automatisch (Prüfumfang: Doku-Wächter, Django-Checks/-Tests, Ruff, Shell-Suite, ShellCheck, `pip check`, Secret-Scan). Secret-Scan: `scripts/run_gitleaks.sh --self-test` (Pin und SHA-256 in diesem Skript, **kein** unpinnter `gitleaks-action` — Org-Lizenzfalle; Allowlists nur mit `matchAll = true`).
 6. Nach einem Merge: betroffene Findings-Status aktualisieren; falls ein Dokument seinen
    Ort gewechselt hat, Index (`docs/README.md`) mitpflegen — der CI-Orphan-Check meldet
    sonst „verwaist“.

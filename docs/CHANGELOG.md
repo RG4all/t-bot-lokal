@@ -4,13 +4,27 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [Unreleased]
 
+## [2.5.2] – 2026-09-14
+
+CI-/Security-Härtung: Secret-Scan-Gate mit gepinnter gitleaks-CLI, fail-closed-Selbsttest und dokumentiertem Finding [SEC-13](findings/SEC-13-gitleaks-secret-scan-gate.md). Keine Änderung an Django-Laufzeit, Settings, Modellen oder Migrationen.
+
 ### Added
 
-- **Betriebsdokument `docs/operations/COMPOSE_ENV_FILE.md`:** erklärt, warum nackte `docker compose`-Kommandos nach `scripts/setup_local.sh` mit „required variable SECRET_KEY is missing a value" abbrechen — Compose lädt für die Interpolation automatisch nur `.env`, die Secrets liegen aber in `.env.local`, und `docker-compose.yml` verlangt `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` per `${VAR:?…}` ohne Default-Fallback. Das Dokument sammelt die drei Abhilfen (`--env-file .env.local`, `.env`-Symlink, Sitzungs-Export), die Regel „`restart` übernimmt keine Env-Änderungen, `up -d --force-recreate` schon", die Klarstellung „nach dem Setup ist kein Neustart nötig" und eine Tabelle, welches Kommando welche Wirkung hat. Im Index, in `LOCAL_DEVELOPMENT.md` und im FAQ verlinkt statt dupliziert.
+- **Secret-Scan im Quality-Gate (SEC-13):** Neuer Job `secrets` in `.github/workflows/quality.yml` scannt bei jedem Push/PR und wöchentlich (Mo 04:17 UTC) die **volle Git-Historie** mit gitleaks. Anbindung über `scripts/run_gitleaks.sh` (freie CLI) statt `gitleaks/gitleaks-action` — RG4all ist eine Organisation, die Action verlangt dort `GITLEAKS_LICENSE` und würde ohne Secret rot oder zum Abschalten verleiten.
+- **Versions-Pin und Integrität:** `GITLEAKS_VERSION=8.30.1` ist Single Source of Truth im Runner-Skript; SHA-256 pro Target (linux/darwin × x64/arm64) wird vor dem Entpacken geprüft. Tool-Cache unter `RUNNER_TOOL_CACHE` (CI) bzw. `XDG_CACHE_HOME/t-bot-gitleaks` (lokal). Kein `latest`, kein stiller Action-Default (in gitleaks-action v3.0.0 sonst hardcodiert `8.24.3`).
+- **Fail-closed-Selbsttest:** `scripts/run_gitleaks.sh --self-test` legt ein untracked Dummy-Token außerhalb freigegebener Pfade ab; gitleaks **muss** Exit 2 melden, sonst bricht der Job mit „Gate ist nicht wirksam“ ab. Anschließend Historien-Scan. Jeder Download-/Integritäts-/Scanner-Fehler → Exit 1 (nie übersprungen).
+- **Konfiguration `.gitleaks.toml`:** `useDefault = true`; Allowlist-Vorlage nur kommentiert und mit `matchAll = true`-Pflicht (gitleaks ≥ 8.19, Audit N-2: paths **und** regexes, sonst weitet ein Dummy-Regex Freigaben aufs ganze Repo).
+- **Regressionen** in `tests/test_gitleaks_gate.sh` (Pin, Checksummen, Workflow-Verdrahtung, kein Action-Lizenzpfad, `--print-version`); Finding [SEC-13](findings/SEC-13-gitleaks-secret-scan-gate.md).
 
 ### Fixed
 
-- **Setup-Hinweise zeigten einen Compose-Aufruf, den niemand so ausführen kann:** `scripts/setup_local.sh` nannte in `--help` und beim Start `docker compose up --build -d`, führte intern aber `docker compose --env-file .env.local up --build -d` aus — genau die Diskrepanz, aus der die obige Fehlermeldung beim Kopieren des Hinweises entsteht. Beide Hinweise nennen jetzt den realen Aufruf mit Verweis auf das neue Dokument, und `docker compose ps` am Ende des Setups bekommt dasselbe Flag. `--help` gibt nur noch den Kopf-Kommentar aus (bisher zusätzlich `set -euo pipefail` aus dem Skriptkörper). Regressionstest in `tests/test_setup_local.sh`.
+- **Betriebsdokument `docs/operations/COMPOSE_ENV_FILE.md` (aus Unreleased):** erklärt, warum nackte `docker compose`-Kommandos nach `scripts/setup_local.sh` mit „required variable SECRET_KEY is missing a value“ abbrechen — Compose lädt für die Interpolation automatisch nur `.env`, die Secrets liegen aber in `.env.local`, und `docker-compose.yml` verlangt `SECRET_KEY`/`PASSPHRASE`/`POSTGRES_PASSWORD` per `${VAR:?…}` ohne Default-Fallback. Drei Abhilfen, `restart` vs. `--force-recreate`, Kommandotabelle; im Index, in `LOCAL_DEVELOPMENT.md` und im FAQ verlinkt.
+- **Setup-Hinweise zeigten einen Compose-Aufruf, den niemand so ausführen kann (aus Unreleased):** `scripts/setup_local.sh` nannte in `--help` und beim Start `docker compose up --build -d`, führte intern aber `docker compose --env-file .env.local up --build -d` aus. Beide Hinweise nennen jetzt den realen Aufruf; `docker compose ps` am Setup-Ende bekommt dasselbe Flag. Regressionstest in `tests/test_setup_local.sh`.
+
+### Security
+
+- Secret-Scan ist Teil der Merge-Pflicht (Job `secrets` parallel zu `checks`). Wöchentlicher Schedule findet Historien-Leaks auch ohne neuen Push. Entwickler lokal: `scripts/run_gitleaks.sh --self-test` (siehe [Lokale Entwicklung §12](operations/LOCAL_DEVELOPMENT.md#12-qualitätssicherung)).
+- Hinweis für andere Repos: jede `gitleaks/gitleaks-action`-Nutzung **ohne** `GITLEAKS_VERSION` hat dasselbe stille Drift-Problem; Org-Repos brauchen zudem `GITLEAKS_LICENSE` oder die freie CLI-Variante wie hier.
 
 ## [2.5.1] – 2026-09-09
 
