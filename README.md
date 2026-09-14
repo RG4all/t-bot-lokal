@@ -19,6 +19,7 @@ Das Skript erzeugt private App-Secrets in `.env.local` (Modus 0600) und startet 
 - Zustandsändernde Endpunkte sind POST-only und CSRF-geschützt; Auth-Endpunkte haben ein IP-Rate-Limit; API-Antworten senden `Cache-Control: no-store`. HTTP-Header-Härtung, Cookie-Flags, Session-Lebensdauer und Fehler-Disclosure sind pro Befund als Findings-Dokumente mit Tests und Prüfgrenzen dokumentiert.
 - Einzelne Befunde, Releases und Nachprüfungen: [docs/findings/](docs/README.md#findings) · verbindlicher Gesamtstatus: [Security-Review](docs/security/SECURITY_REVIEW_2.4.4.md).
 - API-Schlüssel werden **niemals** in der Datenbank gespeichert, sondern nur als Umgebungsvariablen in den laufenden Prozess injiziert.
+- **Secret-Scan in CI:** Jeder Push/PR und ein wöchentlicher Lauf scannen die Git-Historie mit gepinnter gitleaks-CLI (`scripts/run_gitleaks.sh`, [SEC-13](docs/findings/SEC-13-gitleaks-secret-scan-gate.md)). Lokal: `scripts/run_gitleaks.sh --self-test`.
 
 ## Dokumentation
 

@@ -1,0 +1,30 @@
+# Gitleaks-Konfiguration für t-bot-lokal
+# =====================================
+# Der Quality-Gate (.github/workflows/quality.yml) und scripts/run_gitleaks.sh
+# rufen gitleaks mit genau dieser Datei auf. Ziel: versehentlich committete
+# Secrets (API-Keys, Tokens, Passwörter, private Schlüssel) fail-closed melden.
+#
+# Regeln:
+#   * useDefault = true übernimmt den aktuellen Default-Regelsatz der gepinnten
+#     gitleaks-Version (siehe GITLEAKS_VERSION in scripts/run_gitleaks.sh).
+#   * Allowlists mit matchAll = true (gitleaks ≥ 8.19): paths UND regexes.
+#     Ohne matchAll gelten paths ODER regexes und weiten Freigaben ungewollt
+#     aus (Audit N-2 / SEC-13).
+#   * Keine vollständigen Dummy-Literale in dieser Datei – sie würden selbst
+#     als Fund gelten. Freigaben sind pfadbezogen und eng.
+
+title = "t-bot-lokal"
+
+[extend]
+useDefault = true
+
+# Der Runner enthält absichtlich zusammengesetzte Selftest-Dummies (Prefix +
+# Body in getrennten Konstanten). Alles in genau dieser Datei ist freigegeben;
+# derselbe Dummy-Wert in einer anderen Datei bleibt ein Fund.
+# Kein regexes-Feld: sonst müssten die Literale hier stehen und würden den
+# Scan von .gitleaks.toml selbst rot färben.
+[[allowlists]]
+description = "Gate-Runner mit Selftest-Dummy-Konstruktion (kein Produktionscode)"
+paths = [
+  '''(^|/)scripts/run_gitleaks\.sh$''',
+]

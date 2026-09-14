@@ -34,6 +34,7 @@ Ein Dokument pro abgeschlossenem Audit-/Review-Befund. Der Status im Dokumentenk
 | [SEC-09](findings/SEC-09-permissions-policy.md) | Permissions-Policy-Header | Fixed |
 | [SEC-10](findings/SEC-10-information-disclosure.md) | Fehlermeldungen / Information Disclosure | Fixed |
 | [SEC-12](findings/SEC-12-docker-default-passwords.md) | Standard-Passwörter im Compose-Setup | Fixed |
+| [SEC-13](findings/SEC-13-gitleaks-secret-scan-gate.md) | Secret-Scan-Gate (gitleaks pin + fail-closed) | Fixed |
 | [BUG-12](findings/BUG-12-race-condition-bot-start-stop.md) | Race Condition Bot-Start/Stop | Fixed |
 | [BUG-14](findings/BUG-14-csv-echo-true-stream.md) | CSV-Echo-Adapter im Stream-Export | Fixed |
 | [PERF-17](findings/PERF-17-db-trim-batch-delete.md) | DataLog-Trim als Batch-Delete | Fixed |
@@ -60,7 +61,7 @@ Ein Dokument pro abgeschlossenem Audit-/Review-Befund. Der Status im Dokumentenk
 - Konventionen, Findings-Vorlage und Peer-Review-/Patch-Workflow: [CONTRIBUTING.md](../CONTRIBUTING.md)
 - Patch-Eingang für Review-Vorschläge: [`patches/`](../patches/README.md)
 - Dokument-Wächter (Links, Anker, Orphans, Namensregeln): `python3 scripts/check_docs.py`
-- Automatischer Qualitäts-Gate bei jedem Push/PR (Doku-Wächter, Django-Checks/-Tests, Ruff, Shell-Suite, ShellCheck, `pip check`): `.github/workflows/quality.yml`
+- Automatischer Qualitäts-Gate bei jedem Push/PR (Doku-Wächter, Django-Checks/-Tests, Ruff, Shell-Suite, ShellCheck, `pip check`, Secret-Scan): `.github/workflows/quality.yml` · lokal: `scripts/run_gitleaks.sh --self-test` ([SEC-13](findings/SEC-13-gitleaks-secret-scan-gate.md))
 
 ## Archiv
 

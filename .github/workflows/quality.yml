@@ -3,13 +3,87 @@
 # gefuehrte Referenzkopie ci/quality.yml wurde mit Release 2.4.20 aufgeloest,
 # nachdem die GitHub-App die workflows-Push-Berechtigung erhalten hat
 # (siehe docs/CHANGELOG.md 2.4.20 und docs/README.md).
+#
+# Ab 2.5.2 zusaetzlich: Secret-Scan (gitleaks 8.30.1, CLI, fail-closed).
+# Bewusst KEIN gitleaks/gitleaks-action — RG4all ist eine Organisation und
+# die Action verlangt dort GITLEAKS_LICENSE. Freie CLI + Pin + SHA-256 und
+# Gate-Selbsttest: scripts/run_gitleaks.sh (SEC-13).
 name: quality
 
 on:
   push:
   pull_request:
+  # Woechentlicher Secret-/Abhaengigkeits-Lauf: findet Leaks auch ohne Push.
+  schedule:
+    - cron: "17 4 * * 1"
 
 jobs:
+  # -------------------------------------------------------------------------
+  # Secret-Scan (eigenstaendig, volle Historie). Fail-closed: jeder Fund oder
+  # jedes Tool-Problem bricht den Job. Selbsttest vor dem echten Scan stellt
+  # sicher, dass das Gate nicht still gruen wird.
+  # -------------------------------------------------------------------------
+  secrets:
+    name: Secret-Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Volle Historie: gitleaks findet auch in alten Commits nach.
+          fetch-depth: 0
+
+      # Binary vorab installieren und als GITLEAKS_BIN an den Runner geben.
+      # Pin + SHA-256 identisch zu scripts/run_gitleaks.sh (Single Source of
+      # Truth fuer die Version; Checksumme hier zusaetzlich fail-closed).
+      - name: gitleaks binary (v8.30.1)
+        id: glbin
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          EXPECTED_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          ARCHIVE="gitleaks_${VERSION}_linux_x64.tar.gz"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/${ARCHIVE}"
+          DEST="${RUNNER_TEMP}/gitleaks-${VERSION}"
+          mkdir -p "${DEST}"
+          echo "Downloading ${URL}"
+          curl -fsSL --retry 5 --retry-delay 2 -o "${RUNNER_TEMP}/${ARCHIVE}" "${URL}"
+          ACTUAL="$(sha256sum "${RUNNER_TEMP}/${ARCHIVE}" | awk '{print $1}')"
+          echo "sha256 ${ACTUAL}"
+          if [ "${ACTUAL}" != "${EXPECTED_SHA}" ]; then
+            echo "::error::SHA-256 mismatch for gitleaks ${VERSION}"
+            exit 1
+          fi
+          tar -xzf "${RUNNER_TEMP}/${ARCHIVE}" -C "${DEST}" gitleaks
+          chmod 0755 "${DEST}/gitleaks"
+          "${DEST}/gitleaks" version
+          echo "bin=${DEST}/gitleaks" >> "${GITHUB_OUTPUT}"
+
+      - name: gitleaks self-test + history scan
+        env:
+          GITLEAKS_BIN: ${{ steps.glbin.outputs.bin }}
+        run: |
+          set -uo pipefail
+          echo "GITLEAKS_BIN=${GITLEAKS_BIN}"
+          test -x "${GITLEAKS_BIN}"
+          bash scripts/run_gitleaks.sh --print-version
+          set +e
+          OUT=$(bash scripts/run_gitleaks.sh --self-test 2>&1)
+          RC=$?
+          set -e
+          echo "${OUT}"
+          {
+            echo "## gitleaks"
+            echo "exit=${RC}"
+            echo
+            echo '```'
+            echo "${OUT}" | tail -n 120
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::run_gitleaks.sh failed with exit ${RC}"
+            exit "${RC}"
+          fi
+
   checks:
     runs-on: ubuntu-latest
     env:
