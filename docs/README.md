@@ -49,6 +49,7 @@ Ein Dokument pro abgeschlossenem Audit-/Review-Befund. Der Status im Dokumentenk
 | [BUG-26](findings/BUG-26-bitunix-spot-scanner-empty.md) | Bitunix-Spot-Marktscan lieferte nie qualifizierte Märkte (Orderbuch-Tiefe statt fehlendem Volumen) | Fixed |
 | [BUG-27](findings/BUG-27-empty-timeout-error-log.md) | Kursabruf-Timeout erzeugte leere Fehler-Log-Einträge und 2-s-Retry | Fixed |
 | [CODE-28](findings/CODE-28-generic-error-messages.md) | Generische Fehlermeldungen – jetzt mit menschlich lesbaren Erklärungen und Referenznummer | Fixed |
+| [BUG-29](findings/BUG-29-dashboard-charts-webgl-fallback.md) | Dashboard-Charts: SVG-Rückfall ohne WebGL, Plotly-3-Titel | Fixed |
 
 ## Architektur-Entscheidungen
 

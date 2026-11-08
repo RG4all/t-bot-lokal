@@ -130,6 +130,14 @@
             {% endfor %}
         </ul>
         <div class="tab-content border border-top-0 p-2">
+            <div id="webgl-fallback-hint" class="alert alert-warning small mb-3 d-none" role="status">
+                <strong>Vereinfachte Darstellung:</strong> Dein Browser stellt kein WebGL bereit
+                (oder nicht die dafür nötigen Erweiterungen), deshalb zeichnet der Chart die
+                Kurven als SVG. Inhalt und Bedienung sind identisch, nur bei sehr vielen
+                Messpunkten etwas langsamer. WebGL lässt sich meist über die
+                Hardware-Beschleunigung des Browsers oder dessen
+                Grafik-/Fingerprint-Schutz reaktivieren.
+            </div>
             {% for symbol in symbols %}
             <div id="chart-pane-{{ symbol|slugify }}" class="tab-pane fade {% if forloop.first %}show active{% endif %}">
                 <div id="chart-{{ symbol|slugify }}" class="market-chart" data-symbol="{{ symbol }}" style="height:650px"></div>
@@ -185,6 +193,34 @@
     let databaseRetryAt = 0;
     let databaseBackoffMs = 10000;
     let databaseProbeActive = false;
+    // WebGL-Traces (scattergl) brauchen einen WebGL-Kontext plus die
+    // WebGL1-Extensions ANGLE_instanced_arrays und OES_element_index_uint.
+    // -plotly/regl fragt beide in Kleinschreibung ab und bricht sonst ohne
+    // Rückfall ab; Plotly ersetzt den Chart dann durch "WebGL is not supported
+    // by your browser". Das passiert in echten Browsern (Brave 1.93 liefert
+    // einem WebGL1-Kontext den WebGL2-Extensionsatz, dort fehlen beide) und in
+    // VM-/RDP-Umgebungen ohne GPU. Deshalb: genau wie regl prüfen (gleiche
+    // Abfrage, gleiche Schreibweise) und ohne WebGL auf SVG ausweichen.
+    let webglTracesEnabled = detectWebglTraces();
+
+    function detectWebglTraces() {
+        try {
+            const canvas = document.createElement("canvas");
+            const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+            if (!gl) return false;
+            return ["angle_instanced_arrays", "oes_element_index_uint"]
+                .every(name => Boolean(gl.getExtension(name)));
+        } catch (_) {
+            return false;
+        }
+    }
+
+    // Liefert "scattergl" nur mit nutzbarem WebGL, sonst "scatter" (SVG).
+    // Beide Typen teilen sich dieselbe Datenstruktur, der Wechsel ist also
+    // rein darstellend.
+    function traceType() {
+        return webglTracesEnabled ? "scattergl" : "scatter";
+    }
 
     function databaseBackoffError() {
         const error = new Error("Datenbank-Wiederverbindung läuft");
@@ -280,16 +316,42 @@
             const timestamps = rows.map(row => row.timestamp);
             const buyTrades = trades.filter(trade => trade.action === "buy");
             const sellTrades = trades.filter(trade => trade.action === "sell");
+            const type = traceType();
             const traces = [
-                {x: timestamps, y: rows.map(row => row.price), type: "scattergl", mode: "lines", name: "Preis"},
-                {x: timestamps, y: rows.map(row => row.nda), type: "scattergl", mode: "lines", name: "NDA (Preisänderung %)", yaxis: "y2"},
-                {x: timestamps, y: rows.map(row => row.deltadelta), type: "scattergl", mode: "lines", name: "DeltaDelta (Momentum)", yaxis: "y2"},
-                {x: timestamps, y: rows.map(row => row.div_DVA_prev_NDA), type: "scattergl", mode: "lines", name: "Beschleunigung (DVA / prev NDA)", yaxis: "y2"},
-                {x: buyTrades.map(row => row.timestamp), y: buyTrades.map(row => row.price), type: "scattergl", mode: "markers", name: "Buy", marker: {symbol: "triangle-up", color: "green", size: 13}},
-                {x: sellTrades.map(row => row.timestamp), y: sellTrades.map(row => row.price), type: "scattergl", mode: "markers", name: "Sell", marker: {symbol: "triangle-down", color: "red", size: 13}},
+                {x: timestamps, y: rows.map(row => row.price), type, mode: "lines", name: "Preis"},
+                {x: timestamps, y: rows.map(row => row.nda), type, mode: "lines", name: "NDA (Preisänderung %)", yaxis: "y2"},
+                {x: timestamps, y: rows.map(row => row.deltadelta), type, mode: "lines", name: "DeltaDelta (Momentum)", yaxis: "y2"},
+                {x: timestamps, y: rows.map(row => row.div_DVA_prev_NDA), type, mode: "lines", name: "Beschleunigung (DVA / prev NDA)", yaxis: "y2"},
+                {x: buyTrades.map(row => row.timestamp), y: buyTrades.map(row => row.price), type, mode: "markers", name: "Buy", marker: {symbol: "triangle-up", color: "green", size: 13}},
+                {x: sellTrades.map(row => row.timestamp), y: sellTrades.map(row => row.price), type, mode: "markers", name: "Sell", marker: {symbol: "triangle-down", color: "red", size: 13}},
             ];
-            Plotly.react(element, traces, {margin: {t: 35, r: 65, b: 45, l: 65}, title: symbol, uirevision: symbol, yaxis2: {overlaying: "y", side: "right", showgrid: false}, xaxis: {rangeslider: {visible: true}}}, {responsive: true});
+            // Plotly 3 entfernte den Titel als String; ohne title.text bleibt der
+            // Chart unbeschriftet (der alte String wurde still verworfen).
+            const layout = {margin: {t: 35, r: 65, b: 45, l: 65}, title: {text: symbol}, uirevision: symbol, yaxis2: {overlaying: "y", side: "right", showgrid: false}, xaxis: {rangeslider: {visible: true}}};
+            await Plotly.react(element, traces, layout, {responsive: true});
+            await downgradeChartIfWebglFailed(element, symbol);
         } catch (error) { console.error("Chart:", error); }
+    }
+
+    // Plotly ersetzt den Chart durch einen Hinweis ``.no-webgl``, sobald ein
+    // WebGL-Kontext nicht erzeugt werden kann – etwa wenn der Browser die
+    // Obergrenze aktiver Kontexte erreicht, der GPU-Prozess neu startet oder
+    // die Vorabprüfung den Kontext zwar zuließ, regl ihn danach aber nicht
+    // bekommt. In dem Fall einmalig auf SVG umschalten und neu zeichnen.
+    async function downgradeChartIfWebglFailed(element, symbol) {
+        const failure = element.querySelector(".no-webgl");
+        if (!failure) return;
+        failure.remove();
+        if (!webglTracesEnabled) return;
+        webglTracesEnabled = false;
+        showNoWebglHint();
+        await updateChart(symbol);
+    }
+
+    function showNoWebglHint() {
+        const hint = document.getElementById("webgl-fallback-hint");
+        if (hint) hint.classList.remove("d-none");
+    }
     }
 
     function makeCell(value) {

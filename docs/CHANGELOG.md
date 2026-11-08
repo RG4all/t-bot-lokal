@@ -4,6 +4,14 @@ Alle relevanten Änderungen dieses Projekts werden hier dokumentiert. Das Projek
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard-Charts blieben leer (BUG-29):** Die Markt-Charts liefen ausschließlich als `scattergl`-Traces. Plotly verlangt dafür über die gebündelte regl-Bibliothek die WebGL1-Extensions `ANGLE_instanced_arrays` und `OES_element_index_uint` und bricht ohne Rückfall ab; fehlen sie, ersetzt es den Chart durch „WebGL is not supported by your browser“. Das trifft Browser mit fehlerhafter Extension-Abfrage (Brave 1.93 liefert einem WebGL1-Kontext den WebGL2-Extensionsatz) ebenso wie Umgebungen ohne GPU, in denen Chrome und Firefox den stillen SwiftShader-Rückfall nicht mehr zulassen. Das Dashboard prüft WebGL jetzt mit exakt der Abfrage, die Plotly stellt, und weicht sonst automatisch auf SVG (`scatter`) aus; ein späterer Kontextverlust wird nach jedem Render erkannt und ebenfalls dauerhaft auf SVG umgeschaltet. Ein sichtbarer Hinweis erklärt die vereinfachte Darstellung. Zusätzlich: Der Chart-Titel wurde Plotly-3-konform als `title: {text: …}` gesetzt — die bisherige String-Form verwirft Plotly 3 still. Finding [BUG-29](findings/BUG-29-dashboard-charts-webgl-fallback.md).
+
+### Added
+
+- **5 Regressionstests** in `trading/tests/test_dashboard_charts.py`: Plotly-3-Titel, SVG-Rückfall statt fest verdrahtetem `scattergl`, zeichengleiche Extension-Abfrage wie regl, Laufzeit-Downgrade auf `.no-webgl`, Nutzerhinweis.
+
 ## [2.5.2] – 2026-09-14
 
 CI-/Security-Härtung: Secret-Scan-Gate mit gepinnter gitleaks-CLI, fail-closed-Selbsttest und dokumentiertem Finding [SEC-13](findings/SEC-13-gitleaks-secret-scan-gate.md). Keine Änderung an Django-Laufzeit, Settings, Modellen oder Migrationen.
